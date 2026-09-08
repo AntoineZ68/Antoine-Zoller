@@ -23,7 +23,7 @@ from rich.table import Table
 
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
-from .regex_patterns import trouver_dates
+from .regex_patterns import detecter_date_acte
 
 CATEGORIES = [
     "PV d'audition",
@@ -213,8 +213,7 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
         if type_ == "Non identifié":
             statut_revision = "a_relire"
 
-        dates = trouver_dates(texte_complet)
-        date_apparente = dates[0] if dates else None
+        date_apparente = detecter_date_acte(texte_complet)
         service = _detecter_service(texte_complet)
         cote = groupe["pages"][0]["cote_detectee"]
         personnes_citees = _detecter_personnes_citees(texte_complet)

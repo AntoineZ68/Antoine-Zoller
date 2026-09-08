@@ -12,6 +12,7 @@ import re
 RE_COTE = re.compile(r"\bCote\s+([A-Za-z]\d{3,6})\b")
 RE_NUM_PROCEDURE = re.compile(r"N[°ºo]\s*PARQUET\s*([\d/]+)", re.IGNORECASE)
 RE_DATE = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
+RE_DATE_ACTE = re.compile(r"\bLe\s+(\d{2}/\d{2}/\d{4})\b")
 RE_HEURE = re.compile(r"\b(\d{1,2})\s*[hH]\s*(\d{2})\b")
 
 
@@ -29,6 +30,16 @@ def trouver_dates(texte: str) -> list[str]:
     """Renvoie les dates trouvées, normalisées en JJ/MM/AAAA, dans l'ordre
     d'apparition dans le texte."""
     return [f"{j}/{m}/{a}" for j, m, a in RE_DATE.findall(texte)]
+
+
+def detecter_date_acte(texte: str) -> str | None:
+    """Date de l'acte lui-même, reconnue uniquement via la formule
+    d'ouverture standard des PV français ("Le JJ/MM/AAAA..."). Ne renvoie
+    jamais une date incidente (ex. une date de naissance mentionnée dans le
+    corps du texte) : à défaut de ce motif précis, NON TROUVÉ plutôt qu'une
+    approximation."""
+    m = RE_DATE_ACTE.search(texte)
+    return m.group(1) if m else None
 
 
 def trouver_heures(texte: str) -> list[str]:
