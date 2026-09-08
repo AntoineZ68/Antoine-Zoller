@@ -21,9 +21,10 @@ from datetime import datetime, timedelta, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .classify import RE_PERSONNE
+from .classify import RE_PERSONNE, _est_titre, identifier_declarant
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
+from .regex_patterns import phrase_contenant, texte_sans_entete
 from .verification import verifier_table
 
 RE_DATE_HEURE_ACTE = re.compile(r"\bLe\s+(\d{2}/\d{2}/\d{4})\s+à\s+(\d{1,2}h\d{2})\b")
@@ -47,19 +48,12 @@ NATURE_SIMPLE_PAR_TYPE = {
 }
 
 
-def _phrase_contenant(texte: str, position: int) -> str:
-    debut = texte.rfind(".", 0, position)
-    debut = 0 if debut == -1 else debut + 1
-    fin = texte.find(".", position)
-    fin = len(texte) if fin == -1 else fin + 1
-    return texte[debut:fin].strip()
-
-
 def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[int, re.Match, str] | None:
     for page in pages:
-        m = motif.search(page["texte"])
+        bloc = texte_sans_entete(page["texte"], _est_titre)
+        m = motif.search(bloc)
         if m:
-            return page["numero_global"], m, _phrase_contenant(page["texte"], m.start())
+            return page["numero_global"], m, phrase_contenant(bloc, m.start())
     return None
 
 
@@ -73,10 +67,21 @@ def _personne_mentionnee(db: sqlite3.Connection, texte: str) -> int | None:
     return None
 
 
+def _identifier_personne_piece(db: sqlite3.Connection, pages: list[sqlite3.Row]) -> int | None:
+    """Priorité au rôle tagué dans l'en-tête (fiable) ; à défaut, repli sur
+    le premier nom "Prénom NOM" mentionné dans la pièce (utile pour les PV
+    administratifs de garde à vue, qui nomment tôt et sans ambiguïté la
+    personne concernée, mais sans tag de rôle explicite en en-tête)."""
+    personne_id = identifier_declarant(db, pages[0]["texte"])
+    if personne_id is not None:
+        return personne_id
+    texte_complet = "\n".join(p["texte"] for p in pages)
+    return _personne_mentionnee(db, texte_complet)
+
+
 def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages: list[sqlite3.Row]) -> list[dict]:
     type_ = piece["type"]
-    texte_complet = "\n".join(p["texte"] for p in pages)
-    personne_id = _personne_mentionnee(db, texte_complet)
+    personne_id = _identifier_personne_piece(db, pages)
     evenements: list[dict] = []
 
     def ajouter(nature: str, resultat, date_idx: int | None, heure_idx: int, personne: int | None = None) -> None:

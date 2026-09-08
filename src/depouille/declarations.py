@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .classify import _detecter_personnes_avec_role
+from .classify import identifier_declarant
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
 from .verification import _normaliser, verifier_table
@@ -52,19 +52,6 @@ def _detecter_point_factuel(question: str, reponse: str) -> str:
         if any(mot in bloc for mot in mots):
             return label
     return question.strip().rstrip("?").strip().lower()
-
-
-def _declarant_de_la_piece(db: sqlite3.Connection, page_entete: str) -> int | None:
-    """Identifie le déclarant à partir du rôle explicitement tagué dans
-    l'en-tête de la pièce ("(MIS EN CAUSE)", "(VICTIME)", "(TÉMOIN)") —
-    jamais en cherchant le premier nom mentionné n'importe où dans le
-    texte, qui attraperait aussi bien un tiers cité dans une question."""
-    roles = _detecter_personnes_avec_role(page_entete)
-    if not roles:
-        return None
-    nom, role = roles[0]
-    row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
-    return row["id"] if row else None
 
 
 def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
@@ -147,7 +134,7 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
             (piece["page_debut"], piece["page_fin"]),
         ).fetchall()
-        personne_id = _declarant_de_la_piece(db, pages[0]["texte"])
+        personne_id = identifier_declarant(db, pages[0]["texte"])
         if personne_id is None:
             console.print(
                 f"  [decl] pièce {piece['id']} (pages {piece['page_debut']}-{piece['page_fin']}) : "

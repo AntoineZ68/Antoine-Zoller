@@ -168,6 +168,19 @@ def _detecter_personnes_avec_role(texte: str) -> list[tuple[str, str]]:
     return resultats
 
 
+def identifier_declarant(db: sqlite3.Connection, page_entete: str) -> int | None:
+    """Identifie la personne d'une pièce à partir du rôle explicitement tagué
+    dans son en-tête ("(MIS EN CAUSE)", "(VICTIME)", "(TÉMOIN)") — jamais en
+    cherchant le premier nom mentionné n'importe où dans le texte, qui
+    attraperait aussi bien un tiers cité en passant (ex. dans une question)."""
+    roles = _detecter_personnes_avec_role(page_entete)
+    if not roles:
+        return None
+    nom, role = roles[0]
+    row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
+    return row["id"] if row else None
+
+
 def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
     row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
     if row:

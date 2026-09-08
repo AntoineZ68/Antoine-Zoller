@@ -113,11 +113,11 @@ def build(
     offline: bool = OptionOffline,
 ) -> None:
     """Étape 6 : génération des 6 livrables dans <affaire>/out/."""
-    _charger(config_path, offline)
+    cfg = _charger(config_path, offline)
     from .build_deliverables import construire_livrables
 
     db = ouvrir_db(_db_affaire(affaire))
-    construire_livrables(db, Path(affaire), console=console)
+    construire_livrables(db, Path(affaire), cfg, console=console)
 
 
 @app.command()
@@ -143,7 +143,7 @@ def run(
     construire_index(db, Path(affaire), console=console)
     lancer_chrono(db, cfg, force=force, console=console)
     lancer_declarations(db, cfg, force=force, console=console)
-    construire_livrables(db, Path(affaire), console=console)
+    construire_livrables(db, Path(affaire), cfg, console=console)
 
 
 if __name__ == "__main__":
