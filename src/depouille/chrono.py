@@ -24,23 +24,48 @@ from rich.table import Table
 from .classify import RE_PERSONNE, _est_titre, identifier_declarant
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
-from .regex_patterns import phrase_contenant, texte_sans_entete
+from .regex_patterns import (
+    FRAGMENT_DATE,
+    FRAGMENT_HEURE,
+    normaliser_date,
+    normaliser_heure,
+    phrase_contenant,
+    texte_sans_entete,
+)
 from .verification import verifier_table
 
-RE_DATE_HEURE_ACTE = re.compile(r"\bLe\s+(\d{2}/\d{2}/\d{4})\s+à\s+(\d{1,2}h\d{2})\b")
-RE_INTERPELLATION = re.compile(r"[Ii]nterpellation\s+effectuée\s+le\s+(\d{2}/\d{2}/\d{4})\s+à\s+(\d{1,2}h\d{2})")
-RE_DEMANDE_MEDECIN = re.compile(r"réquisition\s+du\s+(\d{2}/\d{2}/\d{4})\s+reçue\s+à\s+(\d{1,2}h\d{2})")
-RE_REALISATION_MEDECIN = re.compile(r"examiné\s+ce\s+jour\s+(\d{2}/\d{2}/\d{4})\s+à\s+(\d{1,2}h\d{2})")
-RE_DEMANDE_AVOCAT = re.compile(r"[Dd]emande\s+d'entretien\s+formulée\s+le\s+(\d{2}/\d{2}/\d{4})\s+à\s+(\d{1,2}h\d{2})")
-RE_REALISATION_AVOCAT = re.compile(r"réalisé\s+le\s+(\d{2}/\d{2}/\d{4})\s+de\s+(\d{1,2}h\d{2})\s+à\s+(\d{1,2}h\d{2})")
-RE_PERQUISITION = re.compile(r"[Ll]e\s+(\d{2}/\d{2}/\d{4})\s+de\s+(\d{1,2}h\d{2})\s+à\s+(\d{1,2}h\d{2})")
-RE_AUDITION_DEBUT_FIN = re.compile(
-    r"[Ll]e\s+(\d{2}/\d{2}/\d{4}),?\s*[Aa]udition\s+débutée\s+à\s+(\d{1,2}h\d{2}),?\s*close\s+à\s+(\d{1,2}h\d{2})"
+RE_DATE_HEURE_ACTE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}\b", re.IGNORECASE)
+RE_INTERPELLATION = re.compile(
+    rf"[Ii]nterpellation\s+effectuée\s+le\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
 )
-RE_AUDITION_DEBUT = re.compile(r"[Ll]e\s+(\d{2}/\d{2}/\d{4}),?\s*[Aa]udition\s+débutée\s+à\s+(\d{1,2}h\d{2})")
-RE_AUDITION_FIN = re.compile(r"[Aa]udition\s+close\s+à\s+(\d{1,2}h\d{2})")
+# Une garde à vue notifiée après coup peut prendre effet "rétroactivement" à
+# l'heure de l'interpellation (article 63 CPP) : quand le texte le dit
+# explicitement, c'est cette date/heure-là qui compte comme début réel de la
+# mesure, pas l'heure de rédaction du PV de notification.
+RE_RETROACTIF = re.compile(
+    rf"rétroactivement.{{0,80}}?{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}",
+    re.IGNORECASE | re.DOTALL,
+)
+RE_DEMANDE_MEDECIN = re.compile(rf"réquisition\s+du\s+{FRAGMENT_DATE}\s+reçue\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
+RE_REALISATION_MEDECIN = re.compile(rf"examiné\s+ce\s+jour\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
+RE_DEMANDE_AVOCAT = re.compile(
+    rf"[Dd]emande\s+d'entretien\s+formulée\s+le\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
+)
+RE_REALISATION_AVOCAT = re.compile(
+    rf"réalisé\s+le\s+{FRAGMENT_DATE}\s+de\s+{FRAGMENT_HEURE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
+)
+RE_PERQUISITION = re.compile(rf"[Ll]e\s+{FRAGMENT_DATE}\s+de\s+{FRAGMENT_HEURE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
+RE_AUDITION_DEBUT_FIN = re.compile(
+    rf"[Ll]e\s+{FRAGMENT_DATE},?\s*[Aa]udition\s+débutée\s+à\s+{FRAGMENT_HEURE},?\s*close\s+à\s+{FRAGMENT_HEURE}",
+    re.IGNORECASE,
+)
+RE_AUDITION_DEBUT = re.compile(
+    rf"[Ll]e\s+{FRAGMENT_DATE},?\s*[Aa]udition\s+débutée\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
+)
+RE_AUDITION_FIN = re.compile(rf"[Aa]udition\s+close\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
 
 NATURE_SIMPLE_PAR_TYPE = {
+    "PV d'interpellation": "interpellation",
     "PV de notification de placement en garde à vue": "placement_garde_a_vue",
     "PV de notification des droits": "notification_droits",
     "PV de prolongation de garde à vue": "prolongation_garde_a_vue",
@@ -86,11 +111,12 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
 
     def ajouter(nature: str, resultat, date_idx: int | None, heure_idx: int, personne: int | None = None) -> None:
         page, m, citation = resultat
+        date_brute = m.group(date_idx) if date_idx else None
         evenements.append(
             {
                 "nature": nature,
-                "date": m.group(date_idx) if date_idx else None,
-                "heure": m.group(heure_idx),
+                "date": normaliser_date(date_brute) if date_brute else None,
+                "heure": normaliser_heure(m.group(heure_idx)),
                 "page": page,
                 "citation": citation,
                 "personne_id": personne if personne is not None else personne_id,
@@ -98,13 +124,24 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
         )
 
     if type_ in NATURE_SIMPLE_PAR_TYPE:
+        nature = NATURE_SIMPLE_PAR_TYPE[type_]
         r = _chercher_sur_pages(pages, RE_DATE_HEURE_ACTE)
         if r:
-            ajouter(NATURE_SIMPLE_PAR_TYPE[type_], r, 1, 2)
+            ajouter(nature, r, 1, 2)
+
         if type_ == "PV de notification de placement en garde à vue":
-            r = _chercher_sur_pages(pages, RE_INTERPELLATION)
-            if r:
-                ajouter("interpellation", r, 1, 2)
+            r_retro = _chercher_sur_pages(pages, RE_RETROACTIF)
+            if r_retro:
+                # La mesure prend effet rétroactivement à l'heure indiquée,
+                # explicitement écrite dans le texte (art. 63 CPP) : c'est
+                # cet horodatage qui remplace celui de l'acte de
+                # notification comme début réel de la garde à vue.
+                evenements[:] = [e for e in evenements if e["nature"] != "placement_garde_a_vue"]
+                ajouter("placement_garde_a_vue", r_retro, 1, 2)
+
+            r_interp = _chercher_sur_pages(pages, RE_INTERPELLATION)
+            if r_interp:
+                ajouter("interpellation", r_interp, 1, 2)
 
     elif type_ == "Certificat médical":
         r = _chercher_sur_pages(pages, RE_DEMANDE_MEDECIN)
@@ -126,22 +163,24 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
         r = _chercher_sur_pages(pages, RE_PERQUISITION)
         if r:
             page, m, citation = r
+            date = normaliser_date(m.group(1))
             evenements.append(
-                {"nature": "debut_perquisition", "date": m.group(1), "heure": m.group(2), "page": page, "citation": citation, "personne_id": personne_id}
+                {"nature": "debut_perquisition", "date": date, "heure": normaliser_heure(m.group(2)), "page": page, "citation": citation, "personne_id": personne_id}
             )
             evenements.append(
-                {"nature": "fin_perquisition", "date": m.group(1), "heure": m.group(3), "page": page, "citation": citation, "personne_id": personne_id}
+                {"nature": "fin_perquisition", "date": date, "heure": normaliser_heure(m.group(3)), "page": page, "citation": citation, "personne_id": personne_id}
             )
 
     elif type_ in ("PV d'audition", "PV d'audition libre"):
         r = _chercher_sur_pages(pages, RE_AUDITION_DEBUT_FIN)
         if r:
             page, m, citation = r
+            date = normaliser_date(m.group(1))
             evenements.append(
-                {"nature": "debut_audition", "date": m.group(1), "heure": m.group(2), "page": page, "citation": citation, "personne_id": personne_id}
+                {"nature": "debut_audition", "date": date, "heure": normaliser_heure(m.group(2)), "page": page, "citation": citation, "personne_id": personne_id}
             )
             evenements.append(
-                {"nature": "fin_audition", "date": m.group(1), "heure": m.group(3), "page": page, "citation": citation, "personne_id": personne_id}
+                {"nature": "fin_audition", "date": date, "heure": normaliser_heure(m.group(3)), "page": page, "citation": citation, "personne_id": personne_id}
             )
         else:
             r = _chercher_sur_pages(pages, RE_AUDITION_DEBUT)

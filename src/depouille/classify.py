@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import unicodedata
 from datetime import datetime, timezone
 
 from rich.console import Console
@@ -28,6 +29,8 @@ from .regex_patterns import detecter_date_acte
 CATEGORIES = [
     "PV d'audition",
     "PV d'audition libre",
+    "PV d'interpellation",
+    "PV de surveillance",
     "PV de notification de placement en garde à vue",
     "PV de notification des droits",
     "PV de prolongation de garde à vue",
@@ -39,6 +42,8 @@ CATEGORIES = [
     "PV de constatations",
     "PV de synthèse",
     "Réquisition",
+    "Réquisitoire introductif",
+    "PV d'interrogatoire de première comparution",
     "Rapport d'expertise",
     "Analyse téléphonique",
     "Retranscription",
@@ -50,12 +55,18 @@ CATEGORIES = [
 ]
 
 # Règles déterministes : (motifs devant TOUS apparaître dans l'en-tête, type).
-# Évaluées dans l'ordre ; la première règle satisfaite l'emporte.
+# Évaluées dans l'ordre ; la première règle satisfaite l'emporte. Ni exhaustif
+# ni figé : chaque dossier réel testé peut révéler une formulation nouvelle à
+# ajouter — une pièce qui ne correspond à aucune règle part en "Non identifié"
+# pour relecture humaine, elle n'est jamais devinée.
 REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["NOTIFICATION", "PLACEMENT", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
+    (["NOTIFICATION", "MESURE", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
     (["NOTIFICATION", "DROITS"], "PV de notification des droits"),
     (["PROLONGATION", "GARDE À VUE"], "PV de prolongation de garde à vue"),
     (["FIN DE GARDE À VUE"], "PV de fin de garde à vue"),
+    (["INTERPELLATION"], "PV d'interpellation"),
+    (["SURVEILLANCE"], "PV de surveillance"),
     (["CERTIFICAT MÉDICAL"], "Certificat médical"),
     (["ENTRETIEN", "AVOCAT"], "PV d'entretien avocat"),
     (["PERQUISITION"], "PV de perquisition"),
@@ -65,15 +76,18 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["SOIT-TRANSMIS"], "Soit-transmis"),
     (["ENQUÊTE DE PERSONNALITÉ"], "Enquête de personnalité"),
     (["CASIER JUDICIAIRE"], "Casier judiciaire"),
+    (["RÉQUISITOIRE"], "Réquisitoire introductif"),
     (["RÉQUISITION"], "Réquisition"),
+    (["INTERROGATOIRE", "COMPARUTION"], "PV d'interrogatoire de première comparution"),
+    (["RAPPORT D'ANALYSE"], "Rapport d'expertise"),
     (["EXPERTISE"], "Rapport d'expertise"),
     (["ANALYSE TÉLÉPHONIQUE"], "Analyse téléphonique"),
-    (["RETRANSCRIPTION"], "Retranscription"),
+    (["TRANSCRIPTION"], "Retranscription"),
     (["AUDITION LIBRE"], "PV d'audition libre"),
     (["AUDITION"], "PV d'audition"),
 ]
 
-RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()\-–—\s.,]{8,}$")
+RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()/\-–—\s.,]{8,}$")
 RE_SERVICE = re.compile(
     r"\b(brigade\s+de\s+gendarmerie\s+de\s+[A-ZÀ-Ÿ][\wà-ÿ'-]+|"
     r"commissariat\s+de\s+[A-ZÀ-Ÿ][\wà-ÿ'-]+|"
@@ -96,6 +110,26 @@ def _est_titre(ligne: str) -> bool:
     return bool(ligne) and len(ligne) >= 8 and bool(RE_TITRE.match(ligne))
 
 
+def _entete_etendu(texte_page: str) -> str:
+    """Regroupe les lignes consécutives en capitales en tête de page (ex.
+    "COTE X / TITRE" suivi du nom du service rédacteur, lui aussi en
+    capitales). Sert de seule base à la classification par mots-clés : le
+    reste du corps du texte est exclu, pour qu'une pièce ne soit jamais
+    classée à tort à cause d'un mot-clé mentionné en passant dans une
+    phrase (ex. un interrogatoire qui évoque "le réquisitoire introductif"
+    en référence à une autre pièce du dossier)."""
+    lignes_entete = []
+    for ligne in texte_page.splitlines():
+        ligne_nettoyee = ligne.strip()
+        if not ligne_nettoyee:
+            continue
+        if _est_titre(ligne_nettoyee):
+            lignes_entete.append(ligne_nettoyee)
+        else:
+            break
+    return " ".join(lignes_entete)
+
+
 def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
     """Frontière déterministe : une page dont la première ligne non vide est
     un intitulé en capitales démarre une nouvelle pièce ; sinon elle prolonge
@@ -112,10 +146,19 @@ def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
     return pieces
 
 
+def _sans_accents(texte: str) -> str:
+    """Les majuscules françaises omettent souvent les accents en pratique
+    ("GARDE A VUE", "REQUISITOIRE") — les règles de classification doivent
+    reconnaître les deux écritures plutôt que de dépendre d'une convention
+    typographique qu'aucun dossier réel ne respecte de façon uniforme."""
+    forme = unicodedata.normalize("NFKD", texte)
+    return "".join(c for c in forme if not unicodedata.combining(c))
+
+
 def _classifier_type_deterministe(texte_entete: str) -> tuple[str, float]:
-    majuscules = texte_entete.upper()
+    majuscules = _sans_accents(texte_entete.upper())
     for motifs, type_ in REGLES_MOTS_CLES:
-        if all(motif in majuscules for motif in motifs):
+        if all(_sans_accents(motif) in majuscules for motif in motifs):
             return type_, 1.0
     return "Non identifié", 0.0
 
@@ -214,7 +257,7 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
 
     for groupe in groupes:
         texte_complet = "\n".join(p["texte"] for p in groupe["pages"])
-        entete = groupe["pages"][0]["texte"]
+        entete = _entete_etendu(groupe["pages"][0]["texte"])
 
         type_, confiance = _classifier_type_deterministe(entete)
         if type_ == "Non identifié" and not config.offline:
