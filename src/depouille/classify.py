@@ -1,0 +1,268 @@
+"""Étape 2 — Classification des pièces.
+
+Déterministe d'abord : la frontière entre deux pièces et le type de la
+plupart des pièces se déduisent directement de l'en-tête de la page (les
+PV français utilisent des intitulés standardisés — "PROCÈS-VERBAL DE...",
+"CERTIFICAT MÉDICAL", etc.). Le modèle de langage n'intervient qu'en
+secours, pour les pièces dont l'en-tête ne correspond à aucun motif connu,
+et seulement si le mode --offline n'est pas actif.
+
+Aucune pièce n'est devinée : sous le seuil de confiance, elle part en
+"Non identifié" avec statut_revision='a_relire'.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from datetime import datetime, timezone
+
+from rich.console import Console
+from rich.table import Table
+
+from .config import Config
+from .llm import ErreurModeOffline, obtenir_provider
+from .regex_patterns import trouver_dates
+
+CATEGORIES = [
+    "PV d'audition",
+    "PV d'audition libre",
+    "PV de notification de placement en garde à vue",
+    "PV de notification des droits",
+    "PV de prolongation de garde à vue",
+    "PV de fin de garde à vue",
+    "Certificat médical",
+    "PV d'entretien avocat",
+    "PV de perquisition",
+    "PV de saisie",
+    "PV de constatations",
+    "PV de synthèse",
+    "Réquisition",
+    "Rapport d'expertise",
+    "Analyse téléphonique",
+    "Retranscription",
+    "Soit-transmis",
+    "Enquête de personnalité",
+    "Casier judiciaire",
+    "Pièce de procédure – autre",
+    "Non identifié",
+]
+
+# Règles déterministes : (motifs devant TOUS apparaître dans l'en-tête, type).
+# Évaluées dans l'ordre ; la première règle satisfaite l'emporte.
+REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
+    (["NOTIFICATION", "PLACEMENT", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
+    (["NOTIFICATION", "DROITS"], "PV de notification des droits"),
+    (["PROLONGATION", "GARDE À VUE"], "PV de prolongation de garde à vue"),
+    (["FIN DE GARDE À VUE"], "PV de fin de garde à vue"),
+    (["CERTIFICAT MÉDICAL"], "Certificat médical"),
+    (["ENTRETIEN", "AVOCAT"], "PV d'entretien avocat"),
+    (["PERQUISITION"], "PV de perquisition"),
+    (["SAISIE"], "PV de saisie"),
+    (["CONSTATATIONS"], "PV de constatations"),
+    (["SYNTHÈSE"], "PV de synthèse"),
+    (["SOIT-TRANSMIS"], "Soit-transmis"),
+    (["ENQUÊTE DE PERSONNALITÉ"], "Enquête de personnalité"),
+    (["CASIER JUDICIAIRE"], "Casier judiciaire"),
+    (["RÉQUISITION"], "Réquisition"),
+    (["EXPERTISE"], "Rapport d'expertise"),
+    (["ANALYSE TÉLÉPHONIQUE"], "Analyse téléphonique"),
+    (["RETRANSCRIPTION"], "Retranscription"),
+    (["AUDITION LIBRE"], "PV d'audition libre"),
+    (["AUDITION"], "PV d'audition"),
+]
+
+RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()\-–—\s.,]{8,}$")
+RE_SERVICE = re.compile(
+    r"\b(brigade de gendarmerie de [A-ZÀ-Ÿ][\wà-ÿ'-]+|"
+    r"commissariat de [A-ZÀ-Ÿ][\wà-ÿ'-]+|"
+    r"Procureur de la République de [A-ZÀ-Ÿ][\wà-ÿ'-]+)\b",
+    re.IGNORECASE,
+)
+RE_PERSONNE = re.compile(r"\b([A-ZÀ-Ÿ][a-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\b")
+RE_ROLE_TAG = re.compile(
+    r"\b([A-ZÀ-Ÿ][A-Za-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,})\s*\((MIS EN CAUSE|VICTIME|TÉMOIN)\)"
+)
+ROLE_PAR_TAG = {
+    "MIS EN CAUSE": "mis_en_cause",
+    "VICTIME": "victime",
+    "TÉMOIN": "témoin",
+}
+
+
+def _est_titre(ligne: str) -> bool:
+    ligne = ligne.strip()
+    return bool(ligne) and len(ligne) >= 8 and bool(RE_TITRE.match(ligne))
+
+
+def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
+    """Frontière déterministe : une page dont la première ligne non vide est
+    un intitulé en capitales démarre une nouvelle pièce ; sinon elle prolonge
+    la précédente."""
+    pieces: list[dict] = []
+    for page in pages:
+        premiere_ligne = next((l for l in page["texte"].splitlines() if l.strip()), "")
+        nouvelle_piece = _est_titre(premiere_ligne) or not pieces
+        if nouvelle_piece:
+            pieces.append({"page_debut": page["numero_global"], "page_fin": page["numero_global"], "pages": [page]})
+        else:
+            pieces[-1]["page_fin"] = page["numero_global"]
+            pieces[-1]["pages"].append(page)
+    return pieces
+
+
+def _classifier_type_deterministe(texte_entete: str) -> tuple[str, float]:
+    majuscules = texte_entete.upper()
+    for motifs, type_ in REGLES_MOTS_CLES:
+        if all(motif in majuscules for motif in motifs):
+            return type_, 1.0
+    return "Non identifié", 0.0
+
+
+def _classifier_type_llm(config: Config, texte: str, console: Console) -> tuple[str, float]:
+    try:
+        provider = obtenir_provider(config)
+        reponse = provider.appeler(
+            systeme=(
+                "Tu classes une pièce de procédure pénale française dans une des "
+                "catégories suivantes, à l'exclusion de toute autre : "
+                + ", ".join(CATEGORIES)
+                + ". Réponds uniquement en JSON : "
+                '{"type": "...", "confiance": 0.0 à 1.0}. '
+                "Si aucune catégorie ne correspond clairement, réponds "
+                '{"type": "Non identifié", "confiance": 0.0}. '
+                "Ne déduis rien qui ne soit pas explicitement lisible dans le texte."
+            ),
+            prompt=texte[:4000],
+            modele=config.modele_classification,
+        )
+        data = json.loads(reponse.texte)
+        type_ = data.get("type", "Non identifié")
+        confiance = float(data.get("confiance", 0.0))
+        if type_ not in CATEGORIES:
+            return "Non identifié", 0.0
+        return type_, confiance
+    except ErreurModeOffline:
+        raise
+    except Exception as exc:  # noqa: BLE001 — on dégrade en "Non identifié", jamais une exception qui casse le run
+        console.print(f"  [classify] échec de l'appel LLM ({exc}), pièce marquée Non identifié.")
+        return "Non identifié", 0.0
+
+
+def _detecter_service(texte: str) -> str | None:
+    m = RE_SERVICE.search(texte)
+    return m.group(1) if m else None
+
+
+def _detecter_personnes_citees(texte: str) -> list[str]:
+    return sorted({f"{p} {n}" for p, n in RE_PERSONNE.findall(texte)})
+
+
+def _detecter_personnes_avec_role(texte: str) -> list[tuple[str, str]]:
+    resultats = []
+    for prenom, nom, tag in RE_ROLE_TAG.findall(texte):
+        resultats.append((f"{prenom.capitalize()} {nom.upper()}", ROLE_PAR_TAG[tag]))
+    return resultats
+
+
+def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
+    row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
+    if row:
+        return row["id"]
+    cur = db.execute("INSERT INTO personnes (nom, role) VALUES (?, ?)", (nom, role))
+    return cur.lastrowid
+
+
+def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, console: Console) -> None:
+    debut = datetime.now(timezone.utc)
+
+    if force:
+        db.execute("DELETE FROM pieces")
+        db.execute("DELETE FROM personnes")
+        db.commit()
+    elif db.execute("SELECT COUNT(*) FROM pieces").fetchone()[0] > 0:
+        console.print("  [classify] des pièces existent déjà, ignoré (utilise --force pour retraiter).")
+        return
+
+    pages = db.execute("SELECT * FROM pages ORDER BY numero_global").fetchall()
+    if not pages:
+        console.print("  [classify] aucune page en base — lance d'abord `depouille ingest`.")
+        return
+
+    groupes = _detecter_pieces_par_page(pages)
+
+    nb_deterministe = 0
+    nb_llm = 0
+    nb_non_identifie = 0
+
+    for groupe in groupes:
+        texte_complet = "\n".join(p["texte"] for p in groupe["pages"])
+        entete = groupe["pages"][0]["texte"]
+
+        type_, confiance = _classifier_type_deterministe(entete)
+        if type_ == "Non identifié" and not config.offline:
+            type_, confiance = _classifier_type_llm(config, texte_complet, console)
+            nb_llm += 1
+        elif type_ == "Non identifié":
+            nb_non_identifie += 1
+        else:
+            nb_deterministe += 1
+
+        statut_revision = "ok" if confiance >= config.seuil_confiance else "a_relire"
+        if type_ == "Non identifié":
+            statut_revision = "a_relire"
+
+        dates = trouver_dates(texte_complet)
+        date_apparente = dates[0] if dates else None
+        service = _detecter_service(texte_complet)
+        cote = groupe["pages"][0]["cote_detectee"]
+        personnes_citees = _detecter_personnes_citees(texte_complet)
+
+        db.execute(
+            """INSERT INTO pieces
+               (type, page_debut, page_fin, date_apparente, service_redacteur,
+                personnes_citees_json, cote, confiance, statut_revision)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                type_,
+                groupe["page_debut"],
+                groupe["page_fin"],
+                date_apparente,
+                service,
+                json.dumps(personnes_citees, ensure_ascii=False),
+                cote,
+                confiance,
+                statut_revision,
+            ),
+        )
+
+        for nom, role in _detecter_personnes_avec_role(texte_complet):
+            _upsert_personne(db, nom, role)
+
+    db.commit()
+
+    fin = datetime.now(timezone.utc)
+    db.execute(
+        "INSERT INTO run_log (etape, statut, debut, fin) VALUES (?, ?, ?, ?)",
+        ("classify", "termine", debut.isoformat(), fin.isoformat()),
+    )
+    db.commit()
+
+    table = Table(title="Classification")
+    table.add_column("Type")
+    table.add_column("Pages")
+    table.add_column("Confiance", justify="right")
+    table.add_column("Statut")
+    for row in db.execute("SELECT * FROM pieces ORDER BY page_debut"):
+        table.add_row(
+            row["type"],
+            f"{row['page_debut']}-{row['page_fin']}",
+            f"{row['confiance']:.2f}",
+            row["statut_revision"],
+        )
+    console.print(table)
+    console.print(
+        f"  Classées par règle déterministe : {nb_deterministe} — "
+        f"par appel modèle : {nb_llm} — Non identifié : {nb_non_identifie}"
+    )
