@@ -1,0 +1,23 @@
+# Config réelle (contient potentiellement des clés API) — jamais commitée
+config.toml
+*.local.toml
+
+# Dossiers d'affaires (secret professionnel — jamais commités)
+affaires/
+*/depouille.db
+*/out/
+*/work/
+*/source/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Divers
+.DS_Store
+.pytest_cache/

@@ -1,0 +1,40 @@
+# Copie ce fichier en `config.toml` (à la racine du projet, ou passé via --config)
+# et renseigne tes propres valeurs. config.toml est dans .gitignore : il ne sera
+# jamais commité.
+
+[llm]
+# "anthropic" (API directe, hébergée aux Etats-Unis) ou "offline" (aucun appel réseau).
+# Le support Bedrock (UE) est prévu dans l'interface LLMProvider mais pas encore
+# implémenté dans cette version — voir PLAN.md section 1.1.
+provider = "anthropic"
+
+# Clé API Anthropic. Peut aussi être fournie via la variable d'environnement
+# ANTHROPIC_API_KEY (recommandé : évite de la stocker en clair sur disque).
+api_key = ""
+
+# Modèle utilisé pour la classification des pièces (volume élevé, coût à maîtriser).
+modele_classification = "claude-haiku-4-5-20251001"
+
+# Modèle utilisé pour l'analyse fine (chronologie des faits, déclarations, personnalité).
+modele_analyse = "claude-sonnet-5"
+
+# Tarifs indicatifs en USD par million de tokens, utilisés uniquement pour le
+# calcul du coût affiché dans 99_controle.md. A ajuster selon les tarifs réels.
+[llm.tarifs."claude-haiku-4-5-20251001"]
+entree_par_million = 1.00
+sortie_par_million = 5.00
+
+[llm.tarifs."claude-sonnet-5"]
+entree_par_million = 3.00
+sortie_par_million = 15.00
+
+[classification]
+# Seuil de confiance en dessous duquel une pièce est classée "Non identifié"
+# et signalée pour relecture humaine plutôt que devinée.
+seuil_confiance = 0.7
+
+[verification]
+# Seuil de similarité (0-100) pour accepter une citation sur une page OCR
+# quand la correspondance exacte échoue (voir PLAN.md section 1.2).
+# Ne s'applique jamais aux pages en texte natif (exactitude stricte obligatoire).
+seuil_flou_ocr = 97
