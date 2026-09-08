@@ -23,6 +23,7 @@ from rich.console import Console
 from .chrono import calculer_durees
 from .classify import _est_titre
 from .config import Config
+from .conformite import detecter_signalements
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
 from .verification import verifier_citation
 
@@ -237,7 +238,36 @@ def _construire_personnalite(db: sqlite3.Connection, chemin: Path, seuil_flou_oc
     doc.save(chemin)
 
 
+def _construire_signalements(db: sqlite3.Connection, chemin: Path) -> None:
+    doc = Document()
+    doc.add_heading("Signalements de conformité procédurale", level=1)
+    doc.add_paragraph(
+        "Signalements strictement structurels (pièce ou événement attendu non retrouvé "
+        "dans le dossier, ou seuil numérique non controversé de garde à vue dépassé). "
+        "L'outil ne qualifie jamais juridiquement un acte et ne parle jamais de "
+        "\"nullité\" ou d'\"irrégularité\" : chaque ligne dit seulement ce qui a été "
+        "trouvé ou pas trouvé, avec sa source. L'appréciation juridique reste entièrement "
+        "à l'avocat.",
+        style="Intense Quote",
+    )
+
+    signalements = detecter_signalements(db)
+    if not signalements:
+        doc.add_paragraph("Aucun signalement structurel détecté sur les éléments identifiés dans le dossier.")
+    else:
+        for s in signalements:
+            doc.add_heading(s.titre, level=2)
+            doc.add_paragraph(s.description)
+            if s.page_reference and s.citation_reference:
+                p = doc.add_paragraph()
+                p.add_run(f"Source (p. {s.page_reference}) : ").bold = True
+                p.add_run(f"« {s.citation_reference} »")
+
+    doc.save(chemin)
+
+
 def _construire_controle(db: sqlite3.Connection, chemin: Path) -> None:
+    nb_signalements = len(detecter_signalements(db))
     nb_pages = db.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
     nb_ocr = db.execute("SELECT COUNT(*) FROM pages WHERE ocr_applique = 1").fetchone()[0]
     pieces_non_id = db.execute("SELECT * FROM pieces WHERE type = 'Non identifié'").fetchall()
@@ -279,7 +309,8 @@ def _construire_controle(db: sqlite3.Connection, chemin: Path) -> None:
     lignes.append(f"- Pages passées en OCR : {nb_ocr}")
     lignes.append(f"- Durée totale de traitement (somme des étapes) : {duree_totale_s:.1f} s")
     lignes.append(f"- Tokens modèle consommés : {tokens_in_total} entrée / {tokens_out_total} sortie")
-    lignes.append(f"- Coût estimé des appels modèle : {cout_total:.4f} $\n")
+    lignes.append(f"- Coût estimé des appels modèle : {cout_total:.4f} $")
+    lignes.append(f"- Signalements de conformité procédurale : {nb_signalements} (voir 06_signalements_procedure.docx)\n")
 
     lignes.append("## Durée et coût par étape\n")
     lignes.append("| Étape | Durée | Tokens entrée | Tokens sortie | Coût |")
@@ -336,6 +367,7 @@ def construire_livrables(db: sqlite3.Connection, affaire_dir: Path, config: Conf
     _construire_chronologie_faits(db, dossier_out / "03_chronologie_faits.docx")
     _construire_declarations(db, dossier_out / "04_declarations.xlsx")
     _construire_personnalite(db, dossier_out / "05_personnalite.docx", config.seuil_flou_ocr)
+    _construire_signalements(db, dossier_out / "06_signalements_procedure.docx")
     _construire_controle(db, dossier_out / "99_controle.md")
 
     console.print(f"  [build] livrables générés dans {dossier_out}")
