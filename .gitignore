@@ -21,3 +21,6 @@ dist/
 # Divers
 .DS_Store
 .pytest_cache/
+
+# Sortie du générateur de jeu d'essai (PDF binaire régénérable, pas de raison de le versionner)
+tests/fixtures/output/
