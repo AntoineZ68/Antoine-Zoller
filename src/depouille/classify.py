@@ -75,9 +75,9 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
 
 RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()\-–—\s.,]{8,}$")
 RE_SERVICE = re.compile(
-    r"\b(brigade de gendarmerie de [A-ZÀ-Ÿ][\wà-ÿ'-]+|"
-    r"commissariat de [A-ZÀ-Ÿ][\wà-ÿ'-]+|"
-    r"Procureur de la République de [A-ZÀ-Ÿ][\wà-ÿ'-]+)\b",
+    r"\b(brigade\s+de\s+gendarmerie\s+de\s+[A-ZÀ-Ÿ][\wà-ÿ'-]+|"
+    r"commissariat\s+de\s+[A-ZÀ-Ÿ][\wà-ÿ'-]+|"
+    r"Procureur\s+de\s+la\s+République\s+de\s+[A-ZÀ-Ÿ][\wà-ÿ'-]+)\b",
     re.IGNORECASE,
 )
 RE_PERSONNE = re.compile(r"\b([A-ZÀ-Ÿ][a-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\b")

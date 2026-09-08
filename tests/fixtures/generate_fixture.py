@@ -248,8 +248,8 @@ def _pieces() -> list[dict]:
                 [
                     "## CERTIFICAT MÉDICAL",
                     "Je soussigné, Docteur Hugo SALINIER, certifie avoir examiné ce "
-                    "jour 14/03/2031 à 09h45, sur réquisition reçue à 08h30, Julien "
-                    "MORVANNEC dans le cadre de sa garde à vue.",
+                    "jour 14/03/2031 à 09h45, sur réquisition du 14/03/2031 reçue à "
+                    "08h30, Julien MORVANNEC dans le cadre de sa garde à vue.",
                     "Son état de santé est compatible avec la mesure de garde à vue.",
                 ]
             ],
