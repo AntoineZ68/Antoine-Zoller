@@ -11,9 +11,13 @@ def obtenir_provider(config: Config) -> LLMProvider:
         from .anthropic_provider import AnthropicProvider
 
         return AnthropicProvider(api_key=config.api_key)
+    if config.provider == "mistral":
+        from .mistral_provider import MistralProvider
+
+        return MistralProvider(api_key=config.api_key)
     raise ValueError(
         f"Provider LLM inconnu : {config.provider!r}. "
-        "Valeurs supportées dans cette version : 'anthropic', 'offline'."
+        "Valeurs supportées dans cette version : 'anthropic', 'mistral', 'offline'."
     )
 
 

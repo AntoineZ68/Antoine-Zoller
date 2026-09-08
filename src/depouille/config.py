@@ -66,8 +66,10 @@ def charger_config(chemin: Path | None, offline: bool) -> Config:
         data = tomllib.load(f)
 
     llm = data.get("llm", {})
-    api_key = llm.get("api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
     provider = llm.get("provider", "offline")
+    variable_env_par_provider = {"anthropic": "ANTHROPIC_API_KEY", "mistral": "MISTRAL_API_KEY"}
+    variable_env = variable_env_par_provider.get(provider, "")
+    api_key = llm.get("api_key") or os.environ.get(variable_env, "")
 
     tarifs = {
         nom: TarifModele(

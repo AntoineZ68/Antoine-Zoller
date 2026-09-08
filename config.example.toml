@@ -3,19 +3,23 @@
 # jamais commité.
 
 [llm]
-# "anthropic" (API directe, hébergée aux Etats-Unis) ou "offline" (aucun appel réseau).
+# "anthropic" (API directe, hébergée aux Etats-Unis), "mistral" (France, option
+# de résidence des données en UE) ou "offline" (aucun appel réseau).
 # Le support Bedrock (UE) est prévu dans l'interface LLMProvider mais pas encore
 # implémenté dans cette version — voir PLAN.md section 1.1.
 provider = "anthropic"
 
-# Clé API Anthropic. Peut aussi être fournie via la variable d'environnement
-# ANTHROPIC_API_KEY (recommandé : évite de la stocker en clair sur disque).
+# Clé API du provider choisi. Peut aussi être fournie par variable d'environnement
+# (ANTHROPIC_API_KEY ou MISTRAL_API_KEY selon le provider) — recommandé : évite de
+# la stocker en clair sur disque.
 api_key = ""
 
 # Modèle utilisé pour la classification des pièces (volume élevé, coût à maîtriser).
+# Anthropic : "claude-haiku-4-5-20251001". Mistral : "mistral-small-latest".
 modele_classification = "claude-haiku-4-5-20251001"
 
 # Modèle utilisé pour l'analyse fine (chronologie des faits, déclarations, personnalité).
+# Anthropic : "claude-sonnet-5". Mistral : "mistral-large-latest".
 modele_analyse = "claude-sonnet-5"
 
 # Tarifs indicatifs en USD par million de tokens, utilisés uniquement pour le
@@ -27,6 +31,14 @@ sortie_par_million = 5.00
 [llm.tarifs."claude-sonnet-5"]
 entree_par_million = 3.00
 sortie_par_million = 15.00
+
+[llm.tarifs."mistral-small-latest"]
+entree_par_million = 0.20
+sortie_par_million = 0.60
+
+[llm.tarifs."mistral-large-latest"]
+entree_par_million = 2.00
+sortie_par_million = 6.00
 
 [classification]
 # Seuil de confiance en dessous duquel une pièce est classée "Non identifié"
