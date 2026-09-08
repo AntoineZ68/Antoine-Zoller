@@ -7,6 +7,8 @@ toucher au pipeline.
 
 from __future__ import annotations
 
+import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -16,6 +18,36 @@ class ReponseLLM:
     texte: str
     tokens_in: int
     tokens_out: int
+
+
+_RE_BLOC_CODE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+
+
+def extraire_json(texte: str):
+    """Les modèles enveloppent souvent leur réponse JSON dans un bloc de
+    code markdown et y ajoutent une justification en prose, même quand la
+    consigne dit explicitement de répondre uniquement en JSON — c'est un
+    comportement réel et courant, pas une anomalie à ignorer. On isole le
+    JSON avant de le parser plutôt que d'échouer sur un texte qui n'en est
+    pas un dans son intégralité."""
+    texte = texte.strip()
+    m = _RE_BLOC_CODE.search(texte)
+    candidat = m.group(1).strip() if m else texte
+    try:
+        return json.loads(candidat)
+    except json.JSONDecodeError:
+        pass
+
+    for ouvrant, fermant in (("{", "}"), ("[", "]")):
+        debut = candidat.find(ouvrant)
+        fin = candidat.rfind(fermant)
+        if debut != -1 and fin != -1 and fin > debut:
+            try:
+                return json.loads(candidat[debut : fin + 1])
+            except json.JSONDecodeError:
+                continue
+
+    raise ValueError(f"Impossible d'extraire du JSON valide de la réponse du modèle : {texte[:200]!r}")
 
 
 class LLMProvider(ABC):

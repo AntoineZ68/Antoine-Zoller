@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Config
-from .llm import ErreurModeOffline, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .regex_patterns import detecter_date_acte
 
 CATEGORIES = [
@@ -201,7 +201,7 @@ def _classifier_type_llm(config: Config, texte: str, console: Console, compteur:
         )
         compteur["tokens_in"] += reponse.tokens_in
         compteur["tokens_out"] += reponse.tokens_out
-        data = json.loads(reponse.texte)
+        data = extraire_json(reponse.texte)
         type_ = data.get("type", "Non identifié")
         confiance = float(data.get("confiance", 0.0))
         if type_ not in CATEGORIES:
@@ -336,7 +336,7 @@ def identifier_personne_via_llm(
         )
         compteur["tokens_in"] += reponse.tokens_in
         compteur["tokens_out"] += reponse.tokens_out
-        data = json.loads(reponse.texte)
+        data = extraire_json(reponse.texte)
         nom, role = data.get("nom"), data.get("role")
         if not nom or role not in ROLES_VALIDES:
             return None

@@ -23,7 +23,7 @@ from rich.table import Table
 
 from .classify import _est_titre
 from .config import Config
-from .llm import ErreurModeOffline, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
     FRAGMENT_HEURE,
@@ -71,6 +71,19 @@ NATURE_SIMPLE_PAR_TYPE = {
     "PV de prolongation de garde à vue": "prolongation_garde_a_vue",
     "PV de fin de garde à vue": "fin_garde_a_vue",
 }
+
+
+def _personne_par_nom(db: sqlite3.Connection, nom_libre: str) -> int | None:
+    """Résout un nom en texte libre (renvoyé par le modèle, ex. dans
+    "personne_source") vers une personne déjà identifiée dans le dossier —
+    jamais en créant une nouvelle entrée : un fait narratif ne doit pas
+    faire apparaître une personne qui n'a pas été identifiée par un canal
+    vérifié (tag d'en-tête, première mention fiable, ou identification LLM
+    déjà vérifiée pendant la classification)."""
+    if not nom_libre or not nom_libre.strip():
+        return None
+    row = db.execute("SELECT id FROM personnes WHERE lower(nom) = lower(?)", (nom_libre.strip(),)).fetchone()
+    return row["id"] if row else None
 
 
 def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[int, re.Match, str] | None:
@@ -251,7 +264,7 @@ def _extraire_faits_llm(
             )
             compteur["tokens_in"] += reponse.tokens_in
             compteur["tokens_out"] += reponse.tokens_out
-            faits = json.loads(reponse.texte)
+            faits = extraire_json(reponse.texte)
         except ErreurModeOffline:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -259,7 +272,7 @@ def _extraire_faits_llm(
             continue
 
         for fait in faits:
-            personne_id = _personne_mentionnee(db, fait.get("personne_source", ""))
+            personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
             db.execute(
                 """INSERT INTO evenements_faits
                    (piece_id, page, citation, personne_id_source, description, statut_verif)

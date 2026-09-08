@@ -30,11 +30,11 @@ from rich.table import Table
 
 from .classify import TYPES_AUDITION
 from .config import Config
-from .llm import ErreurModeOffline, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .verification import _normaliser, verifier_table
 
-RE_QUESTION = re.compile(r"^Question\s*:\s*(.+)$")
-RE_REPONSE = re.compile(r"^Réponse\s*:\s*(.+)$")
+RE_QUESTION = re.compile(r"^(?:Question|Q)[.:\s]+(.+)$")
+RE_REPONSE = re.compile(r"^(?:Réponse|R)[.:\s]+(.+)$")
 
 # Rapprochement déterministe minimal entre questions différemment formulées
 # mais portant sur le même point factuel. Volontairement restreint : la
@@ -129,7 +129,7 @@ def _extraire_declarations_llm(
         )
         compteur["tokens_in"] += reponse.tokens_in
         compteur["tokens_out"] += reponse.tokens_out
-        return json.loads(reponse.texte)
+        return extraire_json(reponse.texte)
     except ErreurModeOffline:
         raise
     except Exception as exc:  # noqa: BLE001
