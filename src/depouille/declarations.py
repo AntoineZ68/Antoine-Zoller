@@ -54,27 +54,60 @@ def _detecter_point_factuel(question: str, reponse: str) -> str:
     return question.strip().rstrip("?").strip().lower()
 
 
+def _reponse_terminee(fragments: list[str]) -> bool:
+    return fragments[-1].rstrip().endswith((".", "?", "!"))
+
+
 def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
+    """Une réponse peut être répartie sur plusieurs lignes visuelles du PDF
+    (retour à la ligne dû à la largeur de mise en page) : on recolle les
+    lignes de continuation tant que la dernière ne se termine pas par une
+    ponctuation finale, plutôt que de ne garder que la première ligne."""
     resultats: list[dict] = []
     question_courante: str | None = None
+    reponse_courante: list[str] | None = None
+    page_reponse: int | None = None
+
+    def _flush() -> None:
+        if question_courante is not None and reponse_courante:
+            citation = " ".join(reponse_courante).strip()
+            resultats.append(
+                {
+                    "page": page_reponse,
+                    "citation": citation,
+                    "point_factuel": _detecter_point_factuel(question_courante, citation),
+                }
+            )
+
     for page in pages:
         for ligne in page["texte"].splitlines():
             ligne = ligne.strip()
+            if not ligne:
+                continue
+
             m_q = RE_QUESTION.match(ligne)
             if m_q:
+                _flush()
                 question_courante = m_q.group(1).strip()
+                reponse_courante = None
+                page_reponse = None
                 continue
+
             m_r = RE_REPONSE.match(ligne)
             if m_r and question_courante:
-                reponse = m_r.group(1).strip()
-                resultats.append(
-                    {
-                        "page": page["numero_global"],
-                        "citation": reponse,
-                        "point_factuel": _detecter_point_factuel(question_courante, reponse),
-                    }
-                )
-                question_courante = None
+                _flush()
+                reponse_courante = [m_r.group(1).strip()]
+                page_reponse = page["numero_global"]
+                continue
+
+            if (
+                reponse_courante is not None
+                and not _reponse_terminee(reponse_courante)
+                and "N° PARQUET" not in ligne
+            ):
+                reponse_courante.append(ligne)
+
+    _flush()
     return resultats
 
 
