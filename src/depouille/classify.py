@@ -120,7 +120,7 @@ def _classifier_type_deterministe(texte_entete: str) -> tuple[str, float]:
     return "Non identifié", 0.0
 
 
-def _classifier_type_llm(config: Config, texte: str, console: Console) -> tuple[str, float]:
+def _classifier_type_llm(config: Config, texte: str, console: Console, compteur: dict[str, int]) -> tuple[str, float]:
     try:
         provider = obtenir_provider(config)
         reponse = provider.appeler(
@@ -137,6 +137,8 @@ def _classifier_type_llm(config: Config, texte: str, console: Console) -> tuple[
             prompt=texte[:4000],
             modele=config.modele_classification,
         )
+        compteur["tokens_in"] += reponse.tokens_in
+        compteur["tokens_out"] += reponse.tokens_out
         data = json.loads(reponse.texte)
         type_ = data.get("type", "Non identifié")
         confiance = float(data.get("confiance", 0.0))
@@ -195,6 +197,7 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
     nb_deterministe = 0
     nb_llm = 0
     nb_non_identifie = 0
+    compteur = {"tokens_in": 0, "tokens_out": 0}
 
     for groupe in groupes:
         texte_complet = "\n".join(p["texte"] for p in groupe["pages"])
@@ -202,7 +205,7 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
 
         type_, confiance = _classifier_type_deterministe(entete)
         if type_ == "Non identifié" and not config.offline:
-            type_, confiance = _classifier_type_llm(config, texte_complet, console)
+            type_, confiance = _classifier_type_llm(config, texte_complet, console, compteur)
             nb_llm += 1
         elif type_ == "Non identifié":
             nb_non_identifie += 1
@@ -242,9 +245,10 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
     db.commit()
 
     fin = datetime.now(timezone.utc)
+    cout = config.cout(config.modele_classification, compteur["tokens_in"], compteur["tokens_out"])
     db.execute(
-        "INSERT INTO run_log (etape, statut, debut, fin) VALUES (?, ?, ?, ?)",
-        ("classify", "termine", debut.isoformat(), fin.isoformat()),
+        "INSERT INTO run_log (etape, statut, debut, fin, tokens_in, tokens_out, cout_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("classify", "termine", debut.isoformat(), fin.isoformat(), compteur["tokens_in"], compteur["tokens_out"], cout),
     )
     db.commit()
 

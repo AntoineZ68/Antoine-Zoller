@@ -200,7 +200,9 @@ def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:
 TYPES_NARRATIFS = ("PV d'audition", "PV d'audition libre", "PV de constatations", "PV de synthèse")
 
 
-def _extraire_faits_llm(db: sqlite3.Connection, config: Config, pieces: list[sqlite3.Row], console: Console) -> int:
+def _extraire_faits_llm(
+    db: sqlite3.Connection, config: Config, pieces: list[sqlite3.Row], console: Console, compteur: dict[str, int]
+) -> int:
     provider = obtenir_provider(config)
     nb = 0
     for piece in pieces:
@@ -223,6 +225,8 @@ def _extraire_faits_llm(db: sqlite3.Connection, config: Config, pieces: list[sql
                 prompt=texte[:8000],
                 modele=config.modele_analyse,
             )
+            compteur["tokens_in"] += reponse.tokens_in
+            compteur["tokens_out"] += reponse.tokens_out
             faits = json.loads(reponse.texte)
         except ErreurModeOffline:
             raise
@@ -273,6 +277,7 @@ def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: 
             )
     db.commit()
 
+    compteur = {"tokens_in": 0, "tokens_out": 0}
     if config.offline:
         console.print(
             "  [chrono] --offline actif : la chronologie des faits (narrative, LLM) n'est pas "
@@ -280,15 +285,16 @@ def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: 
         )
         nb_faits = 0
     else:
-        nb_faits = _extraire_faits_llm(db, config, pieces, console)
+        nb_faits = _extraire_faits_llm(db, config, pieces, console, compteur)
 
     resume_procedure = verifier_table(db, "evenements_procedure", config.seuil_flou_ocr)
     resume_faits = verifier_table(db, "evenements_faits", config.seuil_flou_ocr)
 
     fin = datetime.now(timezone.utc)
+    cout = config.cout(config.modele_analyse, compteur["tokens_in"], compteur["tokens_out"])
     db.execute(
-        "INSERT INTO run_log (etape, statut, debut, fin) VALUES (?, ?, ?, ?)",
-        ("chrono", "termine", debut.isoformat(), fin.isoformat()),
+        "INSERT INTO run_log (etape, statut, debut, fin, tokens_in, tokens_out, cout_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("chrono", "termine", debut.isoformat(), fin.isoformat(), compteur["tokens_in"], compteur["tokens_out"], cout),
     )
     db.commit()
 

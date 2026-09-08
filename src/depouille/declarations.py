@@ -91,7 +91,9 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
     return resultats
 
 
-def _extraire_declarations_llm(config: Config, pages: list[sqlite3.Row], console: Console) -> list[dict]:
+def _extraire_declarations_llm(
+    config: Config, pages: list[sqlite3.Row], console: Console, compteur: dict[str, int]
+) -> list[dict]:
     provider = obtenir_provider(config)
     texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in pages)
     try:
@@ -107,6 +109,8 @@ def _extraire_declarations_llm(config: Config, pages: list[sqlite3.Row], console
             prompt=texte[:8000],
             modele=config.modele_analyse,
         )
+        compteur["tokens_in"] += reponse.tokens_in
+        compteur["tokens_out"] += reponse.tokens_out
         return json.loads(reponse.texte)
     except ErreurModeOffline:
         raise
@@ -136,6 +140,7 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
     nb_deterministe = 0
     nb_llm = 0
     nb_non_couvert = 0
+    compteur = {"tokens_in": 0, "tokens_out": 0}
 
     for piece in pieces:
         pages = db.execute(
@@ -154,7 +159,7 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
         if points:
             nb_deterministe += len(points)
         elif not config.offline:
-            points = _extraire_declarations_llm(config, pages, console)
+            points = _extraire_declarations_llm(config, pages, console, compteur)
             nb_llm += len(points)
         else:
             nb_non_couvert += 1
@@ -202,9 +207,10 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
     db.commit()
 
     fin = datetime.now(timezone.utc)
+    cout = config.cout(config.modele_analyse, compteur["tokens_in"], compteur["tokens_out"])
     db.execute(
-        "INSERT INTO run_log (etape, statut, debut, fin) VALUES (?, ?, ?, ?)",
-        ("decl", "termine", debut.isoformat(), fin.isoformat()),
+        "INSERT INTO run_log (etape, statut, debut, fin, tokens_in, tokens_out, cout_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("decl", "termine", debut.isoformat(), fin.isoformat(), compteur["tokens_in"], compteur["tokens_out"], cout),
     )
     db.commit()
 

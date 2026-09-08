@@ -31,6 +31,12 @@ class Config:
     seuil_flou_ocr: int = 97
     chemin_config: Path | None = None
 
+    def cout(self, modele: str, tokens_in: int, tokens_out: int) -> float:
+        tarif = self.tarifs.get(modele)
+        if tarif is None:
+            return 0.0
+        return (tokens_in / 1_000_000) * tarif.entree_par_million + (tokens_out / 1_000_000) * tarif.sortie_par_million
+
     def resume_reseau(self) -> str:
         """Ligne affichée au démarrage : ce qui sort de la machine, et où."""
         if self.offline or self.provider == "offline":
