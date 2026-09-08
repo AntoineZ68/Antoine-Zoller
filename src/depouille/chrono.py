@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .classify import RE_PERSONNE, _est_titre, identifier_declarant
+from .classify import _est_titre
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
 from .regex_patterns import (
@@ -82,31 +82,11 @@ def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[in
     return None
 
 
-def _personne_mentionnee(db: sqlite3.Connection, texte: str) -> int | None:
-    for prenom, nom in RE_PERSONNE.findall(texte):
-        row = db.execute(
-            "SELECT id FROM personnes WHERE nom = ?", (f"{prenom} {nom.upper()}",)
-        ).fetchone()
-        if row:
-            return row["id"]
-    return None
-
-
-def _identifier_personne_piece(db: sqlite3.Connection, pages: list[sqlite3.Row]) -> int | None:
-    """Priorité au rôle tagué dans l'en-tête (fiable) ; à défaut, repli sur
-    le premier nom "Prénom NOM" mentionné dans la pièce (utile pour les PV
-    administratifs de garde à vue, qui nomment tôt et sans ambiguïté la
-    personne concernée, mais sans tag de rôle explicite en en-tête)."""
-    personne_id = identifier_declarant(db, pages[0]["texte"])
-    if personne_id is not None:
-        return personne_id
-    texte_complet = "\n".join(p["texte"] for p in pages)
-    return _personne_mentionnee(db, texte_complet)
-
-
 def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages: list[sqlite3.Row]) -> list[dict]:
     type_ = piece["type"]
-    personne_id = _identifier_personne_piece(db, pages)
+    # Calculé une seule fois pendant la classification (identifier_personne_principale)
+    # et réutilisé ici pour ne jamais recalculer ni repayer un appel au modèle.
+    personne_id = piece["personne_principale_id"]
     evenements: list[dict] = []
 
     def ajouter(nature: str, resultat, date_idx: int | None, heure_idx: int, personne: int | None = None) -> None:

@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS pieces (
     personnes_citees_json TEXT NOT NULL DEFAULT '[]',
     cote TEXT,
     confiance REAL NOT NULL DEFAULT 0.0,
-    statut_revision TEXT NOT NULL DEFAULT 'a_faire'
+    statut_revision TEXT NOT NULL DEFAULT 'a_faire',
+    personne_principale_id INTEGER REFERENCES personnes(id),
+    methode_personne_principale TEXT
 );
 
 CREATE TABLE IF NOT EXISTS personnes (

@@ -28,15 +28,13 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .classify import identifier_declarant
+from .classify import TYPES_AUDITION
 from .config import Config
 from .llm import ErreurModeOffline, obtenir_provider
 from .verification import _normaliser, verifier_table
 
 RE_QUESTION = re.compile(r"^Question\s*:\s*(.+)$")
 RE_REPONSE = re.compile(r"^Réponse\s*:\s*(.+)$")
-
-TYPES_AUDITION = ("PV d'audition", "PV d'audition libre")
 
 # Rapprochement déterministe minimal entre questions différemment formulées
 # mais portant sur le même point factuel. Volontairement restreint : la
@@ -167,11 +165,13 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
             (piece["page_debut"], piece["page_fin"]),
         ).fetchall()
-        personne_id = identifier_declarant(db, pages[0]["texte"])
+        # Calculé une seule fois pendant la classification
+        # (identifier_personne_principale) et réutilisé ici.
+        personne_id = piece["personne_principale_id"]
         if personne_id is None:
             console.print(
                 f"  [decl] pièce {piece['id']} (pages {piece['page_debut']}-{piece['page_fin']}) : "
-                "rôle du déclarant non identifiable dans l'en-tête, ignorée."
+                "déclarant non identifié, ignorée."
             )
             continue
 

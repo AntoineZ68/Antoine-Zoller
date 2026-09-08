@@ -103,6 +103,25 @@ ROLE_PAR_TAG = {
     "VICTIME": "victime",
     "TÉMOIN": "témoin",
 }
+ROLES_VALIDES = ("mis_en_cause", "victime", "témoin", "expert", "enqueteur")
+
+TYPES_AUDITION = ("PV d'audition", "PV d'audition libre")
+
+# Types où le premier nom "Prénom NOM" mentionné dans la pièce désigne sans
+# ambiguïté la personne concernée (le texte la nomme tôt et explicitement,
+# ex. "notifions à Julien MORVANNEC..."). Explicitement PAS les auditions,
+# où un tiers peut être cité en passant dans une question — voir le bug
+# corrigé précédemment.
+TYPES_PERSONNE_PAR_PREMIERE_MENTION = (
+    "PV de notification de placement en garde à vue",
+    "PV de notification des droits",
+    "PV de prolongation de garde à vue",
+    "PV de fin de garde à vue",
+    "Certificat médical",
+    "PV d'entretien avocat",
+    "PV de perquisition",
+    "PV d'interpellation",
+)
 
 
 def _est_titre(ligne: str) -> bool:
@@ -232,6 +251,149 @@ def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
     return cur.lastrowid
 
 
+TITRES_A_EXCLURE = {
+    "capitaine", "commandant", "lieutenant", "colonel", "major", "brigadier",
+    "adjudant", "gardien", "maréchal", "docteur", "maître", "monsieur", "madame",
+}
+
+
+def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
+    """Le premier nom "Prénom NOM" mentionné n'est pas forcément le mis en
+    cause : les PV nomment très souvent l'officier rédacteur ("nous,
+    capitaine Élodie BASTIER...") avant de nommer la personne concernée. On
+    exclut donc les mentions immédiatement précédées d'un titre ou d'un
+    grade — la personne concernée par la pièce est cherchée après ça."""
+    for m in RE_PERSONNE.finditer(texte):
+        avant = texte[: m.start()].rstrip().split()
+        dernier_mot = avant[-1].lower().rstrip(",.") if avant else ""
+        if dernier_mot in TITRES_A_EXCLURE:
+            continue
+        return m.group(1), m.group(2)
+    return None
+
+
+def _premiere_mention_ou_creation(db: sqlite3.Connection, texte: str, role_par_defaut: str) -> int | None:
+    """Pour les pièces où le premier nom mentionné (hors officier
+    rédacteur) désigne sans ambiguïté la personne concernée (voir
+    TYPES_PERSONNE_PAR_PREMIERE_MENTION) : ces pièces existent
+    structurellement à propos du mis en cause (placement, notification,
+    prolongation, perquisition...), donc si la personne n'est pas encore
+    enregistrée, on la crée avec le rôle par défaut plutôt que d'échouer
+    silencieusement faute d'un tag qu'aucun de ces PV n'écrit jamais
+    explicitement."""
+    trouve = _premiere_mention_hors_titres(texte)
+    if not trouve:
+        return None
+    prenom, nom_famille = trouve
+    nom = f"{prenom} {nom_famille.upper()}"
+    row = db.execute("SELECT id FROM personnes WHERE nom = ?", (nom,)).fetchone()
+    if row:
+        return row["id"]
+    return _upsert_personne(db, nom, role_par_defaut)
+
+
+def identifier_personne_via_llm(
+    config: Config,
+    texte_piece: str,
+    personnes_connues: list[tuple[str, str]],
+    console: Console,
+    compteur: dict[str, int],
+) -> tuple[str, str] | None:
+    """Repli sur le modèle pour identifier la personne concernée par une
+    pièce quand aucun tag de rôle explicite n'est présent dans l'en-tête —
+    jamais en --offline.
+
+    Beaucoup de PV ne renomment pas la personne (ils disent "le gardé à
+    vue", "l'intéressé") parce que son identité a déjà été établie plus tôt
+    dans le dossier : on donne donc au modèle la liste des personnes déjà
+    identifiées ailleurs, pour qu'il puisse la reconnaître par le contexte.
+    Mais la vérifiabilité reste non négociable : le nom renvoyé doit soit
+    correspondre à une personne déjà établie (donc déjà une identité
+    vérifiée, pas une invention), soit être retrouvé littéralement dans le
+    texte de cette pièce précise. Un nom qui ne remplit aucune des deux
+    conditions est rejeté, quelle que soit la confiance apparente du
+    modèle."""
+    try:
+        provider = obtenir_provider(config)
+        liste_connues = "\n".join(f"- {nom} ({role})" for nom, role in personnes_connues) or "(aucune)"
+        reponse = provider.appeler(
+            systeme=(
+                "Tu identifies la personne interrogée ou concernée par cette pièce de "
+                "procédure pénale française, et son rôle. Rôles possibles, à l'exclusion "
+                "de tout autre : " + ", ".join(ROLES_VALIDES) + ".\n"
+                "Personnes déjà identifiées ailleurs dans ce dossier :\n"
+                f"{liste_connues}\n"
+                "Si cette pièce concerne l'une d'entre elles — même si le texte ne la "
+                'nomme pas explicitement (ex. "le gardé à vue", "l\'intéressé") — réponds '
+                "avec son nom EXACTEMENT comme il apparaît dans cette liste. Sinon, si le "
+                "texte nomme explicitement quelqu'un d'autre, recopie ce nom EXACTEMENT "
+                'comme il apparaît dans le texte. Réponds uniquement en JSON : '
+                '{"nom": "...", "role": "..."}. Si tu ne peux déterminer la personne avec '
+                'certitude ni par la liste ni par le texte, réponds {"nom": null, "role": null}.'
+            ),
+            prompt=texte_piece[:4000],
+            modele=config.modele_classification,
+        )
+        compteur["tokens_in"] += reponse.tokens_in
+        compteur["tokens_out"] += reponse.tokens_out
+        data = json.loads(reponse.texte)
+        nom, role = data.get("nom"), data.get("role")
+        if not nom or role not in ROLES_VALIDES:
+            return None
+
+        noms_connus = {n.lower(): n for n, _ in personnes_connues}
+        if nom.lower() in noms_connus:
+            return noms_connus[nom.lower()], role
+        if nom.lower() in texte_piece.lower():
+            return nom, role
+
+        console.print(
+            f"  [classify] identification par le modèle rejetée : {nom!r} ni retrouvé "
+            "littéralement dans la pièce, ni parmi les personnes déjà identifiées."
+        )
+        return None
+    except ErreurModeOffline:
+        raise
+    except Exception as exc:  # noqa: BLE001 — dégrade en None, jamais une exception qui casse le run
+        console.print(f"  [classify] échec de l'identification de personne par le modèle ({exc}).")
+        return None
+
+
+def identifier_personne_principale(
+    db: sqlite3.Connection,
+    config: Config,
+    type_piece: str,
+    texte_complet: str,
+    console: Console,
+    compteur: dict[str, int],
+) -> tuple[int | None, str]:
+    """Point d'entrée unique pour déterminer à qui appartient une pièce,
+    calculé une seule fois pendant la classification et réutilisé partout
+    ensuite (chrono, déclarations) — pour ne jamais recalculer, au risque
+    d'obtenir des réponses différentes selon l'étape, et pour ne jamais
+    payer deux fois le même appel au modèle. Ordre de priorité : le tag de
+    rôle explicite en en-tête (fiable), puis le premier nom mentionné pour
+    les pièces où c'est sans ambiguïté, puis le modèle en dernier recours."""
+    personne_id = identifier_declarant(db, texte_complet)
+    if personne_id is not None:
+        return personne_id, "tag_entete"
+
+    if type_piece in TYPES_PERSONNE_PAR_PREMIERE_MENTION:
+        personne_id = _premiere_mention_ou_creation(db, texte_complet, "mis_en_cause")
+        if personne_id is not None:
+            return personne_id, "premiere_mention"
+
+    if type_piece in TYPES_AUDITION and not config.offline:
+        personnes_connues = [(r["nom"], r["role"]) for r in db.execute("SELECT DISTINCT nom, role FROM personnes")]
+        resultat = identifier_personne_via_llm(config, texte_complet, personnes_connues, console, compteur)
+        if resultat is not None:
+            nom, role = resultat
+            personne_id = _upsert_personne(db, nom, role)
+            return personne_id, "llm"
+
+    return None, "non_identifie"
+
+
 def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, console: Console) -> None:
     debut = datetime.now(timezone.utc)
 
@@ -277,7 +439,10 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
         cote = groupe["pages"][0]["cote_detectee"]
         personnes_citees = _detecter_personnes_citees(texte_complet)
 
-        db.execute(
+        for nom, role in _detecter_personnes_avec_role(texte_complet):
+            _upsert_personne(db, nom, role)
+
+        cur = db.execute(
             """INSERT INTO pieces
                (type, page_debut, page_fin, date_apparente, service_redacteur,
                 personnes_citees_json, cote, confiance, statut_revision)
@@ -295,8 +460,11 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
             ),
         )
 
-        for nom, role in _detecter_personnes_avec_role(texte_complet):
-            _upsert_personne(db, nom, role)
+        personne_id, methode = identifier_personne_principale(db, config, type_, texte_complet, console, compteur)
+        db.execute(
+            "UPDATE pieces SET personne_principale_id = ?, methode_personne_principale = ? WHERE id = ?",
+            (personne_id, methode, cur.lastrowid),
+        )
 
     db.commit()
 
