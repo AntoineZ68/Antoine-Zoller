@@ -25,6 +25,7 @@ from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
+from .surlignage import construire_pdf_surligne
 from .verification import verifier_citation
 
 RE_NE_LE = re.compile(r"né(?:e)?\s+le\s+(\d{2}/\d{2}/\d{4})\s+à\s+([A-ZÀ-Ÿ][\wà-ÿ'\-]+)")
@@ -266,7 +267,7 @@ def _construire_signalements(db: sqlite3.Connection, chemin: Path) -> None:
     doc.save(chemin)
 
 
-def _construire_controle(db: sqlite3.Connection, chemin: Path) -> None:
+def _construire_controle(db: sqlite3.Connection, chemin: Path, stats_surlignage: dict[str, int]) -> None:
     nb_signalements = len(detecter_signalements(db))
     nb_pages = db.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
     nb_ocr = db.execute("SELECT COUNT(*) FROM pages WHERE ocr_applique = 1").fetchone()[0]
@@ -310,7 +311,15 @@ def _construire_controle(db: sqlite3.Connection, chemin: Path) -> None:
     lignes.append(f"- Durée totale de traitement (somme des étapes) : {duree_totale_s:.1f} s")
     lignes.append(f"- Tokens modèle consommés : {tokens_in_total} entrée / {tokens_out_total} sortie")
     lignes.append(f"- Coût estimé des appels modèle : {cout_total:.4f} $")
-    lignes.append(f"- Signalements de conformité procédurale : {nb_signalements} (voir 06_signalements_procedure.docx)\n")
+    lignes.append(f"- Signalements de conformité procédurale : {nb_signalements} (voir 06_signalements_procedure.docx)")
+    if "erreur" in stats_surlignage:
+        lignes.append(f"- Dossier surligné : ÉCHEC ({stats_surlignage['erreur']})\n")
+    else:
+        lignes.append(
+            f"- Dossier surligné (00_dossier_surligne.pdf) : {stats_surlignage['surlignes']} passage(s) "
+            f"surligné(s), {stats_surlignage['introuvables']} introuvable(s) dans la mise en page PDF "
+            "(légende : jaune = chronologie de procédure, bleu = déclarations, vert = chronologie des faits)\n"
+        )
 
     lignes.append("## Durée et coût par étape\n")
     lignes.append("| Étape | Durée | Tokens entrée | Tokens sortie | Coût |")
@@ -363,11 +372,24 @@ def construire_livrables(db: sqlite3.Connection, affaire_dir: Path, config: Conf
         console.print("  [build] aucune pièce en base — lance d'abord `depouille classify`.")
         return
 
+    try:
+        resultat_surlignage = construire_pdf_surligne(db, affaire_dir, dossier_out / "00_dossier_surligne.pdf")
+        console.print(
+            f"  [build] dossier surligné : {resultat_surlignage['surlignes']} passage(s) surligné(s), "
+            f"{resultat_surlignage['introuvables']} introuvable(s) dans la mise en page PDF"
+        )
+    except (FileNotFoundError, OSError) as exc:
+        console.print(
+            f"  [build] échec du surlignage ({exc}) — fichier(s) source introuvable(s). "
+            "Les autres livrables sont générés normalement."
+        )
+        resultat_surlignage = {"surlignes": 0, "introuvables": 0, "erreur": str(exc)}
+
     _construire_chronologie_procedure(db, dossier_out / "02_chronologie_procedure.docx")
     _construire_chronologie_faits(db, dossier_out / "03_chronologie_faits.docx")
     _construire_declarations(db, dossier_out / "04_declarations.xlsx")
     _construire_personnalite(db, dossier_out / "05_personnalite.docx", config.seuil_flou_ocr)
     _construire_signalements(db, dossier_out / "06_signalements_procedure.docx")
-    _construire_controle(db, dossier_out / "99_controle.md")
+    _construire_controle(db, dossier_out / "99_controle.md", resultat_surlignage)
 
     console.print(f"  [build] livrables générés dans {dossier_out}")

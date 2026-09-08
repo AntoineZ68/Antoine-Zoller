@@ -18,6 +18,18 @@ from .conftest import DossierTraite
 CITATION_INVENTEE = "cette phrase n'existe nulle part dans le dossier fictif"
 
 
+def _preparer_affaire_copie(dossier_traite: DossierTraite, tmp_path, nom: str):
+    """Une affaire copiée pour un test isolé a besoin des mêmes fichiers
+    source/OCR que la fixture partagée pour que le surlignage du PDF
+    fonctionne — pas seulement de la base SQLite."""
+    affaire_copie = tmp_path / nom
+    affaire_copie.mkdir()
+    (affaire_copie / "source").symlink_to(dossier_traite.affaire_dir / "source")
+    if (dossier_traite.affaire_dir / "work").exists():
+        (affaire_copie / "work").symlink_to(dossier_traite.affaire_dir / "work")
+    return affaire_copie
+
+
 def test_citation_rejetee_absente_des_livrables_mais_dans_le_controle(
     dossier_traite: DossierTraite, tmp_path
 ) -> None:
@@ -36,8 +48,7 @@ def test_citation_rejetee_absente_des_livrables_mais_dans_le_controle(
     resume = verifier_table(db, "declarations", dossier_traite.config.seuil_flou_ocr)
     assert resume["rejetee"] >= 1
 
-    affaire_copie = tmp_path / "affaire_copie"
-    affaire_copie.mkdir()
+    affaire_copie = _preparer_affaire_copie(dossier_traite, tmp_path, "affaire_copie")
     construire_livrables(db, affaire_copie, dossier_traite.config, console=Console(quiet=True))
 
     wb = load_workbook(affaire_copie / "out" / "04_declarations.xlsx")
@@ -50,15 +61,16 @@ def test_citation_rejetee_absente_des_livrables_mais_dans_le_controle(
 
 
 def test_tous_les_livrables_sont_generes(dossier_traite: DossierTraite, tmp_path) -> None:
-    affaire_copie = tmp_path / "affaire_livrables"
-    affaire_copie.mkdir()
+    affaire_copie = _preparer_affaire_copie(dossier_traite, tmp_path, "affaire_livrables")
     construire_livrables(dossier_traite.db, affaire_copie, dossier_traite.config, console=Console(quiet=True))
 
     for nom in (
+        "00_dossier_surligne.pdf",
         "02_chronologie_procedure.docx",
         "03_chronologie_faits.docx",
         "04_declarations.xlsx",
         "05_personnalite.docx",
+        "06_signalements_procedure.docx",
         "99_controle.md",
     ):
         chemin = affaire_copie / "out" / nom
@@ -71,8 +83,7 @@ def test_personnalite_ne_contient_que_des_elements_sources(dossier_traite: Dossi
     qui se retrouve littéralement sur la page annoncée."""
     from docx import Document
 
-    affaire_copie = tmp_path / "affaire_personnalite"
-    affaire_copie.mkdir()
+    affaire_copie = _preparer_affaire_copie(dossier_traite, tmp_path, "affaire_personnalite")
     construire_livrables(dossier_traite.db, affaire_copie, dossier_traite.config, console=Console(quiet=True))
 
     doc = Document(affaire_copie / "out" / "05_personnalite.docx")
