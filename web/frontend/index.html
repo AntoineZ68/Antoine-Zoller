@@ -163,8 +163,10 @@
           <input type="text" id="champ-nom" required placeholder="ex : Dupont Jean" />
           <label for="champ-reference">Référence (optionnel)</label>
           <input type="text" id="champ-reference" placeholder="ex : CRIM-2026-0142" />
-          <label for="champ-fichier">Fichier PDF</label>
-          <input type="file" id="champ-fichier" accept="application/pdf" required />
+          <label for="champ-fichier">Fichier(s) PDF</label>
+          <input type="file" id="champ-fichier" accept="application/pdf" multiple required />
+          <p class="vide" style="margin: 6px 0 0;">Un dossier pénal arrive souvent en plusieurs PDF distincts —
+          sélectionne-les tous d'un coup (Ctrl ou Maj + clic).</p>
           <button type="submit" id="bouton-envoi">Envoyer</button>
           <div class="erreur" id="erreur-envoi" hidden></div>
         </form>
@@ -443,7 +445,9 @@ formEnvoi.addEventListener("submit", async (evenement) => {
     const donnees = new FormData();
     donnees.append("nom", document.getElementById("champ-nom").value);
     donnees.append("reference", document.getElementById("champ-reference").value);
-    donnees.append("fichier", document.getElementById("champ-fichier").files[0]);
+    for (const f of document.getElementById("champ-fichier").files) {
+      donnees.append("fichiers", f);
+    }
     const dossierCree = await appelApi("/api/dossiers", { method: "POST", body: donnees });
     formEnvoi.reset();
     await rafraichirListe();

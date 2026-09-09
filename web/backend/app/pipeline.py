@@ -114,7 +114,7 @@ def _televerser_resultats(supabase, dossier_id: str, affaire_dir: Path) -> None:
     _maj_dossier(supabase, dossier_id, resultat_db_path=f"{dossier_id}/depouille.db")
 
 
-def traiter_dossier(dossier_id: str, chemin_pdf_local: Path, offline: bool = False) -> None:
+def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bool = False) -> None:
     """Point d'entrée appelé en tâche de fond après l'upload d'un dossier.
 
     Utilise le client service_role (accès élevé) : cette fonction tourne
@@ -131,7 +131,7 @@ def traiter_dossier(dossier_id: str, chemin_pdf_local: Path, offline: bool = Fal
         db = ouvrir_db(affaire_dir / "depouille.db")
 
         etapes_pipeline = (
-            ("ingest", lambda: lancer_ingestion(db, [chemin_pdf_local], affaire_dir, force=False, console=console)),
+            ("ingest", lambda: lancer_ingestion(db, chemins_pdf_locaux, affaire_dir, force=False, console=console)),
             ("classify", lambda: lancer_classification(db, config, force=False, console=console)),
             ("index", lambda: construire_index(db, affaire_dir, console=console)),
             ("chrono", lambda: lancer_chrono(db, config, force=False, console=console)),

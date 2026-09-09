@@ -65,9 +65,9 @@ def _dossier_ou_404(supabase: Client, dossier_id: str) -> dict:
     return resultat.data[0]
 
 
-def _traiter_puis_nettoyer(dossier_id: str, chemin_pdf: Path, repertoire: Path, offline: bool) -> None:
+def _traiter_puis_nettoyer(dossier_id: str, chemins_pdf: list[Path], repertoire: Path, offline: bool) -> None:
     try:
-        traiter_dossier(dossier_id, chemin_pdf, offline=offline)
+        traiter_dossier(dossier_id, chemins_pdf, offline=offline)
     finally:
         shutil.rmtree(repertoire, ignore_errors=True)
 
@@ -77,10 +77,25 @@ def sante() -> dict:
     return {"ok": True}
 
 
+def _nom_disponible(repertoire: Path, nom_souhaite: str) -> str:
+    """Un vrai dossier pénal arrive souvent en plusieurs PDF distincts, mais
+    rien n'empêche deux fichiers de porter le même nom (deux exports "PV.pdf"
+    par exemple) : on désambiguïse plutôt que d'écraser silencieusement l'un
+    des deux en local."""
+    chemin = repertoire / nom_souhaite
+    if not chemin.exists():
+        return nom_souhaite
+    tige, suffixe = Path(nom_souhaite).stem, Path(nom_souhaite).suffix
+    compteur = 2
+    while (repertoire / f"{tige}_{compteur}{suffixe}").exists():
+        compteur += 1
+    return f"{tige}_{compteur}{suffixe}"
+
+
 @app.post("/api/dossiers", response_model=schemas.DossierResume, status_code=201)
 async def creer_dossier(
     background_tasks: BackgroundTasks,
-    fichier: UploadFile = File(...),
+    fichiers: list[UploadFile] = File(...),
     nom: str = Form(...),
     reference: str | None = Form(None),
     mode_offline: bool = Form(False),
@@ -88,8 +103,11 @@ async def creer_dossier(
 ) -> dict:
     supabase, utilisateur_id = contexte
 
-    if fichier.content_type not in ("application/pdf", "application/x-pdf"):
-        raise HTTPException(status_code=400, detail="Seuls les fichiers PDF sont acceptés.")
+    if not fichiers:
+        raise HTTPException(status_code=400, detail="Au moins un fichier PDF est requis.")
+    for fichier in fichiers:
+        if fichier.content_type not in ("application/pdf", "application/x-pdf"):
+            raise HTTPException(status_code=400, detail=f"'{fichier.filename}' n'est pas un PDF.")
 
     resultat = supabase.table("dossiers").insert(
         {"nom": nom, "reference": reference, "owner_id": utilisateur_id}
@@ -98,18 +116,24 @@ async def creer_dossier(
     dossier_id = dossier["id"]
 
     repertoire_local = Path(tempfile.mkdtemp(prefix=f"depouille_upload_{dossier_id}_"))
-    chemin_local = repertoire_local / (fichier.filename or "dossier.pdf")
-    with chemin_local.open("wb") as f:
-        shutil.copyfileobj(fichier.file, f)
-    await fichier.close()
+    chemins_locaux: list[Path] = []
+    bucket_source = client_service().storage.from_("dossiers-source")
+    for fichier in fichiers:
+        nom_fichier = _nom_disponible(repertoire_local, fichier.filename or "dossier.pdf")
+        chemin_local = repertoire_local / nom_fichier
+        with chemin_local.open("wb") as f:
+            shutil.copyfileobj(fichier.file, f)
+        await fichier.close()
+        chemins_locaux.append(chemin_local)
 
-    chemin_storage = f"{utilisateur_id}/{dossier_id}/{chemin_local.name}"
-    client_service().storage.from_("dossiers-source").upload(
-        chemin_storage, str(chemin_local), {"upsert": "true"}
-    )
-    supabase.table("dossiers").update({"fichier_source_path": chemin_storage}).eq("id", dossier_id).execute()
+        chemin_storage = f"{utilisateur_id}/{dossier_id}/{nom_fichier}"
+        bucket_source.upload(chemin_storage, str(chemin_local), {"upsert": "true", "content-type": "application/pdf"})
 
-    background_tasks.add_task(_traiter_puis_nettoyer, dossier_id, chemin_local, repertoire_local, mode_offline)
+    supabase.table("dossiers").update(
+        {"fichier_source_path": f"{utilisateur_id}/{dossier_id}/"}
+    ).eq("id", dossier_id).execute()
+
+    background_tasks.add_task(_traiter_puis_nettoyer, dossier_id, chemins_locaux, repertoire_local, mode_offline)
 
     return dossier
 
