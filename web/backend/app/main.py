@@ -148,8 +148,15 @@ def telecharger_livrable(
         raise HTTPException(status_code=404, detail="Livrable inconnu.")
 
     chemin = f"{dossier_id}/out/{nom_fichier}"
-    reponse = client_service().storage.from_("dossiers-resultats").create_signed_url(chemin, 300)
-    url = reponse.get("signedURL") or reponse.get("signedUrl")
+    try:
+        reponse = client_service().storage.from_("dossiers-resultats").create_signed_url(chemin, 300)
+        url = reponse.get("signedURL") or reponse.get("signedUrl")
+    except Exception:  # noqa: BLE001
+        url = None
     if not url:
-        raise HTTPException(status_code=404, detail="Livrable pas encore disponible — traitement en cours ?")
+        raise HTTPException(
+            status_code=404,
+            detail="Ce livrable n'a pas été généré pour ce dossier (le document ne contenait "
+            "probablement aucune pièce de procédure pénale reconnue).",
+        )
     return {"url": url}
