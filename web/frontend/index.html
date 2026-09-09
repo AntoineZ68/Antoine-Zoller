@@ -256,10 +256,19 @@ async function telechargerLivrable(dossierId, nomFichier, bouton) {
   const texteInitial = bouton.textContent;
   bouton.disabled = true;
   bouton.textContent = "...";
+  // Ouvrir l'onglet tout de suite, en réaction directe au clic : un navigateur
+  // bloque silencieusement window.open() s'il arrive après un await, faute de
+  // le relier au geste de l'utilisateur.
+  const nouvelOnglet = window.open("", "_blank");
   try {
     const { url } = await appelApi(`/api/dossiers/${dossierId}/livrables/${nomFichier}`);
-    window.open(url, "_blank");
+    if (nouvelOnglet) {
+      nouvelOnglet.location = url;
+    } else {
+      window.location.href = url;
+    }
   } catch (erreur) {
+    if (nouvelOnglet) nouvelOnglet.close();
     alert("Téléchargement impossible : " + erreur.message);
   } finally {
     bouton.disabled = false;
