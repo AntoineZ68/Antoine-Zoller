@@ -124,9 +124,28 @@ TYPES_PERSONNE_PAR_PREMIERE_MENTION = (
 )
 
 
+RE_SUFFIXE_METADONNEE_COLONNE = re.compile(
+    r"\s+(Feuillet\b.*|Date\s*:.*|Heure\b.*|N°\s*\S*\s*:.*)$", re.IGNORECASE
+)
+
+
+def _sans_suffixe_metadonnee(ligne: str) -> str:
+    """Certains PV disposent le titre et les repères (date, heure, feuillet)
+    sur deux colonnes ; pdfplumber, qui lit par position verticale, recolle
+    alors les deux colonnes sur une même ligne physique ("DIRECTION ... POLICE
+    JUDICIAIRE Feuillet N° 1/2"). Sans ce nettoyage, le fragment de colonne
+    de droite (casse mixte) empêche de reconnaître la ligne de gauche comme
+    un intitulé — et par ricochet, empêche de détecter le début d'une
+    nouvelle pièce."""
+    return RE_SUFFIXE_METADONNEE_COLONNE.sub("", ligne)
+
+
 def _est_titre(ligne: str) -> bool:
-    ligne = ligne.strip()
+    ligne = _sans_suffixe_metadonnee(ligne.strip()).strip()
     return bool(ligne) and len(ligne) >= 8 and bool(RE_TITRE.match(ligne))
+
+
+RE_METADONNEE_ENTETE = re.compile(r"^(N°\s|N°$|FEUILLET\b|DATE\b|HEURE\b|PROCÉDURE\b)", re.IGNORECASE)
 
 
 def _entete_etendu(texte_page: str) -> str:
@@ -136,16 +155,26 @@ def _entete_etendu(texte_page: str) -> str:
     reste du corps du texte est exclu, pour qu'une pièce ne soit jamais
     classée à tort à cause d'un mot-clé mentionné en passant dans une
     phrase (ex. un interrogatoire qui évoque "le réquisitoire introductif"
-    en référence à une autre pièce du dossier)."""
+    en référence à une autre pièce du dossier).
+
+    Certains PV placent une ligne de référence ("N° Procédure : ...",
+    "Feuillet N° 1/2", "Date : ...") AVANT le titre plutôt qu'après — la
+    casse mixte de ces lignes les exclut de la capture, mais elles ne
+    doivent pas non plus arrêter la lecture avant d'atteindre le vrai
+    titre. On les saute (nombre borné, jamais le corps du texte)."""
     lignes_entete = []
+    lignes_metadonnees_sautees = 0
     for ligne in texte_page.splitlines():
         ligne_nettoyee = ligne.strip()
         if not ligne_nettoyee:
             continue
         if _est_titre(ligne_nettoyee):
             lignes_entete.append(ligne_nettoyee)
-        else:
-            break
+            continue
+        if lignes_metadonnees_sautees < 6 and RE_METADONNEE_ENTETE.match(ligne_nettoyee):
+            lignes_metadonnees_sautees += 1
+            continue
+        break
     return " ".join(lignes_entete)
 
 

@@ -79,11 +79,27 @@ def _personne_par_nom(db: sqlite3.Connection, nom_libre: str) -> int | None:
     jamais en créant une nouvelle entrée : un fait narratif ne doit pas
     faire apparaître une personne qui n'a pas été identifiée par un canal
     vérifié (tag d'en-tête, première mention fiable, ou identification LLM
-    déjà vérifiée pendant la classification)."""
+    déjà vérifiée pendant la classification).
+
+    Comparaison par ensemble de mots, pas par ordre exact : un PV écrit
+    "BENALI Karim" (NOM Prénom, convention française courante) tandis que
+    l'appel séparé qui extrait les faits narratifs reformule spontanément
+    en "Karim Benali" — même personne, ordre différent. Le rapprochement
+    reste déterministe (mêmes mots, aucun jugement sémantique) et ne
+    matche jamais qu'une personne déjà connue."""
     if not nom_libre or not nom_libre.strip():
         return None
-    row = db.execute("SELECT id FROM personnes WHERE lower(nom) = lower(?)", (nom_libre.strip(),)).fetchone()
-    return row["id"] if row else None
+    nom_libre = nom_libre.strip()
+    row = db.execute("SELECT id FROM personnes WHERE lower(nom) = lower(?)", (nom_libre,)).fetchone()
+    if row:
+        return row["id"]
+    mots_recherches = frozenset(nom_libre.lower().split())
+    if len(mots_recherches) < 2:
+        return None
+    for ligne in db.execute("SELECT id, nom FROM personnes"):
+        if frozenset(ligne["nom"].lower().split()) == mots_recherches:
+            return ligne["id"]
+    return None
 
 
 def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[int, re.Match, str] | None:

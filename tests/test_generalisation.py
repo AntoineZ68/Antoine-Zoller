@@ -5,8 +5,10 @@ correspond à un bug réellement observé, pas à une anticipation théorique.""
 
 from __future__ import annotations
 
-from depouille.chrono import RE_RETROACTIF
-from depouille.classify import _classifier_type_deterministe, _entete_etendu
+import sqlite3
+
+from depouille.chrono import RE_RETROACTIF, _personne_par_nom
+from depouille.classify import _classifier_type_deterministe, _detecter_pieces_par_page, _entete_etendu, _est_titre
 from depouille.regex_patterns import (
     detecter_cote,
     detecter_date_acte,
@@ -77,6 +79,82 @@ def test_classification_ne_regarde_que_lentete_pas_le_corps() -> None:
     assert "REQUISITOIRE" not in entete.upper()
     type_, confiance = _classifier_type_deterministe(entete)
     assert type_ == "PV d'interrogatoire de première comparution"
+
+
+def test_entete_titre_apres_des_lignes_de_reference() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur : certains PV
+    placent "N° Procédure", "Feuillet N° 1/2", "Date :", "Heure de début :"
+    (casse mixte) AVANT le titre plutôt qu'après. Sans tolérance pour ces
+    lignes de référence, la lecture de l'en-tête s'arrêtait avant d'atteindre
+    "AUDITION", classant la pièce en "Non identifié" — et par ricochet,
+    aucune déclaration Q/R n'était jamais extraite de cette pièce."""
+    texte_page = (
+        "DIRECTION CENTRALE DE LA POLICE JUDICIAIRE\n"
+        "BRIGADE DES STUPÉFIANTS - LYON\n"
+        "N° Procédure : 2026-LY-4521\n"
+        "Feuillet N° 1/2\n"
+        "Date : 02/09/2026\n"
+        "Heure de début : 14h30\n"
+        "PROCÈS-VERBAL D'AUDITION (GARDE À VUE)\n"
+        "L'an deux mille vingt-six, le deux septembre à quatorze heures trente.\n"
+    )
+    entete = _entete_etendu(texte_page)
+    assert "AUDITION" in entete.upper()
+    type_, confiance = _classifier_type_deterministe(entete)
+    assert type_ == "PV d'audition"
+    assert confiance == 1.0
+
+
+def test_entete_titre_pollue_par_colonne_voisine() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur : certains PV
+    mettent le titre et les repères (feuillet, date, heure) sur deux
+    colonnes ; pdfplumber, qui lit par position verticale, recolle les
+    deux colonnes sur une même ligne physique
+    ("DIRECTION ... POLICE JUDICIAIRE Feuillet N° 1/2"). Le fragment de
+    droite, en casse mixte, empêchait de reconnaître la ligne de gauche
+    comme un intitulé — et donc de détecter le début d'une nouvelle pièce,
+    fusionnant deux PV en un seul."""
+    assert _est_titre("DIRECTION CENTRALE DE LA POLICE JUDICIAIRE Feuillet N° 1/2")
+    assert _est_titre("BRIGADE DES STUPÉFIANTS - LYON Date : 02/09/2026")
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    db.executemany(
+        "INSERT INTO pages VALUES (?, ?)",
+        [
+            (1, "PROCÈS-VERBAL DE SAISINE\nUn premier acte.\n"),
+            (2, "Suite du premier acte, sans nouvel intitulé.\n"),
+            (
+                3,
+                "DIRECTION CENTRALE DE LA POLICE JUDICIAIRE Feuillet N° 1/2\n"
+                "BRIGADE DES STUPÉFIANTS - LYON Date : 02/09/2026\n"
+                "N° Procédure : 2026-LY-4521 Heure de début : 14h30\n"
+                "PROCÈS-VERBAL D'AUDITION (GARDE À VUE)\n"
+                "L'an deux mille vingt-six...\n",
+            ),
+        ],
+    )
+    pages = db.execute("SELECT * FROM pages ORDER BY numero_global").fetchall()
+    groupes = _detecter_pieces_par_page(pages)
+    assert len(groupes) == 2
+    assert groupes[1]["page_debut"] == 3
+
+
+def test_personne_par_nom_ignore_lordre_nom_prenom() -> None:
+    """Un PV écrit "BENALI Karim" (NOM Prénom) ; l'appel séparé qui extrait
+    les faits narratifs reformule spontanément en "Karim Benali" — même
+    personne, ordre différent. Le rapprochement doit fonctionner sans
+    jamais créer de nouvelle personne ni matcher un nom sans rapport."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE personnes (id INTEGER PRIMARY KEY, nom TEXT, role TEXT)")
+    db.execute("INSERT INTO personnes (nom, role) VALUES ('BENALI Karim', 'mis_en_cause')")
+
+    assert _personne_par_nom(db, "Karim Benali") == 1
+    assert _personne_par_nom(db, "BENALI Karim") == 1
+    assert _personne_par_nom(db, "Karim Dupont") is None
+    assert _personne_par_nom(db, "") is None
 
 
 def test_retroactivite_garde_a_vue_detectee() -> None:
