@@ -1,0 +1,10 @@
+.git
+.pytest_cache
+__pycache__
+*.pyc
+tests
+PLAN.md
+README.md
+config.example.toml
+affaires
+web/backend/.env
