@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dépouille — Pilote</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --fond: #0f1521;
+    --carte: #171f2e;
+    --bordure: #2a3547;
+    --texte: #e7ebf1;
+    --texte-att: #8b96a8;
+    --accent: #c9a15a;
+    --erreur: #d9695f;
+    --succes: #5fae7d;
+    --encours: #5b8fd9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--fond);
+    color: var(--texte);
+    font-family: Georgia, 'Times New Roman', serif;
+    line-height: 1.5;
+  }
+  header {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid var(--bordure);
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: normal; letter-spacing: 0.02em; }
+  header p { margin: 4px 0 0; color: var(--texte-att); font-size: 14px; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px; }
+  .carte {
+    background: var(--carte);
+    border: 1px solid var(--bordure);
+    border-radius: 6px;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+  .carte h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
+  label { display: block; font-size: 13px; color: var(--texte-att); margin: 12px 0 4px; }
+  input[type=text], input[type=email], input[type=password] {
+    width: 100%; padding: 9px 10px; background: var(--fond); border: 1px solid var(--bordure);
+    border-radius: 4px; color: var(--texte); font-family: inherit; font-size: 14px;
+  }
+  input[type=file] { color: var(--texte-att); font-size: 13px; margin-top: 4px; }
+  button {
+    font-family: inherit; font-size: 14px; padding: 9px 18px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); cursor: pointer; margin-top: 16px;
+  }
+  button:hover { background: rgba(201,161,90,0.12); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.lien { border: none; padding: 0; margin: 0; text-decoration: underline; font-size: 13px; }
+  .erreur { color: var(--erreur); font-size: 13px; margin-top: 10px; }
+  .bascule { font-size: 13px; color: var(--texte-att); margin-top: 14px; }
+  .ligne-dossier { border-top: 1px solid var(--bordure); padding: 14px 0; }
+  .ligne-dossier:first-child { border-top: none; padding-top: 0; }
+  .entete-dossier { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .nom-dossier { font-size: 15px; }
+  .ref-dossier { color: var(--texte-att); font-size: 13px; }
+  .badge {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .badge-en_attente { background: rgba(139,150,168,0.18); color: var(--texte-att); }
+  .badge-en_cours { background: rgba(91,143,217,0.18); color: var(--encours); }
+  .badge-termine { background: rgba(95,174,125,0.18); color: var(--succes); }
+  .badge-erreur { background: rgba(217,105,95,0.18); color: var(--erreur); }
+  .etape { font-size: 13px; color: var(--texte-att); margin-top: 4px; }
+  .livrables { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .livrables button { margin-top: 0; padding: 5px 10px; font-size: 12px; }
+  .vide { color: var(--texte-att); font-size: 13px; }
+  footer { max-width: 760px; margin: 0 auto; padding: 0 24px 40px; color: var(--texte-att); font-size: 12px; }
+  #entete-utilisateur { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #entete-utilisateur span { font-size: 13px; color: var(--texte-att); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Dépouille — Pilote</h1>
+  <p>Envoi et suivi de dossiers pénaux pour traitement automatique</p>
+</header>
+
+<main>
+  <div id="zone-auth" class="carte" hidden>
+    <h2 id="titre-auth">Connexion</h2>
+    <form id="form-auth">
+      <label for="champ-email">E-mail</label>
+      <input type="email" id="champ-email" required autocomplete="email" />
+      <label for="champ-mdp">Mot de passe</label>
+      <input type="password" id="champ-mdp" required autocomplete="current-password" minlength="6" />
+      <button type="submit" id="bouton-auth">Se connecter</button>
+      <div class="erreur" id="erreur-auth" hidden></div>
+    </form>
+    <div class="bascule">
+      <span id="texte-bascule">Pas encore de compte ?</span>
+      <button type="button" class="lien" id="bouton-bascule">Créer un compte</button>
+    </div>
+  </div>
+
+  <div id="zone-connecte" hidden>
+    <div id="entete-utilisateur">
+      <span id="email-utilisateur"></span>
+      <button type="button" id="bouton-deconnexion">Se déconnecter</button>
+    </div>
+
+    <div class="carte">
+      <h2>Envoyer un dossier</h2>
+      <form id="form-envoi">
+        <label for="champ-nom">Nom du dossier</label>
+        <input type="text" id="champ-nom" required placeholder="ex : Dupont Jean" />
+        <label for="champ-reference">Référence (optionnel)</label>
+        <input type="text" id="champ-reference" placeholder="ex : CRIM-2026-0142" />
+        <label for="champ-fichier">Fichier PDF</label>
+        <input type="file" id="champ-fichier" accept="application/pdf" required />
+        <button type="submit" id="bouton-envoi">Envoyer</button>
+        <div class="erreur" id="erreur-envoi" hidden></div>
+      </form>
+    </div>
+
+    <div class="carte">
+      <h2>Mes dossiers</h2>
+      <button type="button" id="bouton-actualiser" style="margin-top:0;margin-bottom:14px;">Actualiser</button>
+      <div id="liste-dossiers"><p class="vide">Aucun dossier envoyé pour l'instant.</p></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  Le serveur d'analyse est hébergé sur une offre gratuite : après une période d'inactivité,
+  la première réponse peut prendre jusqu'à 50 secondes.
+</footer>
+
+<script>
+// --- Réglages : valeurs publiques par conception (clé "anon" et adresses de service),
+// aucun secret ici. Le vrai contrôle d'accès est fait par la Row Level Security côté base
+// de données, pas par la confidentialité de ces valeurs.
+const SUPABASE_URL = "https://rwwvewdnqcfvqnntukf.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_VM042ZwEEWS8xvb9UHptDg_S6EpXiQk";
+const API_BASE = "https://antoine-zoller-hiho.onrender.com";
+
+const LIVRABLES = [
+  ["00_dossier_surligne.pdf", "PDF surligné"],
+  ["01_index.xlsx", "Index des pièces"],
+  ["02_chronologie_procedure.docx", "Chronologie de la procédure"],
+  ["03_chronologie_faits.docx", "Chronologie des faits"],
+  ["04_declarations.xlsx", "Déclarations"],
+  ["05_personnalite.docx", "Personnalité"],
+  ["06_signalements_procedure.docx", "Signalements procéduraux"],
+  ["99_controle.md", "Rapport de contrôle"],
+];
+
+const ETAPES_LABELS = {
+  ingest: "Lecture du PDF", classify: "Classification des pièces", index: "Construction de l'index",
+  chrono: "Chronologie", decl: "Déclarations", build: "Assemblage des documents",
+};
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const zoneAuth = document.getElementById("zone-auth");
+const zoneConnecte = document.getElementById("zone-connecte");
+const formAuth = document.getElementById("form-auth");
+const titreAuth = document.getElementById("titre-auth");
+const boutonAuth = document.getElementById("bouton-auth");
+const erreurAuth = document.getElementById("erreur-auth");
+const boutonBascule = document.getElementById("bouton-bascule");
+const texteBascule = document.getElementById("texte-bascule");
+let modeInscription = false;
+
+boutonBascule.addEventListener("click", () => {
+  modeInscription = !modeInscription;
+  titreAuth.textContent = modeInscription ? "Créer un compte" : "Connexion";
+  boutonAuth.textContent = modeInscription ? "Créer le compte" : "Se connecter";
+  texteBascule.textContent = modeInscription ? "Déjà un compte ?" : "Pas encore de compte ?";
+  boutonBascule.textContent = modeInscription ? "Se connecter" : "Créer un compte";
+  erreurAuth.hidden = true;
+});
+
+formAuth.addEventListener("submit", async (evenement) => {
+  evenement.preventDefault();
+  erreurAuth.hidden = true;
+  const email = document.getElementById("champ-email").value;
+  const motDePasse = document.getElementById("champ-mdp").value;
+  const { error } = modeInscription
+    ? await supabase.auth.signUp({ email, password: motDePasse })
+    : await supabase.auth.signInWithPassword({ email, password: motDePasse });
+  if (error) {
+    erreurAuth.textContent = error.message;
+    erreurAuth.hidden = false;
+    return;
+  }
+  if (modeInscription) {
+    erreurAuth.textContent = "Compte créé. Si la confirmation par e-mail est activée sur le projet, vérifie ta boîte mail avant de te connecter.";
+    erreurAuth.hidden = false;
+  }
+});
+
+document.getElementById("bouton-deconnexion").addEventListener("click", () => supabase.auth.signOut());
+
+async function jetonCourant() {
+  const { data } = await supabase.auth.getSession();
+  return data.session ? data.session.access_token : null;
+}
+
+async function appelApi(chemin, options = {}) {
+  const jeton = await jetonCourant();
+  const reponse = await fetch(API_BASE + chemin, {
+    ...options,
+    headers: { ...(options.headers || {}), Authorization: "Bearer " + jeton },
+  });
+  if (!reponse.ok) {
+    const detail = await reponse.json().catch(() => ({}));
+    throw new Error(detail.detail || ("Erreur HTTP " + reponse.status));
+  }
+  return reponse.status === 204 ? null : reponse.json();
+}
+
+const formEnvoi = document.getElementById("form-envoi");
+const boutonEnvoi = document.getElementById("bouton-envoi");
+const erreurEnvoi = document.getElementById("erreur-envoi");
+
+formEnvoi.addEventListener("submit", async (evenement) => {
+  evenement.preventDefault();
+  erreurEnvoi.hidden = true;
+  boutonEnvoi.disabled = true;
+  boutonEnvoi.textContent = "Envoi en cours...";
+  try {
+    const donnees = new FormData();
+    donnees.append("nom", document.getElementById("champ-nom").value);
+    donnees.append("reference", document.getElementById("champ-reference").value);
+    donnees.append("fichier", document.getElementById("champ-fichier").files[0]);
+    await appelApi("/api/dossiers", { method: "POST", body: donnees });
+    formEnvoi.reset();
+    await rafraichirDossiers();
+    demarrerSuiviAutomatique();
+  } catch (erreur) {
+    erreurEnvoi.textContent = erreur.message;
+    erreurEnvoi.hidden = false;
+  } finally {
+    boutonEnvoi.disabled = false;
+    boutonEnvoi.textContent = "Envoyer";
+  }
+});
+
+const listeDossiers = document.getElementById("liste-dossiers");
+
+function badge(statut) {
+  const libelles = { en_attente: "En attente", en_cours: "En cours", termine: "Terminé", erreur: "Erreur" };
+  return `<span class="badge badge-${statut}">${libelles[statut] || statut}</span>`;
+}
+
+async function telechargerLivrable(dossierId, nomFichier, bouton) {
+  const texteInitial = bouton.textContent;
+  bouton.disabled = true;
+  bouton.textContent = "...";
+  try {
+    const { url } = await appelApi(`/api/dossiers/${dossierId}/livrables/${nomFichier}`);
+    window.open(url, "_blank");
+  } catch (erreur) {
+    alert("Téléchargement impossible : " + erreur.message);
+  } finally {
+    bouton.disabled = false;
+    bouton.textContent = texteInitial;
+  }
+}
+window.telechargerLivrable = telechargerLivrable;
+
+async function rafraichirDossiers() {
+  let dossiers;
+  try {
+    dossiers = await appelApi("/api/dossiers");
+  } catch (erreur) {
+    listeDossiers.innerHTML = `<p class="erreur">${erreur.message}</p>`;
+    return null;
+  }
+  if (dossiers.length === 0) {
+    listeDossiers.innerHTML = '<p class="vide">Aucun dossier envoyé pour l\'instant.</p>';
+    return;
+  }
+  listeDossiers.innerHTML = dossiers.map((dossier) => {
+    const etape = dossier.etape_courante ? `<div class="etape">Étape en cours : ${ETAPES_LABELS[dossier.etape_courante] || dossier.etape_courante}</div>` : "";
+    const erreur = dossier.message_erreur ? `<div class="erreur">${dossier.message_erreur}</div>` : "";
+    const livrables = dossier.statut === "termine"
+      ? `<div class="livrables">${LIVRABLES.map(([nom, libelle]) =>
+          `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${libelle}</button>`
+        ).join("")}</div>`
+      : "";
+    return `
+      <div class="ligne-dossier">
+        <div class="entete-dossier">
+          <div>
+            <span class="nom-dossier">${dossier.nom}</span>
+            ${dossier.reference ? `<span class="ref-dossier"> — ${dossier.reference}</span>` : ""}
+          </div>
+          ${badge(dossier.statut)}
+        </div>
+        ${etape}${erreur}${livrables}
+      </div>`;
+  }).join("");
+  return dossiers;
+}
+
+document.getElementById("bouton-actualiser").addEventListener("click", rafraichirDossiers);
+
+// Rafraîchit tout seul pendant qu'un dossier est encore en traitement, pour que
+// la progression s'affiche sans que l'avocat ait à cliquer sans arrêt.
+let minuteurSuivi = null;
+function demarrerSuiviAutomatique() {
+  if (minuteurSuivi) return;
+  minuteurSuivi = setInterval(async () => {
+    const dossiers = await rafraichirDossiers();
+    if (dossiers && !dossiers.some((d) => d.statut === "en_attente" || d.statut === "en_cours")) {
+      clearInterval(minuteurSuivi);
+      minuteurSuivi = null;
+    }
+  }, 6000);
+}
+
+function afficherEtatConnecte(connecte) {
+  zoneAuth.hidden = connecte;
+  zoneConnecte.hidden = !connecte;
+}
+
+supabase.auth.onAuthStateChange((_evenement, session) => {
+  afficherEtatConnecte(!!session);
+  if (session) {
+    document.getElementById("email-utilisateur").textContent = session.user.email;
+    rafraichirDossiers();
+    demarrerSuiviAutomatique();
+  } else if (minuteurSuivi) {
+    clearInterval(minuteurSuivi);
+    minuteurSuivi = null;
+  }
+});
+
+supabase.auth.getSession().then(({ data }) => afficherEtatConnecte(!!data.session));
+</script>
+
+</body>
+</html>
