@@ -158,7 +158,7 @@ const ETAPES_LABELS = {
   chrono: "Chronologie", decl: "Déclarations", build: "Assemblage des documents",
 };
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const zoneAuth = document.getElementById("zone-auth");
 const zoneConnecte = document.getElementById("zone-connecte");
@@ -185,8 +185,8 @@ formAuth.addEventListener("submit", async (evenement) => {
   const email = document.getElementById("champ-email").value;
   const motDePasse = document.getElementById("champ-mdp").value;
   const { error } = modeInscription
-    ? await supabase.auth.signUp({ email, password: motDePasse })
-    : await supabase.auth.signInWithPassword({ email, password: motDePasse });
+    ? await supabaseClient.auth.signUp({ email, password: motDePasse })
+    : await supabaseClient.auth.signInWithPassword({ email, password: motDePasse });
   if (error) {
     erreurAuth.textContent = error.message;
     erreurAuth.hidden = false;
@@ -198,10 +198,10 @@ formAuth.addEventListener("submit", async (evenement) => {
   }
 });
 
-document.getElementById("bouton-deconnexion").addEventListener("click", () => supabase.auth.signOut());
+document.getElementById("bouton-deconnexion").addEventListener("click", () => supabaseClient.auth.signOut());
 
 async function jetonCourant() {
-  const { data } = await supabase.auth.getSession();
+  const { data } = await supabaseClient.auth.getSession();
   return data.session ? data.session.access_token : null;
 }
 
@@ -324,7 +324,7 @@ function afficherEtatConnecte(connecte) {
   zoneConnecte.hidden = !connecte;
 }
 
-supabase.auth.onAuthStateChange((_evenement, session) => {
+supabaseClient.auth.onAuthStateChange((_evenement, session) => {
   afficherEtatConnecte(!!session);
   if (session) {
     document.getElementById("email-utilisateur").textContent = session.user.email;
@@ -336,7 +336,7 @@ supabase.auth.onAuthStateChange((_evenement, session) => {
   }
 });
 
-supabase.auth.getSession().then(({ data }) => afficherEtatConnecte(!!data.session));
+supabaseClient.auth.getSession().then(({ data }) => afficherEtatConnecte(!!data.session));
 </script>
 
 </body>
