@@ -8,6 +8,7 @@
 <style>
   :root {
     --fond: #0f1521;
+    --fond-barre: #131a27;
     --carte: #171f2e;
     --bordure: #2a3547;
     --texte: #e7ebf1;
@@ -18,6 +19,7 @@
     --encours: #5b8fd9;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
     background: var(--fond);
@@ -25,41 +27,72 @@
     font-family: Georgia, 'Times New Roman', serif;
     line-height: 1.5;
   }
-  header {
-    padding: 28px 24px 20px;
-    border-bottom: 1px solid var(--bordure);
+  button {
+    font-family: inherit; font-size: 14px; padding: 9px 18px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); cursor: pointer;
   }
-  header h1 { margin: 0; font-size: 22px; font-weight: normal; letter-spacing: 0.02em; }
-  header p { margin: 4px 0 0; color: var(--texte-att); font-size: 14px; }
-  main { max-width: 760px; margin: 0 auto; padding: 24px; }
-  .carte {
-    background: var(--carte);
-    border: 1px solid var(--bordure);
-    border-radius: 6px;
-    padding: 22px;
-    margin-bottom: 20px;
-  }
-  .carte h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
+  button:hover { background: rgba(201,161,90,0.12); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.lien { border: none; padding: 0; margin: 0; text-decoration: underline; font-size: 13px; }
   label { display: block; font-size: 13px; color: var(--texte-att); margin: 12px 0 4px; }
   input[type=text], input[type=email], input[type=password] {
     width: 100%; padding: 9px 10px; background: var(--fond); border: 1px solid var(--bordure);
     border-radius: 4px; color: var(--texte); font-family: inherit; font-size: 14px;
   }
   input[type=file] { color: var(--texte-att); font-size: 13px; margin-top: 4px; }
-  button {
-    font-family: inherit; font-size: 14px; padding: 9px 18px; border-radius: 4px; border: 1px solid var(--accent);
-    background: transparent; color: var(--accent); cursor: pointer; margin-top: 16px;
-  }
-  button:hover { background: rgba(201,161,90,0.12); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.lien { border: none; padding: 0; margin: 0; text-decoration: underline; font-size: 13px; }
   .erreur { color: var(--erreur); font-size: 13px; margin-top: 10px; }
+  .vide { color: var(--texte-att); font-size: 13px; }
+
+  /* --- Écran de connexion (page pleine, avant d'entrer dans l'appli) --- */
+  #ecran-auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  #ecran-auth .carte { width: 100%; max-width: 380px; background: var(--carte); border: 1px solid var(--bordure);
+    border-radius: 6px; padding: 26px; }
+  #ecran-auth h1 { margin: 0 0 4px; font-size: 20px; font-weight: normal; }
+  #ecran-auth .sous-titre { margin: 0 0 20px; color: var(--texte-att); font-size: 13px; }
+  #ecran-auth h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
+  #ecran-auth button[type=submit] { width: 100%; margin-top: 16px; }
   .bascule { font-size: 13px; color: var(--texte-att); margin-top: 14px; }
-  .ligne-dossier { border-top: 1px solid var(--bordure); padding: 14px 0; }
-  .ligne-dossier:first-child { border-top: none; padding-top: 0; }
-  .entete-dossier { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .nom-dossier { font-size: 15px; }
-  .ref-dossier { color: var(--texte-att); font-size: 13px; }
+
+  /* --- Appli (après connexion) : barre latérale + zone principale --- */
+  #appli { display: none; height: 100vh; }
+  #appli.visible { display: flex; }
+  #barre-laterale {
+    width: 260px; flex-shrink: 0; background: var(--fond-barre); border-right: 1px solid var(--bordure);
+    display: flex; flex-direction: column; padding: 16px;
+  }
+  #barre-laterale h1 { font-size: 15px; font-weight: normal; margin: 4px 8px 16px; letter-spacing: 0.02em; }
+  #bouton-nouveau { width: 100%; text-align: left; margin-bottom: 14px; }
+  #liste-dossiers { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .item-dossier {
+    display: block; width: 100%; text-align: left; background: none; border: 1px solid transparent;
+    color: var(--texte); padding: 9px 10px; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 13px;
+  }
+  .item-dossier:hover { background: rgba(255,255,255,0.04); }
+  .item-dossier.selectionne { background: rgba(201,161,90,0.12); border-color: var(--bordure); }
+  .item-dossier .nom-item { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-dossier .ligne-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 3px; }
+  .item-dossier .ref-item { color: var(--texte-att); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pastille { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .pastille-en_attente { background: var(--texte-att); }
+  .pastille-en_cours { background: var(--encours); }
+  .pastille-termine { background: var(--succes); }
+  .pastille-erreur { background: var(--erreur); }
+  #pied-barre { border-top: 1px solid var(--bordure); padding-top: 12px; margin-top: 12px; }
+  #pied-barre #email-utilisateur { display: block; font-size: 12px; color: var(--texte-att); margin-bottom: 8px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pied-barre button { width: 100%; font-size: 12px; padding: 6px 10px; }
+  #avertissement-veille { font-size: 11px; color: var(--texte-att); margin-top: 10px; line-height: 1.4; }
+
+  #zone-principale { flex: 1; overflow-y: auto; padding: 32px; }
+  #zone-principale > div { max-width: 640px; margin: 0 auto; }
+
+  .carte { background: var(--carte); border: 1px solid var(--bordure); border-radius: 6px; padding: 22px; margin-bottom: 20px; }
+  .carte h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
+  #form-envoi button[type=submit] { margin-top: 16px; }
+
+  .entete-detail h2 { margin: 0; font-size: 20px; font-weight: normal; color: var(--texte); }
+  .entete-detail .ref-detail { color: var(--texte-att); font-size: 13px; margin-top: 2px; }
+  .entete-detail { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
   .badge {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 3px;
     white-space: nowrap;
@@ -68,24 +101,29 @@
   .badge-en_cours { background: rgba(91,143,217,0.18); color: var(--encours); }
   .badge-termine { background: rgba(95,174,125,0.18); color: var(--succes); }
   .badge-erreur { background: rgba(217,105,95,0.18); color: var(--erreur); }
-  .etape { font-size: 13px; color: var(--texte-att); margin-top: 4px; }
-  .livrables { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
-  .livrables button { margin-top: 0; padding: 5px 10px; font-size: 12px; }
-  .vide { color: var(--texte-att); font-size: 13px; }
-  footer { max-width: 760px; margin: 0 auto; padding: 0 24px 40px; color: var(--texte-att); font-size: 12px; }
-  #entete-utilisateur { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-  #entete-utilisateur span { font-size: 13px; color: var(--texte-att); }
+
+  .infos-rapides { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; color: var(--texte-att); margin-bottom: 22px; }
+  .infos-rapides strong { color: var(--texte); font-weight: normal; }
+
+  .liste-etapes { list-style: none; margin: 0; padding: 0; }
+  .liste-etapes li { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 14px; }
+  .puce-etape { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; border: 1px solid var(--bordure); color: var(--texte-att); }
+  .puce-etape.fait { background: var(--succes); border-color: var(--succes); color: #0f1521; }
+  .puce-etape.encours { border-color: var(--encours); color: var(--encours); }
+  .puce-etape.erreur { background: var(--erreur); border-color: var(--erreur); color: #0f1521; }
+  .liste-etapes li.a-venir { color: var(--texte-att); }
+
+  .grille-livrables { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .grille-livrables button { width: 100%; text-align: left; padding: 12px 14px; }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Dépouille — Pilote</h1>
-  <p>Envoi et suivi de dossiers pénaux pour traitement automatique</p>
-</header>
-
-<main>
-  <div id="zone-auth" class="carte" hidden>
+<div id="ecran-auth">
+  <div class="carte">
+    <h1>Dépouille — Pilote</h1>
+    <p class="sous-titre">Envoi et suivi de dossiers pénaux pour traitement automatique</p>
     <h2 id="titre-auth">Connexion</h2>
     <form id="form-auth">
       <label for="champ-email">E-mail</label>
@@ -100,39 +138,46 @@
       <button type="button" class="lien" id="bouton-bascule">Créer un compte</button>
     </div>
   </div>
+</div>
 
-  <div id="zone-connecte" hidden>
-    <div id="entete-utilisateur">
+<div id="appli">
+  <div id="barre-laterale">
+    <h1>Dépouille</h1>
+    <button type="button" id="bouton-nouveau">+ Nouveau dossier</button>
+    <div id="liste-dossiers"><p class="vide">Aucun dossier pour l'instant.</p></div>
+    <div id="pied-barre">
       <span id="email-utilisateur"></span>
       <button type="button" id="bouton-deconnexion">Se déconnecter</button>
-    </div>
-
-    <div class="carte">
-      <h2>Envoyer un dossier</h2>
-      <form id="form-envoi">
-        <label for="champ-nom">Nom du dossier</label>
-        <input type="text" id="champ-nom" required placeholder="ex : Dupont Jean" />
-        <label for="champ-reference">Référence (optionnel)</label>
-        <input type="text" id="champ-reference" placeholder="ex : CRIM-2026-0142" />
-        <label for="champ-fichier">Fichier PDF</label>
-        <input type="file" id="champ-fichier" accept="application/pdf" required />
-        <button type="submit" id="bouton-envoi">Envoyer</button>
-        <div class="erreur" id="erreur-envoi" hidden></div>
-      </form>
-    </div>
-
-    <div class="carte">
-      <h2>Mes dossiers</h2>
-      <button type="button" id="bouton-actualiser" style="margin-top:0;margin-bottom:14px;">Actualiser</button>
-      <div id="liste-dossiers"><p class="vide">Aucun dossier envoyé pour l'instant.</p></div>
+      <p id="avertissement-veille">
+        Le serveur d'analyse peut mettre jusqu'à 50 secondes à répondre après une période d'inactivité.
+      </p>
     </div>
   </div>
-</main>
 
-<footer>
-  Le serveur d'analyse est hébergé sur une offre gratuite : après une période d'inactivité,
-  la première réponse peut prendre jusqu'à 50 secondes.
-</footer>
+  <div id="zone-principale">
+    <div id="vue-nouveau" hidden>
+      <div class="carte">
+        <h2>Envoyer un dossier</h2>
+        <form id="form-envoi">
+          <label for="champ-nom">Nom du dossier</label>
+          <input type="text" id="champ-nom" required placeholder="ex : Dupont Jean" />
+          <label for="champ-reference">Référence (optionnel)</label>
+          <input type="text" id="champ-reference" placeholder="ex : CRIM-2026-0142" />
+          <label for="champ-fichier">Fichier PDF</label>
+          <input type="file" id="champ-fichier" accept="application/pdf" required />
+          <button type="submit" id="bouton-envoi">Envoyer</button>
+          <div class="erreur" id="erreur-envoi" hidden></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="vue-dossier" hidden></div>
+
+    <div id="vue-vide">
+      <p class="vide">Sélectionne un dossier dans la liste, ou clique sur "+ Nouveau dossier" pour en envoyer un.</p>
+    </div>
+  </div>
+</div>
 
 <script>
 // --- Réglages : valeurs publiques par conception (clé "anon" et adresses de service),
@@ -153,15 +198,19 @@ const LIVRABLES = [
   ["99_controle.md", "Rapport de contrôle"],
 ];
 
+const ETAPES = ["ingest", "classify", "index", "chrono", "decl", "build"];
 const ETAPES_LABELS = {
   ingest: "Lecture du PDF", classify: "Classification des pièces", index: "Construction de l'index",
   chrono: "Chronologie", decl: "Déclarations", build: "Assemblage des documents",
 };
+const LIBELLES_STATUT = { en_attente: "En attente", en_cours: "En cours", termine: "Terminé", erreur: "Erreur" };
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const zoneAuth = document.getElementById("zone-auth");
-const zoneConnecte = document.getElementById("zone-connecte");
+// --- Authentification ---
+
+const ecranAuth = document.getElementById("ecran-auth");
+const appli = document.getElementById("appli");
 const formAuth = document.getElementById("form-auth");
 const titreAuth = document.getElementById("titre-auth");
 const boutonAuth = document.getElementById("bouton-auth");
@@ -200,6 +249,13 @@ formAuth.addEventListener("submit", async (evenement) => {
 
 document.getElementById("bouton-deconnexion").addEventListener("click", () => supabaseClient.auth.signOut());
 
+function afficherEtatConnecte(connecte) {
+  ecranAuth.style.display = connecte ? "none" : "flex";
+  appli.classList.toggle("visible", connecte);
+}
+
+// --- Appel de l'API backend ---
+
 async function jetonCourant() {
   const { data } = await supabaseClient.auth.getSession();
   return data.session ? data.session.access_token : null;
@@ -216,40 +272,6 @@ async function appelApi(chemin, options = {}) {
     throw new Error(detail.detail || ("Erreur HTTP " + reponse.status));
   }
   return reponse.status === 204 ? null : reponse.json();
-}
-
-const formEnvoi = document.getElementById("form-envoi");
-const boutonEnvoi = document.getElementById("bouton-envoi");
-const erreurEnvoi = document.getElementById("erreur-envoi");
-
-formEnvoi.addEventListener("submit", async (evenement) => {
-  evenement.preventDefault();
-  erreurEnvoi.hidden = true;
-  boutonEnvoi.disabled = true;
-  boutonEnvoi.textContent = "Envoi en cours...";
-  try {
-    const donnees = new FormData();
-    donnees.append("nom", document.getElementById("champ-nom").value);
-    donnees.append("reference", document.getElementById("champ-reference").value);
-    donnees.append("fichier", document.getElementById("champ-fichier").files[0]);
-    await appelApi("/api/dossiers", { method: "POST", body: donnees });
-    formEnvoi.reset();
-    await rafraichirDossiers();
-    demarrerSuiviAutomatique();
-  } catch (erreur) {
-    erreurEnvoi.textContent = erreur.message;
-    erreurEnvoi.hidden = false;
-  } finally {
-    boutonEnvoi.disabled = false;
-    boutonEnvoi.textContent = "Envoyer";
-  }
-});
-
-const listeDossiers = document.getElementById("liste-dossiers");
-
-function badge(statut) {
-  const libelles = { en_attente: "En attente", en_cours: "En cours", termine: "Terminé", erreur: "Erreur" };
-  return `<span class="badge badge-${statut}">${libelles[statut] || statut}</span>`;
 }
 
 async function telechargerLivrable(dossierId, nomFichier, bouton) {
@@ -277,42 +299,164 @@ async function telechargerLivrable(dossierId, nomFichier, bouton) {
 }
 window.telechargerLivrable = telechargerLivrable;
 
-async function rafraichirDossiers() {
-  let dossiers;
+// --- État de l'appli : liste des dossiers (barre latérale) + dossier ouvert (zone principale) ---
+
+let dossiers = [];
+let dossierOuvertId = null;
+
+const listeDossiersEl = document.getElementById("liste-dossiers");
+const vueNouveau = document.getElementById("vue-nouveau");
+const vueDossier = document.getElementById("vue-dossier");
+const vueVide = document.getElementById("vue-vide");
+
+function afficherVue(nom) {
+  vueNouveau.hidden = nom !== "nouveau";
+  vueDossier.hidden = nom !== "dossier";
+  vueVide.hidden = nom !== "vide";
+}
+
+document.getElementById("bouton-nouveau").addEventListener("click", () => {
+  dossierOuvertId = null;
+  document.getElementById("form-envoi").reset();
+  rendreListeLaterale();
+  afficherVue("nouveau");
+});
+
+function rendreListeLaterale() {
+  if (dossiers.length === 0) {
+    listeDossiersEl.innerHTML = '<p class="vide">Aucun dossier pour l\'instant.</p>';
+    return;
+  }
+  listeDossiersEl.innerHTML = dossiers.map((d) => `
+    <button type="button" class="item-dossier ${d.id === dossierOuvertId ? 'selectionne' : ''}"
+            onclick="ouvrirDossier('${d.id}')">
+      <span class="nom-item">${d.nom}</span>
+      <span class="ligne-meta">
+        <span class="ref-item">${d.reference || ''}</span>
+        <span class="pastille pastille-${d.statut}" title="${LIBELLES_STATUT[d.statut] || d.statut}"></span>
+      </span>
+    </button>
+  `).join("");
+}
+
+function rendreDetailDossier(dossier) {
+  const badge = `<span class="badge badge-${dossier.statut}">${LIBELLES_STATUT[dossier.statut] || dossier.statut}</span>`;
+  const cree = new Date(dossier.cree_le).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
+
+  const infos = `
+    <div class="infos-rapides">
+      <span>Envoyé le <strong>${cree}</strong></span>
+      ${dossier.nb_pages ? `<span><strong>${dossier.nb_pages}</strong> page(s)</span>` : ""}
+    </div>`;
+
+  let corps;
+  if (dossier.statut === "erreur") {
+    corps = `<div class="carte"><p class="erreur">${dossier.message_erreur || "Une erreur est survenue pendant le traitement."}</p></div>`;
+  } else if (dossier.statut === "termine") {
+    corps = `
+      <div class="carte">
+        <h2>Résumé de l'affaire</h2>
+        <p class="vide">Résumé automatique du contenu : pas encore disponible dans cette version.
+        Consulte la chronologie et l'index ci-dessous pour le détail.</p>
+      </div>
+      <div class="carte">
+        <h2>Documents générés</h2>
+        <div class="grille-livrables">
+          ${LIVRABLES.map(([nom, libelle]) =>
+            `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${libelle}</button>`
+          ).join("")}
+        </div>
+      </div>`;
+  } else {
+    const etapesParNom = Object.fromEntries((dossier.etapes || []).map((e) => [e.etape, e]));
+    corps = `
+      <div class="carte">
+        <h2>Traitement en cours</h2>
+        <ul class="liste-etapes">
+          ${ETAPES.map((nomEtape) => {
+            const e = etapesParNom[nomEtape];
+            const statutEtape = e ? e.statut : "en_attente";
+            const classe = statutEtape === "termine" ? "fait" : statutEtape === "en_cours" ? "encours" : statutEtape === "erreur" ? "erreur" : "";
+            const puce = statutEtape === "termine" ? "✓" : statutEtape === "erreur" ? "!" : "";
+            return `<li class="${statutEtape === 'en_attente' ? 'a-venir' : ''}">
+              <span class="puce-etape ${classe}">${puce}</span> ${ETAPES_LABELS[nomEtape]}
+            </li>`;
+          }).join("")}
+        </ul>
+      </div>`;
+  }
+
+  vueDossier.innerHTML = `
+    <div class="entete-detail">
+      <div>
+        <h2>${dossier.nom}</h2>
+        ${dossier.reference ? `<div class="ref-detail">${dossier.reference}</div>` : ""}
+      </div>
+      ${badge}
+    </div>
+    ${infos}
+    ${corps}
+  `;
+}
+
+async function ouvrirDossier(id) {
+  dossierOuvertId = id;
+  rendreListeLaterale();
+  afficherVue("dossier");
+  try {
+    const dossier = await appelApi(`/api/dossiers/${id}`);
+    if (dossierOuvertId === id) rendreDetailDossier(dossier);
+  } catch (erreur) {
+    if (dossierOuvertId === id) vueDossier.innerHTML = `<p class="erreur">${erreur.message}</p>`;
+  }
+}
+window.ouvrirDossier = ouvrirDossier;
+
+async function rafraichirListe() {
   try {
     dossiers = await appelApi("/api/dossiers");
   } catch (erreur) {
-    listeDossiers.innerHTML = `<p class="erreur">${erreur.message}</p>`;
-    return null;
-  }
-  if (dossiers.length === 0) {
-    listeDossiers.innerHTML = '<p class="vide">Aucun dossier envoyé pour l\'instant.</p>';
+    listeDossiersEl.innerHTML = `<p class="erreur">${erreur.message}</p>`;
     return;
   }
-  listeDossiers.innerHTML = dossiers.map((dossier) => {
-    const etape = dossier.etape_courante ? `<div class="etape">Étape en cours : ${ETAPES_LABELS[dossier.etape_courante] || dossier.etape_courante}</div>` : "";
-    const erreur = dossier.message_erreur ? `<div class="erreur">${dossier.message_erreur}</div>` : "";
-    const livrables = dossier.statut === "termine"
-      ? `<div class="livrables">${LIVRABLES.map(([nom, libelle]) =>
-          `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${libelle}</button>`
-        ).join("")}</div>`
-      : "";
-    return `
-      <div class="ligne-dossier">
-        <div class="entete-dossier">
-          <div>
-            <span class="nom-dossier">${dossier.nom}</span>
-            ${dossier.reference ? `<span class="ref-dossier"> — ${dossier.reference}</span>` : ""}
-          </div>
-          ${badge(dossier.statut)}
-        </div>
-        ${etape}${erreur}${livrables}
-      </div>`;
-  }).join("");
-  return dossiers;
+  rendreListeLaterale();
+  if (dossierOuvertId && !vueDossier.hidden) {
+    const dossier = dossiers.find((d) => d.id === dossierOuvertId);
+    if (dossier && (dossier.statut === "en_cours" || dossier.statut === "en_attente")) {
+      ouvrirDossier(dossierOuvertId); // récupère aussi le détail des étapes
+    } else if (dossier) {
+      ouvrirDossier(dossierOuvertId);
+    }
+  }
 }
 
-document.getElementById("bouton-actualiser").addEventListener("click", rafraichirDossiers);
+const formEnvoi = document.getElementById("form-envoi");
+const boutonEnvoi = document.getElementById("bouton-envoi");
+const erreurEnvoi = document.getElementById("erreur-envoi");
+
+formEnvoi.addEventListener("submit", async (evenement) => {
+  evenement.preventDefault();
+  erreurEnvoi.hidden = true;
+  boutonEnvoi.disabled = true;
+  boutonEnvoi.textContent = "Envoi en cours...";
+  try {
+    const donnees = new FormData();
+    donnees.append("nom", document.getElementById("champ-nom").value);
+    donnees.append("reference", document.getElementById("champ-reference").value);
+    donnees.append("fichier", document.getElementById("champ-fichier").files[0]);
+    const dossierCree = await appelApi("/api/dossiers", { method: "POST", body: donnees });
+    formEnvoi.reset();
+    await rafraichirListe();
+    ouvrirDossier(dossierCree.id);
+    demarrerSuiviAutomatique();
+  } catch (erreur) {
+    erreurEnvoi.textContent = erreur.message;
+    erreurEnvoi.hidden = false;
+  } finally {
+    boutonEnvoi.disabled = false;
+    boutonEnvoi.textContent = "Envoyer";
+  }
+});
 
 // Rafraîchit tout seul pendant qu'un dossier est encore en traitement, pour que
 // la progression s'affiche sans que l'avocat ait à cliquer sans arrêt.
@@ -320,25 +464,24 @@ let minuteurSuivi = null;
 function demarrerSuiviAutomatique() {
   if (minuteurSuivi) return;
   minuteurSuivi = setInterval(async () => {
-    const dossiers = await rafraichirDossiers();
-    if (dossiers && !dossiers.some((d) => d.statut === "en_attente" || d.statut === "en_cours")) {
+    await rafraichirListe();
+    if (!dossiers.some((d) => d.statut === "en_attente" || d.statut === "en_cours")) {
       clearInterval(minuteurSuivi);
       minuteurSuivi = null;
     }
   }, 6000);
 }
 
-function afficherEtatConnecte(connecte) {
-  zoneAuth.hidden = connecte;
-  zoneConnecte.hidden = !connecte;
-}
-
 supabaseClient.auth.onAuthStateChange((_evenement, session) => {
   afficherEtatConnecte(!!session);
   if (session) {
     document.getElementById("email-utilisateur").textContent = session.user.email;
-    rafraichirDossiers();
-    demarrerSuiviAutomatique();
+    afficherVue("vide");
+    rafraichirListe().then(() => {
+      if (dossiers.some((d) => d.statut === "en_attente" || d.statut === "en_cours")) {
+        demarrerSuiviAutomatique();
+      }
+    });
   } else if (minuteurSuivi) {
     clearInterval(minuteurSuivi);
     minuteurSuivi = null;
