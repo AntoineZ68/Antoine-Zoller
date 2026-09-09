@@ -26,7 +26,8 @@ from .supabase_client import client_service, client_utilisateur
 
 app = FastAPI(title="Depouille — API pilote")
 
-_origines = [o.strip() for o in os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173").split(",") if o.strip()]
+_ORIGINES_PAR_DEFAUT = "https://antoine-zoller.onrender.com,http://localhost:5173"
+_origines = [o.strip() for o in os.environ.get("FRONTEND_ORIGIN", _ORIGINES_PAR_DEFAUT).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origines,
