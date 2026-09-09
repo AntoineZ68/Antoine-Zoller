@@ -81,18 +81,35 @@ def _cout_etape(db, nom_etape: str) -> tuple[float, int, int]:
     return row["cout_usd"], row["tokens_in"], row["tokens_out"]
 
 
+_TYPES_MIME = {
+    ".pdf": "application/pdf",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".md": "text/markdown",
+    ".db": "application/octet-stream",
+}
+
+
+def _options_upload(chemin: Path) -> dict:
+    # Sans "content-type" explicite, l'API Storage retombe sur text/plain :
+    # le fichier arrive intact, mais le navigateur refuse de l'afficher en
+    # PDF/Word/Excel et affiche une erreur de chargement.
+    type_mime = _TYPES_MIME.get(chemin.suffix, "application/octet-stream")
+    return {"upsert": "true", "content-type": type_mime}
+
+
 def _televerser_resultats(supabase, dossier_id: str, affaire_dir: Path) -> None:
     bucket = supabase.storage.from_("dossiers-resultats")
 
     chemin_db = affaire_dir / "depouille.db"
     if chemin_db.exists():
-        bucket.upload(f"{dossier_id}/depouille.db", str(chemin_db), {"upsert": "true"})
+        bucket.upload(f"{dossier_id}/depouille.db", str(chemin_db), _options_upload(chemin_db))
 
     dossier_out = affaire_dir / "out"
     for nom in NOMS_LIVRABLES:
         chemin = dossier_out / nom
         if chemin.exists():
-            bucket.upload(f"{dossier_id}/out/{nom}", str(chemin), {"upsert": "true"})
+            bucket.upload(f"{dossier_id}/out/{nom}", str(chemin), _options_upload(chemin))
 
     _maj_dossier(supabase, dossier_id, resultat_db_path=f"{dossier_id}/depouille.db")
 
