@@ -24,3 +24,8 @@ dist/
 
 # Sortie du générateur de jeu d'essai (PDF binaire régénérable, pas de raison de le versionner)
 tests/fixtures/output/
+
+# Backend web : clés Supabase / LLM, jamais commitées
+web/backend/.env
+web/backend/*.local.env
+web/backend/tmp/

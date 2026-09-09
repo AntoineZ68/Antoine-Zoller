@@ -15,9 +15,10 @@ dossier, où en est son traitement. Voir le commentaire en tête de
 
 ## Mise en place de Supabase
 
-1. Créer le projet sur [supabase.com](https://supabase.com), région
-   **Frankfurt (eu-central-1)** — c'est le choix de résidence des données
-   UE qu'on avait retenu.
+1. Créer le projet sur [supabase.com](https://supabase.com), dans une
+   région UE/EEE (Frankfurt `eu-central-1`, Ireland `eu-west-1`, etc.) —
+   n'importe laquelle convient pour la résidence des données, seul le fait
+   de rester dans l'UE/EEE compte.
 2. Dans l'éditeur SQL du projet, exécuter le contenu de
    `supabase/migrations/0001_init.sql`.
 3. Dans Storage, créer deux buckets **privés** :
@@ -31,8 +32,30 @@ dossier, où en est son traitement. Voir le commentaire en tête de
 
 ## Variables d'environnement attendues
 
+Voir `.env.example` pour la liste complète (URL, clés, provider LLM,
+origine CORS du frontend).
+
+## Lancer l'API en local
+
 ```
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-ANTHROPIC_API_KEY=...        # ou MISTRAL_API_KEY selon le provider choisi
+cd web/backend
+pip install -r requirements.txt
+pip install -e ../..          # installe le moteur depouille (src/depouille)
+cp .env.example .env           # puis renseigner les vraies valeurs
+export $(grep -v '^#' .env | xargs)
+uvicorn app.main:app --reload
 ```
+
+## Routes
+
+- `POST /api/dossiers` (multipart : `fichier` PDF, `nom`, `reference`
+  optionnelle, `mode_offline` optionnel) — crée le dossier et lance le
+  traitement en tâche de fond.
+- `GET /api/dossiers` — liste les dossiers de l'utilisateur authentifié.
+- `GET /api/dossiers/{id}` — détail d'un dossier, avec l'état de chaque
+  étape du pipeline.
+- `GET /api/dossiers/{id}/livrables/{nom_fichier}` — URL signée temporaire
+  pour télécharger un livrable généré.
+
+Toutes les routes `/api/dossiers*` attendent un en-tête
+`Authorization: Bearer <jeton Supabase Auth de l'avocat>`.

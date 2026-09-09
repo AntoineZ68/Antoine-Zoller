@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+supabase>=2.4
+python-multipart>=0.0.9
+pydantic>=2.6
+
+# Le moteur depouille lui-même (src/depouille) est installé séparément :
+# pip install -e ../.. depuis ce dossier, ou -e . depuis la racine du dépôt.
