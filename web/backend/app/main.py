@@ -162,6 +162,16 @@ def detail_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_cont
     return dossier
 
 
+def _cle_tri_date(date_jj_mm_aaaa: str | None) -> tuple[int, int, int, int]:
+    """Convertit une date JJ/MM/AAAA en clé triable chronologiquement — les
+    faits sans date connue passent en dernier plutôt qu'en tête (tri sur
+    chaîne brute donnerait un ordre alphabétique dénué de sens)."""
+    if not date_jj_mm_aaaa:
+        return (1, 0, 0, 0)
+    jour, mois, annee = date_jj_mm_aaaa.split("/")
+    return (0, int(annee), int(mois), int(jour))
+
+
 @app.get("/api/dossiers/{dossier_id}/donnees", response_model=schemas.DonneesDossier)
 def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> dict:
     """Données structurées (personnes, chronologies) pour l'affichage type
@@ -188,12 +198,20 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             faits = [
                 dict(r)
                 for r in db.execute(
-                    """SELECT ef.page, ef.citation, ef.description, p.nom AS personne
-                       FROM evenements_faits ef LEFT JOIN personnes p ON p.id = ef.personne_id_source
+                    """SELECT ef.page, ef.citation, ef.description, p.nom AS personne,
+                              pi.date_apparente AS date
+                       FROM evenements_faits ef
+                       LEFT JOIN personnes p ON p.id = ef.personne_id_source
+                       JOIN pieces pi ON pi.id = ef.piece_id
                        WHERE ef.statut_verif = 'verifie'
                        ORDER BY ef.page"""
                 )
             ]
+            # Un fait hérite de la date de sa pièce (formule d'ouverture du PV,
+            # détectée de façon déterministe pendant la classification) — trier
+            # sur cette date plutôt que sur le numéro de page donne une vraie
+            # chronologie, pas seulement l'ordre d'arrivée des documents.
+            faits.sort(key=lambda f: (_cle_tri_date(f["date"]), f["page"]))
             procedure = [
                 dict(r)
                 for r in db.execute(

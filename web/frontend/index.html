@@ -382,7 +382,7 @@ function rendreBlocChronologie(donnees) {
   const rendreFait = (f) => `
     <li>
       <div class="fait-entete">
-        <span class="fait-page">Page ${f.page}</span>
+        <span class="fait-page">${f.date ? `${f.date} — ` : ""}Page ${f.page}</span>
         ${f.personne ? `<span class="fait-personne">${f.personne}</span>` : ""}
       </div>
       <div class="fait-description">${f.description || ""}</div>
