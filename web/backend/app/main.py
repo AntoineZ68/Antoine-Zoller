@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -159,6 +160,53 @@ def detail_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_cont
     )
     dossier["etapes"] = etapes
     return dossier
+
+
+@app.get("/api/dossiers/{dossier_id}/donnees", response_model=schemas.DonneesDossier)
+def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> dict:
+    """Données structurées (personnes, chronologies) pour l'affichage type
+    tableau de bord — lit directement le fichier SQLite de l'affaire, sans
+    jamais rejouer son contenu dans des tables Postgres (voir le choix
+    d'architecture documenté dans web/backend/README.md)."""
+    supabase, _ = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)
+    if dossier["statut"] != "termine":
+        raise HTTPException(status_code=404, detail="Le traitement de ce dossier n'est pas encore terminé.")
+
+    try:
+        contenu_db = client_service().storage.from_("dossiers-resultats").download(f"{dossier_id}/depouille.db")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Résultats introuvables pour ce dossier.") from exc
+
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        tmp.write(contenu_db)
+        tmp.flush()
+        db = sqlite3.connect(tmp.name)
+        db.row_factory = sqlite3.Row
+        try:
+            personnes = [dict(r) for r in db.execute("SELECT nom, role FROM personnes ORDER BY role, nom")]
+            faits = [
+                dict(r)
+                for r in db.execute(
+                    """SELECT ef.page, ef.citation, ef.description, p.nom AS personne
+                       FROM evenements_faits ef LEFT JOIN personnes p ON p.id = ef.personne_id_source
+                       WHERE ef.statut_verif = 'verifie'
+                       ORDER BY ef.page"""
+                )
+            ]
+            procedure = [
+                dict(r)
+                for r in db.execute(
+                    """SELECT ep.date, ep.heure, ep.nature, ep.page, ep.citation, p.nom AS personne
+                       FROM evenements_procedure ep LEFT JOIN personnes p ON p.id = ep.personne_id
+                       WHERE ep.statut_verif = 'verifie'
+                       ORDER BY ep.date, ep.heure"""
+                )
+            ]
+        finally:
+            db.close()
+
+    return {"personnes": personnes, "chronologie_faits": faits, "chronologie_procedure": procedure}
 
 
 @app.get("/api/dossiers/{dossier_id}/livrables/{nom_fichier}")

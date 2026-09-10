@@ -34,3 +34,30 @@ class CouleursSurlignage(BaseModel):
     procedure: str
     declaration: str
     faits: str
+
+
+class Personne(BaseModel):
+    nom: str
+    role: str
+
+
+class EvenementFait(BaseModel):
+    page: int
+    citation: str
+    description: str
+    personne: str | None = None
+
+
+class EvenementProcedure(BaseModel):
+    date: str | None = None
+    heure: str | None = None
+    nature: str
+    page: int
+    citation: str
+    personne: str | None = None
+
+
+class DonneesDossier(BaseModel):
+    personnes: list[Personne] = []
+    chronologie_faits: list[EvenementFait] = []
+    chronologie_procedure: list[EvenementProcedure] = []
