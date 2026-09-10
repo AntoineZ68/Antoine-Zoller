@@ -25,6 +25,7 @@ from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
+from .resume import generer_resume
 from .surlignage import construire_pdf_surligne
 from .verification import verifier_citation
 
@@ -390,6 +391,7 @@ def construire_livrables(db: sqlite3.Connection, affaire_dir: Path, config: Conf
     _construire_declarations(db, dossier_out / "04_declarations.xlsx")
     _construire_personnalite(db, dossier_out / "05_personnalite.docx", config.seuil_flou_ocr)
     _construire_signalements(db, dossier_out / "06_signalements_procedure.docx")
+    generer_resume(db, config, console)
     _construire_controle(db, dossier_out / "99_controle.md", resultat_surlignage)
 
     console.print(f"  [build] livrables générés dans {dossier_out}")

@@ -116,6 +116,16 @@ CREATE TABLE IF NOT EXISTS run_log (
     tokens_out INTEGER NOT NULL DEFAULT 0,
     cout_usd REAL NOT NULL DEFAULT 0.0
 );
+
+-- Une seule ligne (id=1) : le résumé en une phrase de l'affaire, généré à
+-- partir des faits déjà extraits et vérifiés — jamais en relisant les PDF
+-- bruts. Absent en --offline (nécessite un appel au modèle) ou si la
+-- génération échoue ; jamais une valeur devinée pour combler l'absence.
+CREATE TABLE IF NOT EXISTS resume_affaire (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    texte TEXT NOT NULL,
+    genere_le TEXT NOT NULL
+);
 """
 
 

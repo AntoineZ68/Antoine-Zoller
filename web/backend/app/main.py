@@ -194,6 +194,12 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         db = sqlite3.connect(tmp.name)
         db.row_factory = sqlite3.Row
         try:
+            try:
+                ligne_resume = db.execute("SELECT texte FROM resume_affaire WHERE id = 1").fetchone()
+                resume = ligne_resume["texte"] if ligne_resume else None
+            except sqlite3.OperationalError:
+                # Dossier traité avant l'introduction de cette table.
+                resume = None
             personnes = [dict(r) for r in db.execute("SELECT nom, role FROM personnes ORDER BY role, nom")]
             faits = [
                 dict(r)
@@ -226,7 +232,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         finally:
             db.close()
 
-    return {"personnes": personnes, "chronologie_faits": faits, "chronologie_procedure": procedure}
+    return {"resume": resume, "personnes": personnes, "chronologie_faits": faits, "chronologie_procedure": procedure}
 
 
 @app.get("/api/dossiers/{dossier_id}/livrables/{nom_fichier}")

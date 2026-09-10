@@ -60,6 +60,7 @@ class EvenementProcedure(BaseModel):
 
 
 class DonneesDossier(BaseModel):
+    resume: str | None = None
     personnes: list[Personne] = []
     chronologie_faits: list[EvenementFait] = []
     chronologie_procedure: list[EvenementProcedure] = []
