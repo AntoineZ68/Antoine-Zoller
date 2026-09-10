@@ -15,12 +15,16 @@ from rich.console import Console
 COLONNES = ["Type", "Page début", "Page fin", "Cote", "Date apparente", "Service rédacteur", "Confiance", "Statut"]
 
 
-def _cle_tri_date(date_apparente: str | None) -> tuple[int, datetime]:
+def _cle_tri_date(date_apparente: str | None, heure_apparente: str | None) -> tuple[int, datetime]:
     if not date_apparente:
         return (1, datetime.max)
     try:
         j, m, a = date_apparente.split("/")
-        return (0, datetime(int(a), int(m), int(j)))
+        heure, minute = 0, 0
+        if heure_apparente:
+            hh, mm = heure_apparente.split("h")
+            heure, minute = int(hh), int(mm)
+        return (0, datetime(int(a), int(m), int(j), heure, minute))
     except ValueError:
         return (1, datetime.max)
 
@@ -53,7 +57,9 @@ def construire_index(db: sqlite3.Connection, affaire_dir: Path, console: Console
         console.print("  [index] aucune pièce en base — lance d'abord `depouille classify`.")
         return
 
-    pieces_chrono = sorted(pieces, key=lambda p: (_cle_tri_date(p["date_apparente"]), p["page_debut"]))
+    pieces_chrono = sorted(
+        pieces, key=lambda p: (_cle_tri_date(p["date_apparente"], p["heure_apparente"]), p["page_debut"])
+    )
 
     wb = Workbook()
     feuille_pages = wb.active

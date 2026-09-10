@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS pieces (
     page_debut INTEGER NOT NULL,
     page_fin INTEGER NOT NULL,
     date_apparente TEXT,
+    heure_apparente TEXT,
     service_redacteur TEXT,
     personnes_citees_json TEXT NOT NULL DEFAULT '[]',
     cote TEXT,

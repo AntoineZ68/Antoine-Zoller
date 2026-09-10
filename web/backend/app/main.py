@@ -199,7 +199,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 dict(r)
                 for r in db.execute(
                     """SELECT ef.page, ef.citation, ef.description, p.nom AS personne,
-                              pi.date_apparente AS date
+                              pi.date_apparente AS date, pi.heure_apparente AS heure
                        FROM evenements_faits ef
                        LEFT JOIN personnes p ON p.id = ef.personne_id_source
                        JOIN pieces pi ON pi.id = ef.piece_id
@@ -207,11 +207,13 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                        ORDER BY ef.page"""
                 )
             ]
-            # Un fait hérite de la date de sa pièce (formule d'ouverture du PV,
-            # détectée de façon déterministe pendant la classification) — trier
-            # sur cette date plutôt que sur le numéro de page donne une vraie
-            # chronologie, pas seulement l'ordre d'arrivée des documents.
-            faits.sort(key=lambda f: (_cle_tri_date(f["date"]), f["page"]))
+            # Un fait hérite de la date/heure de sa pièce (formule d'ouverture
+            # du PV, détectée de façon déterministe pendant la classification)
+            # — trier là-dessus donne une vraie chronologie, pas seulement
+            # l'ordre d'arrivée des documents. Heure inconnue = début de
+            # journée par convention, pour ne pas casser le tri par date
+            # quand seule l'heure manque.
+            faits.sort(key=lambda f: (_cle_tri_date(f["date"]), f["heure"] or "00h00", f["page"]))
             procedure = [
                 dict(r)
                 for r in db.execute(

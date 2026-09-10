@@ -12,6 +12,7 @@ from depouille.classify import _classifier_type_deterministe, _detecter_pieces_p
 from depouille.regex_patterns import (
     detecter_cote,
     detecter_date_acte,
+    detecter_date_heure_acte,
     normaliser_date,
     normaliser_heure,
     trouver_heures,
@@ -46,6 +47,35 @@ def test_trouver_heures_avec_espaces() -> None:
 def test_detecter_date_acte_avec_mois_en_lettres() -> None:
     texte = "Le 12 novembre 2024 à 09 h 45, nous notifions la mesure."
     assert detecter_date_acte(texte) == "12/11/2024"
+
+
+def test_formule_ouverture_annee_separee_toutes_lettres() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur : la formule
+    d'ouverture la plus répandue des PV français déclare l'année une fois
+    ("L'an deux mille vingt-six") puis le jour et le mois SANS année
+    accolée ("le deux septembre à six heures et quinze minutes") — jamais
+    reconnue par l'ancien motif, qui exige une date complète en un bloc."""
+    texte = (
+        "L'An deux mille vingt-six, le deux septembre à six heures et quinze minutes.\n"
+        "Nous, Capitaine Martin DUPONT, Officier de Police Judiciaire..."
+    )
+    assert detecter_date_heure_acte(texte) == ("02/09/2026", "06h15")
+
+
+def test_formule_ouverture_heure_sans_minutes() -> None:
+    texte = "L'an deux mille vingt-six, le trois septembre à neuf heures.\nDevant nous, Lieutenant BERNIER Lucas..."
+    assert detecter_date_heure_acte(texte) == ("03/09/2026", "09h00")
+
+
+def test_formule_ouverture_retrocompatible_avec_date_chiffree() -> None:
+    """L'ancienne écriture ("Le 12 novembre 2024 à 09 h 45") doit continuer
+    à fonctionner via la nouvelle fonction combinée."""
+    texte = "Le 12 novembre 2024 à 09 h 45, nous notifions la mesure."
+    assert detecter_date_heure_acte(texte) == ("12/11/2024", "09h45")
+
+
+def test_formule_ouverture_absente_ne_renvoie_rien() -> None:
+    assert detecter_date_heure_acte("Un texte quelconque sans aucune formule de date.") == (None, None)
 
 
 def test_detecter_cote_avec_tiret_et_capitales() -> None:

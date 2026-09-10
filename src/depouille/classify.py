@@ -24,7 +24,7 @@ from rich.table import Table
 
 from .config import Config
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
-from .regex_patterns import detecter_date_acte
+from .regex_patterns import detecter_date_heure_acte
 
 CATEGORIES = [
     "PV d'audition",
@@ -473,7 +473,7 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
         if type_ == "Non identifié":
             statut_revision = "a_relire"
 
-        date_apparente = detecter_date_acte(texte_complet)
+        date_apparente, heure_apparente = detecter_date_heure_acte(texte_complet)
         service = _detecter_service(texte_complet)
         cote = groupe["pages"][0]["cote_detectee"]
         personnes_citees = _detecter_personnes_citees(texte_complet)
@@ -483,14 +483,15 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
 
         cur = db.execute(
             """INSERT INTO pieces
-               (type, page_debut, page_fin, date_apparente, service_redacteur,
+               (type, page_debut, page_fin, date_apparente, heure_apparente, service_redacteur,
                 personnes_citees_json, cote, confiance, statut_revision)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 type_,
                 groupe["page_debut"],
                 groupe["page_fin"],
                 date_apparente,
+                heure_apparente,
                 service,
                 json.dumps(personnes_citees, ensure_ascii=False),
                 cote,

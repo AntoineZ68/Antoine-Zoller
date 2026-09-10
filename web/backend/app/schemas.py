@@ -47,6 +47,7 @@ class EvenementFait(BaseModel):
     description: str
     personne: str | None = None
     date: str | None = None
+    heure: str | None = None
 
 
 class EvenementProcedure(BaseModel):
