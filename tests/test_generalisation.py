@@ -141,6 +141,36 @@ def test_entete_titre_pollue_par_colonne_voisine() -> None:
     assert groupes[1]["page_debut"] == 3
 
 
+def test_frontiere_piece_apres_tampon_de_fax() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur : une page
+    reçue par fax porte un tampon de transmission au-dessus du titre
+    ("FAX FROM: ... -- PAGE 1/2"). Cette ligne contient des ":", exclus
+    d'office du test de titre, donc regarder uniquement la toute première
+    ligne de la page ratait le titre juste en dessous — fusionnant deux
+    pièces distinctes (et par ricochet, perdant l'identification de la
+    personne concernée par la première pièce)."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    db.executemany(
+        "INSERT INTO pages VALUES (?, ?)",
+        [
+            (1, "PROCÈS-VERBAL D'AUDITION\nUn premier acte.\n"),
+            (
+                2,
+                "FAX FROM: COMMISSARIAT VENISSIEUX -- TO: PJ LYON STUPS -- DATE: 03/09/2026 09:42 -- PAGE 1/2\n"
+                "PROCÈS-VERBAL D'AUDITION DE TÉMOIN\n"
+                "(ARTICLE 62 DU CODE DE PROCÉDURE PÉNALE)\n"
+                "L'an deux mille vingt-six...\n",
+            ),
+        ],
+    )
+    pages = db.execute("SELECT * FROM pages ORDER BY numero_global").fetchall()
+    groupes = _detecter_pieces_par_page(pages)
+    assert len(groupes) == 2
+    assert groupes[1]["page_debut"] == 2
+
+
 def test_personne_par_nom_ignore_lordre_nom_prenom() -> None:
     """Un PV écrit "BENALI Karim" (NOM Prénom) ; l'appel séparé qui extrait
     les faits narratifs reformule spontanément en "Karim Benali" — même

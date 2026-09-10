@@ -178,14 +178,24 @@ def _entete_etendu(texte_page: str) -> str:
     return " ".join(lignes_entete)
 
 
+NB_LIGNES_EXAMINEES_FRONTIERE = 3
+
+
 def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
-    """Frontière déterministe : une page dont la première ligne non vide est
-    un intitulé en capitales démarre une nouvelle pièce ; sinon elle prolonge
-    la précédente."""
+    """Frontière déterministe : une page démarre une nouvelle pièce si l'une
+    de ses toutes premières lignes non vides est un intitulé en capitales ;
+    sinon elle prolonge la précédente.
+
+    Certaines pages portent un tampon de transmission avant le vrai titre
+    (ex. "FAX FROM: COMMISSARIAT VENISSIEUX -- TO: PJ LYON STUPS -- ... --
+    PAGE 1/2") : cette ligne contient des ":" qui l'excluent d'office du
+    test de titre (jamais dans un intitulé légitime), donc regarder
+    uniquement la toute première ligne ratait le titre juste en dessous —
+    fusionnant deux pièces distinctes en une seule."""
     pieces: list[dict] = []
     for page in pages:
-        premiere_ligne = next((l for l in page["texte"].splitlines() if l.strip()), "")
-        nouvelle_piece = _est_titre(premiere_ligne) or not pieces
+        premieres_lignes = [l for l in page["texte"].splitlines() if l.strip()][:NB_LIGNES_EXAMINEES_FRONTIERE]
+        nouvelle_piece = not pieces or any(_est_titre(l) for l in premieres_lignes)
         if nouvelle_piece:
             pieces.append({"page_debut": page["numero_global"], "page_fin": page["numero_global"], "pages": [page]})
         else:
