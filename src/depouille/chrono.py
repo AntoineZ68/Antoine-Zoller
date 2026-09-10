@@ -272,7 +272,14 @@ def _extraire_faits_llm(
                     "Tu extrais des affirmations factuelles d'une pièce de procédure pénale "
                     "française. Pour chaque affirmation, cite le texte EXACT (mot pour mot, "
                     "sans reformuler) et le numéro de page où il apparaît. N'invente rien, ne "
-                    "déduis rien. Réponds en JSON : une liste d'objets "
+                    "déduis rien. "
+                    "Ignore les champs de référence purement administratifs de l'en-tête "
+                    "(numéro de parquet, numéro d'enquête, et les lignes autonomes \"DATE :\" / "
+                    "\"HEURE :\" qui ne font que répéter la date/l'heure de l'acte) : ce ne sont "
+                    "pas des faits narratifs, ne les extrais pas comme tels. Concentre-toi sur "
+                    "les événements, actions, déclarations et constatations qui font avancer le "
+                    "récit. "
+                    "Réponds en JSON : une liste d'objets "
                     '{"page": int, "citation": "...", "description": "...", "personne_source": "..."}.'
                 ),
                 prompt=texte[:8000],
