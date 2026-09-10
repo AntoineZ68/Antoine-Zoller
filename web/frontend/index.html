@@ -116,6 +116,20 @@
 
   .grille-livrables { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   .grille-livrables button { width: 100%; text-align: left; padding: 12px 14px; }
+
+  .liste-personnes { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  .liste-personnes li { padding: 5px 0; }
+  .role-personne { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .liste-faits { list-style: none; margin: 0; padding: 0; }
+  .liste-faits li { border-top: 1px solid var(--bordure); padding: 12px 0; }
+  .liste-faits li:first-child { border-top: none; padding-top: 0; }
+  .liste-faits.reste { display: none; }
+  .bloc-chronologie.developpe .liste-faits.reste { display: block; }
+  .fait-entete { display: flex; justify-content: space-between; font-size: 12px; color: var(--texte-att); margin-bottom: 4px; }
+  .fait-description { font-size: 14px; margin-bottom: 4px; }
+  .fait-citation { font-size: 13px; color: var(--texte-att); font-style: italic; }
+  .bloc-chronologie button.lien { display: block; margin-top: 14px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -341,7 +355,56 @@ function rendreListeLaterale() {
   `).join("");
 }
 
-function rendreDetailDossier(dossier) {
+const LIBELLES_ROLE = {
+  mis_en_cause: "Client (mis en cause)", victime: "Victime", témoin: "Témoin",
+  expert: "Expert", enqueteur: "Enquêteur",
+};
+const NB_FAITS_APERCU = 4;
+
+function rendreBlocInformations(donnees) {
+  if (!donnees.personnes.length) {
+    return `<div class="carte"><h2>Informations</h2><p class="vide">Aucune personne identifiée dans ce dossier.</p></div>`;
+  }
+  return `
+    <div class="carte">
+      <h2>Informations</h2>
+      <ul class="liste-personnes">
+        ${donnees.personnes.map((p) => `<li><span class="role-personne">${LIBELLES_ROLE[p.role] || p.role}</span> — ${p.nom}</li>`).join("")}
+      </ul>
+    </div>`;
+}
+
+function rendreBlocChronologie(donnees) {
+  if (!donnees.chronologie_faits.length) {
+    return `<div class="carte"><h2>Chronologie</h2><p class="vide">Aucun fait extrait pour ce dossier.</p></div>`;
+  }
+  const faits = donnees.chronologie_faits;
+  const rendreFait = (f) => `
+    <li>
+      <div class="fait-entete">
+        <span class="fait-page">Page ${f.page}</span>
+        ${f.personne ? `<span class="fait-personne">${f.personne}</span>` : ""}
+      </div>
+      <div class="fait-description">${f.description || ""}</div>
+      <div class="fait-citation">« ${f.citation} »</div>
+    </li>`;
+  const apercu = faits.slice(0, NB_FAITS_APERCU).map(rendreFait).join("");
+  const reste = faits.slice(NB_FAITS_APERCU).map(rendreFait).join("");
+  const boutonPlus = reste
+    ? `<button type="button" class="lien" onclick="this.parentElement.classList.add('developpe'); this.hidden = true;">
+         Voir les ${faits.length - NB_FAITS_APERCU} fait(s) supplémentaire(s)
+       </button>`
+    : "";
+  return `
+    <div class="carte bloc-chronologie">
+      <h2>Chronologie des faits</h2>
+      <ul class="liste-faits">${apercu}</ul>
+      <ul class="liste-faits reste">${reste}</ul>
+      ${boutonPlus}
+    </div>`;
+}
+
+async function rendreDetailDossier(dossier) {
   const badge = `<span class="badge badge-${dossier.statut}">${LIBELLES_STATUT[dossier.statut] || dossier.statut}</span>`;
   const cree = new Date(dossier.cree_le).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
@@ -355,12 +418,24 @@ function rendreDetailDossier(dossier) {
   if (dossier.statut === "erreur") {
     corps = `<div class="carte"><p class="erreur">${dossier.message_erreur || "Une erreur est survenue pendant le traitement."}</p></div>`;
   } else if (dossier.statut === "termine") {
+    let donnees = { personnes: [], chronologie_faits: [], chronologie_procedure: [] };
+    let erreurDonnees = "";
+    try {
+      donnees = await appelApi(`/api/dossiers/${dossier.id}/donnees`);
+    } catch (erreur) {
+      erreurDonnees = erreur.message;
+    }
+    if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
+
     corps = `
       <div class="carte">
         <h2>Résumé de l'affaire</h2>
-        <p class="vide">Résumé automatique du contenu : pas encore disponible dans cette version.
-        Consulte la chronologie et l'index ci-dessous pour le détail.</p>
+        <p class="vide">Résumé automatique en une phrase : pas encore disponible dans cette version.
+        Consulte la chronologie ci-dessous pour le détail.</p>
       </div>
+      ${erreurDonnees ? `<div class="carte"><p class="erreur">${erreurDonnees}</p></div>` : ""}
+      ${rendreBlocInformations(donnees)}
+      ${rendreBlocChronologie(donnees)}
       <div class="carte">
         <h2>Documents générés</h2>
         <div class="grille-livrables">
@@ -407,7 +482,7 @@ async function ouvrirDossier(id) {
   afficherVue("dossier");
   try {
     const dossier = await appelApi(`/api/dossiers/${id}`);
-    if (dossierOuvertId === id) rendreDetailDossier(dossier);
+    if (dossierOuvertId === id) await rendreDetailDossier(dossier);
   } catch (erreur) {
     if (dossierOuvertId === id) vueDossier.innerHTML = `<p class="erreur">${erreur.message}</p>`;
   }
