@@ -24,6 +24,7 @@ from .chrono import calculer_durees
 from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
+from .index_builder import _cle_tri_date
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
 from .resume import generer_resume
 from .surlignage import construire_pdf_surligne
@@ -100,12 +101,21 @@ def _construire_chronologie_faits(db: sqlite3.Connection, chemin: Path) -> None:
         "chacune avec sa propre source."
     )
 
+    # ef.date_evenement_affirmee n'est jamais renseignée nulle part dans le
+    # pipeline (colonne vestige) : trier dessus revenait silencieusement à
+    # ne trier que par page, pas par date — un fait hérite en réalité de la
+    # date/heure de sa pièce (formule d'ouverture du PV, déjà détectée
+    # pendant la classification), comme pour 01_index.xlsx et le tableau de
+    # bord web.
     lignes = db.execute(
-        """SELECT ef.*, p.nom AS personne_nom FROM evenements_faits ef
+        """SELECT ef.page, ef.citation, ef.description, p.nom AS personne_nom,
+                  pi.date_apparente AS date, pi.heure_apparente AS heure
+           FROM evenements_faits ef
            LEFT JOIN personnes p ON p.id = ef.personne_id_source
-           WHERE ef.statut_verif = 'verifie'
-           ORDER BY ef.date_evenement_affirmee, ef.page"""
+           JOIN pieces pi ON pi.id = ef.piece_id
+           WHERE ef.statut_verif = 'verifie'"""
     ).fetchall()
+    lignes = sorted(lignes, key=lambda r: (_cle_tri_date(r["date"], r["heure"]), r["page"]))
 
     if not lignes:
         doc.add_paragraph(
@@ -117,7 +127,8 @@ def _construire_chronologie_faits(db: sqlite3.Connection, chemin: Path) -> None:
     else:
         for r in lignes:
             p = doc.add_paragraph()
-            p.add_run(f"Page {r['page']} — {r['personne_nom'] or 'NON TROUVÉ'} : ").bold = True
+            prefixe_date = f"{r['date']}{' à ' + r['heure'] if r['heure'] else ''} — " if r["date"] else ""
+            p.add_run(f"{prefixe_date}Page {r['page']} — {r['personne_nom'] or 'NON TROUVÉ'} : ").bold = True
             p.add_run(f"« {r['citation']} »")
             if r["description"]:
                 doc.add_paragraph(r["description"], style="Intense Quote")

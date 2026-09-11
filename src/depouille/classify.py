@@ -69,6 +69,12 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["NOTIFICATION", "DROITS"], "PV de notification des droits"),
     (["PROLONGATION", "GARDE À VUE"], "PV de prolongation de garde à vue"),
     (["FIN DE GARDE À VUE"], "PV de fin de garde à vue"),
+    # Repli sur un intitulé qui ne dit jamais littéralement "NOTIFICATION" —
+    # un vrai PV rencontré titre simplement "PROCÈS-VERBAL DE PLACEMENT EN
+    # GARDE À VUE", la notification des droits n'étant qu'une section du
+    # même document. Vérifié après les règles plus spécifiques ci-dessus
+    # (prolongation, fin) pour ne jamais les court-circuiter.
+    (["PLACEMENT", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
     (["INTERPELLATION"], "PV d'interpellation"),
     (["SURVEILLANCE"], "PV de surveillance"),
     (["CERTIFICAT MÉDICAL"], "Certificat médical"),

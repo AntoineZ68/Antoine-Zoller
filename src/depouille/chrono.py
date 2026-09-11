@@ -291,16 +291,20 @@ def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:
 # peut anticiper à l'avance — les exclure par défaut faute de reconnaître
 # leur intitulé revenait à ne jamais extraire aucun fait des pièces qui
 # fondent souvent l'affaire (ex. le signalement du commissaire aux comptes
-# à l'origine d'un dossier financier). Seules restent exclues les pièces
-# purement procédurales, déjà capturées ailleurs sous forme d'événements de
-# procédure (placement/prolongation/fin de garde à vue, notification des
-# droits), et celles couvertes par le secret professionnel (entretien
-# avocat) ou déjà traitées par un autre livrable (personnalité, casier).
+# à l'origine d'un dossier financier).
+#
+# Les PV de placement/prolongation/fin de garde à vue et de notification
+# des droits en avaient longtemps fait partie, sur l'idée qu'ils ne sont
+# que des horodatages déjà capturés ailleurs comme événements de
+# procédure — faux en pratique : un vrai dossier testé en contient un qui
+# rapporte aussi "Je ne dirai rien avant d'avoir vu mon avocat", une vraie
+# déclaration que la seule frise de procédure ne montre jamais. Seules
+# restent exclues les pièces couvertes par le secret professionnel
+# (entretien avocat) ou déjà traitées par un autre livrable (personnalité,
+# casier) — l'éventuel doublon avec la frise de procédure (ex. l'heure du
+# placement réapparaissant aussi comme un "fait") est un moindre mal face
+# au risque de silencieusement passer à côté d'une déclaration.
 TYPES_SANS_FAITS_NARRATIFS = (
-    "PV de notification de placement en garde à vue",
-    "PV de notification des droits",
-    "PV de prolongation de garde à vue",
-    "PV de fin de garde à vue",
     "PV d'entretien avocat",
     "Réquisition",
     "Soit-transmis",
