@@ -3,20 +3,31 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dépouille — Pilote</title>
+<title>Dépouille</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
-    --fond: #0f1521;
-    --fond-barre: #131a27;
-    --carte: #171f2e;
-    --bordure: #2a3547;
-    --texte: #e7ebf1;
-    --texte-att: #8b96a8;
+    --fond: #0b0f17;
+    --fond-barre: #0e1420;
+    --carte: #141c2b;
+    --bordure: #263048;
+    --bordure-douce: #1c2537;
+    --texte: #edf0f5;
+    --texte-att: #8d99ad;
+    --texte-att-2: #66728a;
     --accent: #c9a15a;
-    --erreur: #d9695f;
-    --succes: #5fae7d;
+    --accent-clair: #e4c98a;
+    --accent-fonce: #9c7a41;
+    --erreur: #e0685d;
+    --succes: #4fae7d;
     --encours: #5b8fd9;
+    --ombre: 0 10px 30px rgba(0,0,0,0.35);
+    --ombre-douce: 0 2px 10px rgba(0,0,0,0.22);
+    --rayon: 12px;
+    --rayon-sm: 7px;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -25,143 +36,234 @@
     margin: 0;
     background: var(--fond);
     color: var(--texte);
-    font-family: Georgia, 'Times New Roman', serif;
-    line-height: 1.5;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
   }
+  h1, h2, .police-serif { font-family: 'Newsreader', Georgia, serif; }
   button {
-    font-family: inherit; font-size: 14px; padding: 9px 18px; border-radius: 4px; border: 1px solid var(--accent);
-    background: transparent; color: var(--accent); cursor: pointer;
+    font-family: inherit; font-size: 13.5px; font-weight: 500; padding: 10px 18px; border-radius: var(--rayon-sm);
+    border: 1px solid var(--bordure); background: transparent; color: var(--texte); cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
   }
-  button:hover { background: rgba(201,161,90,0.12); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.lien { border: none; padding: 0; margin: 0; text-decoration: underline; font-size: 13px; }
-  label { display: block; font-size: 13px; color: var(--texte-att); margin: 12px 0 4px; }
+  button:hover { border-color: var(--accent); color: var(--accent-clair); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.5; cursor: default; transform: none; }
+  button.lien { border: none; padding: 0; margin: 0; text-decoration: underline; text-underline-offset: 2px; font-size: 13px; color: var(--accent); background: none; }
+  button.lien:hover { color: var(--accent-clair); }
+  button.bouton-primaire {
+    background: linear-gradient(180deg, var(--accent-clair), var(--accent));
+    border-color: var(--accent); color: #1a1305; font-weight: 600;
+  }
+  button.bouton-primaire:hover { color: #1a1305; filter: brightness(1.06); border-color: var(--accent-clair); }
+  label { display: block; font-size: 12.5px; font-weight: 500; color: var(--texte-att); margin: 14px 0 6px; letter-spacing: 0.01em; }
   input[type=text], input[type=email], input[type=password] {
-    width: 100%; padding: 9px 10px; background: var(--fond); border: 1px solid var(--bordure);
-    border-radius: 4px; color: var(--texte); font-family: inherit; font-size: 14px;
+    width: 100%; padding: 10px 12px; background: #0f1522; border: 1px solid var(--bordure);
+    border-radius: var(--rayon-sm); color: var(--texte); font-family: inherit; font-size: 14px;
+    transition: border-color 0.15s ease;
   }
-  input[type=file] { color: var(--texte-att); font-size: 13px; margin-top: 4px; }
+  input[type=text]:focus, input[type=email]:focus, input[type=password]:focus {
+    outline: none; border-color: var(--accent);
+  }
+  input[type=file] { color: var(--texte-att); font-size: 13px; margin-top: 6px; }
   .erreur { color: var(--erreur); font-size: 13px; margin-top: 10px; }
-  .vide { color: var(--texte-att); font-size: 13px; }
+  .vide { color: var(--texte-att); font-size: 13.5px; }
 
-  /* --- Écran de connexion (page pleine, avant d'entrer dans l'appli) --- */
-  #ecran-auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  #ecran-auth .carte { width: 100%; max-width: 380px; background: var(--carte); border: 1px solid var(--bordure);
-    border-radius: 6px; padding: 26px; }
-  #ecran-auth h1 { margin: 0 0 4px; font-size: 20px; font-weight: normal; }
-  #ecran-auth .sous-titre { margin: 0 0 20px; color: var(--texte-att); font-size: 13px; }
-  #ecran-auth h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
-  #ecran-auth button[type=submit] { width: 100%; margin-top: 16px; }
-  .bascule { font-size: 13px; color: var(--texte-att); margin-top: 14px; }
+  /* --- Écran de connexion --- */
+  #ecran-auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: radial-gradient(ellipse at top left, #101a2c 0%, var(--fond) 55%); }
+  .auth-conteneur {
+    width: 100%; max-width: 860px; display: flex; border-radius: var(--rayon); overflow: hidden;
+    box-shadow: var(--ombre); border: 1px solid var(--bordure-douce);
+  }
+  .auth-marque {
+    flex: 1; min-width: 0; padding: 44px 38px; background: linear-gradient(160deg, #17223a, #0e1522);
+    display: flex; flex-direction: column; justify-content: center; gap: 18px;
+  }
+  .marque-logo {
+    width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(160deg, var(--accent-clair), var(--accent-fonce));
+    color: #1a1305; font-family: 'Newsreader', serif; font-size: 20px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .auth-marque h1 { margin: 0; font-size: 27px; font-weight: 500; color: var(--texte); }
+  .auth-accroche { margin: 0; font-size: 14px; color: var(--texte-att); line-height: 1.6; max-width: 340px; }
+  .auth-points { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .auth-points li { font-size: 13px; color: var(--texte-att); padding-left: 20px; position: relative; }
+  .auth-points li::before {
+    content: ""; position: absolute; left: 0; top: 6px; width: 8px; height: 8px; border-radius: 2px;
+    background: var(--accent); opacity: 0.85; transform: rotate(45deg);
+  }
+  .auth-formulaire {
+    flex: 1; min-width: 300px; background: var(--carte); padding: 44px 38px; display: flex; flex-direction: column; justify-content: center;
+  }
+  #ecran-auth h2 { margin: 0 0 18px; font-size: 19px; font-weight: 500; color: var(--texte); }
+  #ecran-auth button[type=submit] { width: 100%; margin-top: 20px; padding: 11px 18px; }
+  .bascule { font-size: 13px; color: var(--texte-att); margin-top: 16px; }
+  @media (max-width: 720px) {
+    .auth-conteneur { flex-direction: column; max-width: 420px; }
+    .auth-marque { padding: 32px 28px 20px; }
+    .auth-points { display: none; }
+  }
 
-  /* --- Appli (après connexion) : barre latérale + zone principale --- */
+  /* --- Appli (après connexion) --- */
   #appli { display: none; height: 100vh; }
   #appli.visible { display: flex; }
   #barre-laterale {
-    width: 260px; flex-shrink: 0; background: var(--fond-barre); border-right: 1px solid var(--bordure);
-    display: flex; flex-direction: column; padding: 16px;
+    width: 264px; flex-shrink: 0; background: var(--fond-barre); border-right: 1px solid var(--bordure-douce);
+    display: flex; flex-direction: column; padding: 20px 16px;
   }
-  #barre-laterale h1 { font-size: 15px; font-weight: normal; margin: 4px 8px 16px; letter-spacing: 0.02em; }
-  #bouton-nouveau { width: 100%; text-align: left; margin-bottom: 14px; }
+  .marque-barre { display: flex; align-items: center; gap: 10px; margin: 2px 6px 20px; }
+  .marque-barre .marque-logo { width: 28px; height: 28px; font-size: 14px; border-radius: 7px; }
+  .marque-barre h1 { font-size: 15.5px; font-weight: 500; margin: 0; letter-spacing: 0.01em; color: var(--texte); }
+  #bouton-nouveau { width: 100%; text-align: center; margin-bottom: 18px; }
+  .titre-section {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--texte-att-2);
+    margin: 4px 10px 8px; font-weight: 600;
+  }
   #liste-dossiers { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
   .item-dossier {
     display: block; width: 100%; text-align: left; background: none; border: 1px solid transparent;
-    color: var(--texte); padding: 9px 10px; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 13px;
+    border-left: 2px solid transparent; color: var(--texte); padding: 9px 11px; border-radius: var(--rayon-sm);
+    cursor: pointer; font-family: inherit; font-size: 13.5px;
   }
-  .item-dossier:hover { background: rgba(255,255,255,0.04); }
-  .item-dossier.selectionne { background: rgba(201,161,90,0.12); border-color: var(--bordure); }
-  .item-dossier .nom-item { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .item-dossier .ligne-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 3px; }
-  .item-dossier .ref-item { color: var(--texte-att); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-dossier:hover { background: rgba(255,255,255,0.035); border-color: transparent; }
+  .item-dossier.selectionne { background: rgba(201,161,90,0.10); border-left-color: var(--accent); }
+  .item-dossier .nom-item { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .item-dossier .ligne-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; }
+  .item-dossier .ref-item { color: var(--texte-att-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pastille { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .pastille-en_attente { background: var(--texte-att); }
-  .pastille-en_cours { background: var(--encours); }
+  .pastille-en_attente { background: var(--texte-att-2); }
+  .pastille-en_cours { background: var(--encours); box-shadow: 0 0 0 3px rgba(91,143,217,0.18); }
   .pastille-termine { background: var(--succes); }
   .pastille-erreur { background: var(--erreur); }
-  #pied-barre { border-top: 1px solid var(--bordure); padding-top: 12px; margin-top: 12px; }
-  #pied-barre #email-utilisateur { display: block; font-size: 12px; color: var(--texte-att); margin-bottom: 8px;
+  #pied-barre { border-top: 1px solid var(--bordure-douce); padding-top: 14px; margin-top: 12px; }
+  #pied-barre #email-utilisateur { display: block; font-size: 12px; color: var(--texte-att); margin-bottom: 10px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #pied-barre button { width: 100%; font-size: 12px; padding: 6px 10px; }
-  #avertissement-veille { font-size: 11px; color: var(--texte-att); margin-top: 10px; line-height: 1.4; }
-
-  #zone-principale { flex: 1; overflow-y: auto; padding: 32px; }
-  #zone-principale > div { max-width: 640px; margin: 0 auto; }
-
-  .carte { background: var(--carte); border: 1px solid var(--bordure); border-radius: 6px; padding: 22px; margin-bottom: 20px; }
-  .carte h2 { margin: 0 0 14px; font-size: 16px; font-weight: normal; color: var(--accent); }
-  #form-envoi button[type=submit] { margin-top: 16px; }
-
-  .entete-detail h2 { margin: 0; font-size: 20px; font-weight: normal; color: var(--texte); }
-  .entete-detail .ref-detail { color: var(--texte-att); font-size: 13px; margin-top: 2px; }
-  .entete-detail { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
-  .badge {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 3px;
-    white-space: nowrap;
+  #pied-barre button { width: 100%; font-size: 12px; padding: 7px 10px; }
+  #avertissement-veille {
+    font-size: 11px; color: var(--texte-att-2); margin-top: 12px; line-height: 1.5; padding: 9px 10px;
+    background: rgba(255,255,255,0.025); border: 1px solid var(--bordure-douce); border-radius: var(--rayon-sm);
   }
-  .badge-en_attente { background: rgba(139,150,168,0.18); color: var(--texte-att); }
-  .badge-en_cours { background: rgba(91,143,217,0.18); color: var(--encours); }
-  .badge-termine { background: rgba(95,174,125,0.18); color: var(--succes); }
-  .badge-erreur { background: rgba(217,105,95,0.18); color: var(--erreur); }
 
-  .infos-rapides { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; color: var(--texte-att); margin-bottom: 22px; }
-  .infos-rapides strong { color: var(--texte); font-weight: normal; }
+  #zone-principale { flex: 1; overflow-y: auto; padding: 40px 32px; }
+  #zone-principale > div { max-width: 680px; margin: 0 auto; }
+
+  .carte { background: var(--carte); border: 1px solid var(--bordure-douce); border-radius: var(--rayon); padding: 24px 26px;
+    margin-bottom: 18px; box-shadow: var(--ombre-douce); }
+  .carte h2 { margin: 0 0 16px; font-size: 16.5px; font-weight: 500; color: var(--texte); }
+  #form-envoi button[type=submit] { margin-top: 18px; padding: 11px 22px; }
+
+  .entete-detail h2 { margin: 0; font-size: 23px; font-weight: 500; color: var(--texte); }
+  .entete-detail .ref-detail { color: var(--texte-att); font-size: 13px; margin-top: 4px; }
+  .entete-detail { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 600; padding: 5px 11px 5px 9px; border-radius: 20px; white-space: nowrap;
+  }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .badge-en_attente { background: rgba(139,150,168,0.14); color: var(--texte-att); }
+  .badge-en_cours { background: rgba(91,143,217,0.16); color: var(--encours); }
+  .badge-termine { background: rgba(79,174,125,0.16); color: var(--succes); }
+  .badge-erreur { background: rgba(224,104,93,0.16); color: var(--erreur); }
+
+  .infos-rapides { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+  .infos-rapides span {
+    font-size: 12.5px; color: var(--texte-att); background: var(--carte); border: 1px solid var(--bordure-douce);
+    padding: 7px 12px; border-radius: 20px;
+  }
+  .infos-rapides strong { color: var(--texte); font-weight: 600; }
 
   .liste-etapes { list-style: none; margin: 0; padding: 0; }
-  .liste-etapes li { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 14px; }
-  .puce-etape { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center;
+  .liste-etapes li { display: flex; align-items: center; gap: 12px; padding: 9px 0; font-size: 14px; }
+  .puce-etape { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center;
     justify-content: center; font-size: 11px; border: 1px solid var(--bordure); color: var(--texte-att); }
-  .puce-etape.fait { background: var(--succes); border-color: var(--succes); color: #0f1521; }
-  .puce-etape.encours { border-color: var(--encours); color: var(--encours); }
-  .puce-etape.erreur { background: var(--erreur); border-color: var(--erreur); color: #0f1521; }
-  .liste-etapes li.a-venir { color: var(--texte-att); }
+  .puce-etape.fait { background: var(--succes); border-color: var(--succes); color: #0b0f17; }
+  .puce-etape.encours { border-color: var(--encours); color: var(--encours); box-shadow: 0 0 0 3px rgba(91,143,217,0.15); }
+  .puce-etape.erreur { background: var(--erreur); border-color: var(--erreur); color: #0b0f17; }
+  .liste-etapes li.a-venir { color: var(--texte-att-2); }
 
-  .grille-livrables { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-  .grille-livrables button { width: 100%; text-align: left; padding: 12px 14px; }
+  .grille-livrables { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+  .grille-livrables button {
+    width: 100%; text-align: left; padding: 13px 14px; display: flex; align-items: center; gap: 10px;
+    background: #0f1522;
+  }
+  .grille-livrables button:hover { background: rgba(201,161,90,0.06); }
+  .icone-doc { flex-shrink: 0; color: var(--accent); opacity: 0.85; }
 
-  .texte-resume { font-size: 16px; margin: 0 0 8px; }
-  .note-resume { font-size: 12px; color: var(--texte-att); margin: 0; }
+  .bloc-resume { border: 1px solid var(--bordure-douce); position: relative; overflow: hidden; }
+  .bloc-resume::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(var(--accent-clair), var(--accent-fonce)); }
+  .texte-resume { font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 18px; line-height: 1.5; margin: 0 0 10px; color: var(--texte); }
+  .note-resume { font-size: 11.5px; color: var(--texte-att-2); margin: 0; }
 
-  .liste-personnes { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-  .liste-personnes li { padding: 5px 0; }
-  .role-personne { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .liste-personnes { list-style: none; margin: 0; padding: 0; font-size: 14px; display: flex; flex-direction: column; gap: 9px; }
+  .liste-personnes li { display: flex; align-items: center; gap: 10px; }
+  .role-personne {
+    color: var(--accent); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+    background: rgba(201,161,90,0.12); padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+  }
 
-  .liste-faits { list-style: none; margin: 0; padding: 0; }
-  .liste-faits li { border-top: 1px solid var(--bordure); padding: 12px 0; }
-  .liste-faits li:first-child { border-top: none; padding-top: 0; }
+  .frise { list-style: none; margin: 0; padding: 0; position: relative; }
+  .frise::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 1px; background: var(--bordure); }
+  .frise li { position: relative; padding: 0 0 20px 24px; }
+  .frise li:last-child { padding-bottom: 0; }
+  .frise li::before {
+    content: ""; position: absolute; left: 0; top: 4px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--fond); border: 2px solid var(--accent);
+  }
   .liste-faits.reste { display: none; }
   .bloc-chronologie.developpe .liste-faits.reste { display: block; }
-  .fait-entete { display: flex; justify-content: space-between; font-size: 12px; color: var(--texte-att); margin-bottom: 4px; }
-  .fait-description { font-size: 14px; margin-bottom: 4px; }
-  .fait-citation { font-size: 13px; color: var(--texte-att); font-style: italic; }
-  .bloc-chronologie button.lien { display: block; margin-top: 14px; font-size: 13px; }
+  .fait-entete { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--texte-att-2); margin-bottom: 5px; font-weight: 500; }
+  .fait-description { font-size: 14px; margin-bottom: 6px; }
+  .fait-citation {
+    font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 13.5px; color: var(--texte-att);
+    border-left: 2px solid var(--bordure); padding-left: 10px; margin: 0;
+  }
+  .bloc-chronologie button.lien { display: block; margin-top: 16px; font-size: 13px; }
+
+  .etat-vide { text-align: center; padding: 60px 20px; color: var(--texte-att); }
+  .etat-vide p { font-size: 14px; max-width: 320px; margin: 0 auto; }
 </style>
 </head>
 <body>
 
 <div id="ecran-auth">
-  <div class="carte">
-    <h1>Dépouille — Pilote</h1>
-    <p class="sous-titre">Envoi et suivi de dossiers pénaux pour traitement automatique</p>
-    <h2 id="titre-auth">Connexion</h2>
-    <form id="form-auth">
-      <label for="champ-email">E-mail</label>
-      <input type="email" id="champ-email" required autocomplete="email" />
-      <label for="champ-mdp">Mot de passe</label>
-      <input type="password" id="champ-mdp" required autocomplete="current-password" minlength="6" />
-      <button type="submit" id="bouton-auth">Se connecter</button>
-      <div class="erreur" id="erreur-auth" hidden></div>
-    </form>
-    <div class="bascule">
-      <span id="texte-bascule">Pas encore de compte ?</span>
-      <button type="button" class="lien" id="bouton-bascule">Créer un compte</button>
+  <div class="auth-conteneur">
+    <div class="auth-marque">
+      <div class="marque-logo">D</div>
+      <h1>Dépouille</h1>
+      <p class="auth-accroche">Dépouillement automatisé de dossiers pénaux : chronologie, personnes et synthèse reconstitués à partir de citations vérifiables, page par page.</p>
+      <ul class="auth-points">
+        <li>Chaque fait est rattaché à une citation exacte du dossier</li>
+        <li>Chronologie et résumé générés automatiquement</li>
+        <li>Jamais d'invention, jamais de qualification juridique</li>
+      </ul>
+    </div>
+    <div class="auth-formulaire carte">
+      <h2 id="titre-auth">Connexion</h2>
+      <form id="form-auth">
+        <label for="champ-email">E-mail</label>
+        <input type="email" id="champ-email" required autocomplete="email" />
+        <label for="champ-mdp">Mot de passe</label>
+        <input type="password" id="champ-mdp" required autocomplete="current-password" minlength="6" />
+        <button type="submit" id="bouton-auth" class="bouton-primaire">Se connecter</button>
+        <div class="erreur" id="erreur-auth" hidden></div>
+      </form>
+      <div class="bascule">
+        <span id="texte-bascule">Pas encore de compte ?</span>
+        <button type="button" class="lien" id="bouton-bascule">Créer un compte</button>
+      </div>
     </div>
   </div>
 </div>
 
 <div id="appli">
   <div id="barre-laterale">
-    <h1>Dépouille</h1>
-    <button type="button" id="bouton-nouveau">+ Nouveau dossier</button>
+    <div class="marque-barre">
+      <div class="marque-logo">D</div>
+      <h1>Dépouille</h1>
+    </div>
+    <button type="button" id="bouton-nouveau" class="bouton-primaire">+ Nouveau dossier</button>
+    <div class="titre-section">Dossiers</div>
     <div id="liste-dossiers"><p class="vide">Aucun dossier pour l'instant.</p></div>
     <div id="pied-barre">
       <span id="email-utilisateur"></span>
@@ -183,9 +285,9 @@
           <input type="text" id="champ-reference" placeholder="ex : CRIM-2026-0142" />
           <label for="champ-fichier">Fichier(s) PDF</label>
           <input type="file" id="champ-fichier" accept="application/pdf" multiple required />
-          <p class="vide" style="margin: 6px 0 0;">Un dossier pénal arrive souvent en plusieurs PDF distincts —
+          <p class="vide" style="margin: 8px 0 0;">Un dossier pénal arrive souvent en plusieurs PDF distincts —
           sélectionne-les tous d'un coup (Ctrl ou Maj + clic).</p>
-          <button type="submit" id="bouton-envoi">Envoyer</button>
+          <button type="submit" id="bouton-envoi" class="bouton-primaire">Envoyer</button>
           <div class="erreur" id="erreur-envoi" hidden></div>
         </form>
       </div>
@@ -194,7 +296,9 @@
     <div id="vue-dossier" hidden></div>
 
     <div id="vue-vide">
-      <p class="vide">Sélectionne un dossier dans la liste, ou clique sur "+ Nouveau dossier" pour en envoyer un.</p>
+      <div class="etat-vide">
+        <p>Sélectionne un dossier dans la liste, ou clique sur « + Nouveau dossier » pour en envoyer un.</p>
+      </div>
     </div>
   </div>
 </div>
@@ -217,6 +321,8 @@ const LIVRABLES = [
   ["06_signalements_procedure.docx", "Signalements procéduraux"],
   ["99_controle.md", "Rapport de contrôle"],
 ];
+
+const ICONE_DOCUMENT = `<svg class="icone-doc" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>`;
 
 const ETAPES = ["ingest", "classify", "index", "chrono", "decl", "build"];
 const ETAPES_LABELS = {
@@ -295,7 +401,7 @@ async function appelApi(chemin, options = {}) {
 }
 
 async function telechargerLivrable(dossierId, nomFichier, bouton) {
-  const texteInitial = bouton.textContent;
+  const texteInitial = bouton.innerHTML;
   bouton.disabled = true;
   bouton.textContent = "...";
   // Ouvrir l'onglet tout de suite, en réaction directe au clic : un navigateur
@@ -314,7 +420,7 @@ async function telechargerLivrable(dossierId, nomFichier, bouton) {
     alert("Téléchargement impossible : " + erreur.message);
   } finally {
     bouton.disabled = false;
-    bouton.textContent = texteInitial;
+    bouton.innerHTML = texteInitial;
   }
 }
 window.telechargerLivrable = telechargerLivrable;
@@ -373,14 +479,14 @@ function rendreBlocInformations(donnees) {
     <div class="carte">
       <h2>Informations</h2>
       <ul class="liste-personnes">
-        ${donnees.personnes.map((p) => `<li><span class="role-personne">${LIBELLES_ROLE[p.role] || p.role}</span> — ${p.nom}</li>`).join("")}
+        ${donnees.personnes.map((p) => `<li><span class="role-personne">${LIBELLES_ROLE[p.role] || p.role}</span> ${p.nom}</li>`).join("")}
       </ul>
     </div>`;
 }
 
 function rendreBlocChronologie(donnees) {
   if (!donnees.chronologie_faits.length) {
-    return `<div class="carte"><h2>Chronologie</h2><p class="vide">Aucun fait extrait pour ce dossier.</p></div>`;
+    return `<div class="carte"><h2>Chronologie des faits</h2><p class="vide">Aucun fait extrait pour ce dossier.</p></div>`;
   }
   const faits = donnees.chronologie_faits;
   const rendreFait = (f) => `
@@ -390,7 +496,7 @@ function rendreBlocChronologie(donnees) {
         ${f.personne ? `<span class="fait-personne">${f.personne}</span>` : ""}
       </div>
       <div class="fait-description">${f.description || ""}</div>
-      <div class="fait-citation">« ${f.citation} »</div>
+      <blockquote class="fait-citation">« ${f.citation} »</blockquote>
     </li>`;
   const apercu = faits.slice(0, NB_FAITS_APERCU).map(rendreFait).join("");
   const reste = faits.slice(NB_FAITS_APERCU).map(rendreFait).join("");
@@ -402,8 +508,8 @@ function rendreBlocChronologie(donnees) {
   return `
     <div class="carte bloc-chronologie">
       <h2>Chronologie des faits</h2>
-      <ul class="liste-faits">${apercu}</ul>
-      <ul class="liste-faits reste">${reste}</ul>
+      <ul class="liste-faits frise">${apercu}</ul>
+      <ul class="liste-faits frise reste">${reste}</ul>
       ${boutonPlus}
     </div>`;
 }
@@ -432,10 +538,10 @@ async function rendreDetailDossier(dossier) {
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
 
     corps = `
-      <div class="carte">
+      <div class="carte bloc-resume">
         <h2>Résumé de l'affaire</h2>
         ${donnees.resume
-          ? `<p class="texte-resume">${donnees.resume}</p><p class="note-resume">Résumé généré par l'IA à partir des faits déjà vérifiés ci-dessous — à recouper, jamais à citer tel quel.</p>`
+          ? `<p class="texte-resume">${donnees.resume}</p><p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés ci-dessous — à recouper, jamais à citer tel quel.</p>`
           : `<p class="vide">Aucun résumé disponible pour ce dossier (généré uniquement en mode connecté, avec au moins un fait vérifié).</p>`}
       </div>
       ${erreurDonnees ? `<div class="carte"><p class="erreur">${erreurDonnees}</p></div>` : ""}
@@ -445,7 +551,7 @@ async function rendreDetailDossier(dossier) {
         <h2>Documents générés</h2>
         <div class="grille-livrables">
           ${LIVRABLES.map(([nom, libelle]) =>
-            `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${libelle}</button>`
+            `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${ICONE_DOCUMENT}<span>${libelle}</span></button>`
           ).join("")}
         </div>
       </div>`;
