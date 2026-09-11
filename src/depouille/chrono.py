@@ -250,7 +250,28 @@ def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:
     }
 
 
-TYPES_NARRATIFS = ("PV d'audition", "PV d'audition libre", "PV de constatations", "PV de synthèse")
+# Liste d'exclusion plutôt que d'inclusion : un vrai dossier pénal contient
+# une grande variété de pièces (signalement Art. 40, expertise financière,
+# relevé bancaire, pièce saisie...) qu'aucune énumération de types de PV ne
+# peut anticiper à l'avance — les exclure par défaut faute de reconnaître
+# leur intitulé revenait à ne jamais extraire aucun fait des pièces qui
+# fondent souvent l'affaire (ex. le signalement du commissaire aux comptes
+# à l'origine d'un dossier financier). Seules restent exclues les pièces
+# purement procédurales, déjà capturées ailleurs sous forme d'événements de
+# procédure (placement/prolongation/fin de garde à vue, notification des
+# droits), et celles couvertes par le secret professionnel (entretien
+# avocat) ou déjà traitées par un autre livrable (personnalité, casier).
+TYPES_SANS_FAITS_NARRATIFS = (
+    "PV de notification de placement en garde à vue",
+    "PV de notification des droits",
+    "PV de prolongation de garde à vue",
+    "PV de fin de garde à vue",
+    "PV d'entretien avocat",
+    "Réquisition",
+    "Soit-transmis",
+    "Enquête de personnalité",
+    "Casier judiciaire",
+)
 
 
 def _extraire_faits_llm(
@@ -259,7 +280,7 @@ def _extraire_faits_llm(
     provider = obtenir_provider(config)
     nb = 0
     for piece in pieces:
-        if piece["type"] not in TYPES_NARRATIFS:
+        if piece["type"] in TYPES_SANS_FAITS_NARRATIFS:
             continue
         pages = db.execute(
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
