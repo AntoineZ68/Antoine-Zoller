@@ -59,8 +59,36 @@ class EvenementProcedure(BaseModel):
     personne: str | None = None
 
 
+class DureesGardeAVue(BaseModel):
+    duree_totale_garde_a_vue: str
+    delai_placement_notification_droits: str
+    delai_demande_realisation_examen_medical: str
+    delai_demande_realisation_entretien_avocat: str
+
+
+class Signalement(BaseModel):
+    titre: str
+    description: str
+    page_reference: int | None = None
+    citation_reference: str | None = None
+
+
+class DeclarationConfrontation(BaseModel):
+    personne: str | None = None
+    page: int
+    citation: str
+
+
+class PointConfrontation(BaseModel):
+    point_factuel: str
+    declarations: list[DeclarationConfrontation]
+
+
 class DonneesDossier(BaseModel):
     resume: str | None = None
     personnes: list[Personne] = []
     chronologie_faits: list[EvenementFait] = []
     chronologie_procedure: list[EvenementProcedure] = []
+    duree_garde_a_vue: DureesGardeAVue | None = None
+    signalements: list[Signalement] = []
+    confrontations: list[PointConfrontation] = []

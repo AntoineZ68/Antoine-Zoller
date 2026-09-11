@@ -21,6 +21,9 @@ from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import Client
 
+from depouille.chrono import calculer_durees
+from depouille.conformite import detecter_signalements
+
 from . import schemas
 from .pipeline import NOMS_LIVRABLES, traiter_dossier
 from .supabase_client import client_service, client_utilisateur
@@ -229,10 +232,64 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                        ORDER BY ep.date, ep.heure"""
                 )
             ]
+
+            # Chronologie de garde à vue et signalements structurels : mêmes
+            # calculs que ceux déjà utilisés pour 02_chronologie_procedure.docx
+            # et 06_signalements_procedure.docx, réutilisés tels quels. Jamais
+            # de qualification juridique ici non plus — ni "nullité" ni
+            # "irrégularité" : seulement des délais chiffrés et des absences
+            # structurelles, sourcés, à charge de l'avocat de qualifier.
+            duree_garde_a_vue = None
+            a_une_garde_a_vue = db.execute(
+                "SELECT 1 FROM evenements_procedure WHERE nature = 'placement_garde_a_vue' AND statut_verif = 'verifie' LIMIT 1"
+            ).fetchone()
+            if a_une_garde_a_vue:
+                duree_garde_a_vue = calculer_durees(db)
+
+            signalements = [
+                {
+                    "titre": s.titre,
+                    "description": s.description,
+                    "page_reference": s.page_reference,
+                    "citation_reference": s.citation_reference,
+                }
+                for s in detecter_signalements(db)
+            ]
+
+            # Confrontation : les mêmes points factuels abordés par des
+            # personnes différentes, présentés côte à côte — jamais qualifiés
+            # de "contradiction", l'avocat en juge lui-même à la lecture.
+            lignes_decl = [
+                dict(r)
+                for r in db.execute(
+                    """SELECT d.point_factuel, d.page, d.citation, p.nom AS personne
+                       FROM declarations d LEFT JOIN personnes p ON p.id = d.personne_id
+                       WHERE d.statut_verif = 'verifie'
+                       ORDER BY d.point_factuel, p.nom"""
+                )
+            ]
+            groupes_confrontation: dict[str, list[dict]] = {}
+            for ligne in lignes_decl:
+                groupes_confrontation.setdefault(ligne["point_factuel"], []).append(
+                    {"personne": ligne["personne"], "page": ligne["page"], "citation": ligne["citation"]}
+                )
+            confrontations = [
+                {"point_factuel": point_factuel, "declarations": decls}
+                for point_factuel, decls in groupes_confrontation.items()
+                if len({d["personne"] for d in decls if d["personne"]}) >= 2
+            ]
         finally:
             db.close()
 
-    return {"resume": resume, "personnes": personnes, "chronologie_faits": faits, "chronologie_procedure": procedure}
+    return {
+        "resume": resume,
+        "personnes": personnes,
+        "chronologie_faits": faits,
+        "chronologie_procedure": procedure,
+        "duree_garde_a_vue": duree_garde_a_vue,
+        "signalements": signalements,
+        "confrontations": confrontations,
+    }
 
 
 def _lister_fichiers_recursif(bucket, prefixe: str) -> list[str]:

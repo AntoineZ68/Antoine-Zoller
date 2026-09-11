@@ -257,6 +257,24 @@
   }
   .bloc-analyse-ia h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: var(--texte); }
   .bloc-analyse-ia p { margin: 0; font-size: 13.5px; color: var(--texte-att); max-width: 360px; margin: 0 auto; }
+
+  .stats-gav { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .stat-gav { background: #0f1522; border: 1px solid var(--bordure-douce); border-radius: var(--rayon-sm); padding: 14px 16px; }
+  .stat-gav .valeur-stat { font-size: 19px; font-weight: 600; color: var(--texte); }
+  .stat-gav .libelle-stat { font-size: 11px; color: var(--texte-att-2); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .liste-signalements { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .signalement { border-left: 3px solid var(--accent); background: rgba(201,161,90,0.06); border-radius: 0 var(--rayon-sm) var(--rayon-sm) 0; padding: 12px 14px; }
+  .titre-signalement { font-size: 13.5px; font-weight: 600; color: var(--texte); margin-bottom: 4px; }
+  .description-signalement { font-size: 13px; color: var(--texte-att); line-height: 1.5; }
+  .source-signalement { font-size: 12px; color: var(--texte-att-2); font-style: italic; margin-top: 6px; }
+
+  .liste-confrontations { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
+  .point-factuel { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--accent); margin-bottom: 8px; }
+  .declaration-personne { border-top: 1px solid var(--bordure-douce); padding: 9px 0; }
+  .declaration-personne:first-of-type { border-top: none; padding-top: 0; }
+  .nom-declarant { font-size: 12.5px; font-weight: 500; color: var(--texte); }
+  .citation-declarant { font-size: 13px; color: var(--texte-att); font-style: italic; margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -537,6 +555,56 @@ function rendreBlocInformations(donnees) {
     </div>`;
 }
 
+function rendreBlocAnalyseIA(donnees) {
+  const sections = [];
+
+  if (donnees.duree_garde_a_vue) {
+    const d = donnees.duree_garde_a_vue;
+    sections.push(`
+      <div class="carte">
+        <h2>Chronologie de garde à vue</h2>
+        <div class="stats-gav">
+          <div class="stat-gav"><div class="valeur-stat">${d.duree_totale_garde_a_vue}</div><div class="libelle-stat">Durée totale</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${d.delai_placement_notification_droits}</div><div class="libelle-stat">Placement → notification des droits</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${d.delai_demande_realisation_examen_medical}</div><div class="libelle-stat">Demande → examen médical</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${d.delai_demande_realisation_entretien_avocat}</div><div class="libelle-stat">Demande → entretien avocat</div></div>
+        </div>
+        <p class="note-resume" style="margin-top:14px;">Délais calculés à partir des horodatages vérifiés du dossier — à recouper avec les textes applicables, jamais une conclusion en soi.</p>
+      </div>`);
+  }
+
+  sections.push(`
+    <div class="carte">
+      <h2>Points d'attention structurels</h2>
+      ${donnees.signalements.length
+        ? `<ul class="liste-signalements">${donnees.signalements.map((s) => `
+            <li class="signalement">
+              <div class="titre-signalement">${s.titre}</div>
+              <div class="description-signalement">${s.description}</div>
+              ${s.citation_reference ? `<div class="source-signalement">Page ${s.page_reference} — « ${s.citation_reference} »</div>` : ""}
+            </li>`).join("")}</ul>`
+        : `<p class="vide">Aucun signalement structurel détecté (pièce ou événement attendu absent, ou seuil de durée de garde à vue dépassé).</p>`}
+    </div>`);
+
+  sections.push(`
+    <div class="carte">
+      <h2>Points communs entre plusieurs personnes</h2>
+      ${donnees.confrontations.length
+        ? `<ul class="liste-confrontations">${donnees.confrontations.map((c) => `
+            <li class="confrontation">
+              <div class="point-factuel">${c.point_factuel}</div>
+              ${c.declarations.map((d) => `
+                <div class="declaration-personne">
+                  <div class="nom-declarant">${d.personne || "NON TROUVÉ"} — page ${d.page}</div>
+                  <div class="citation-declarant">« ${d.citation} »</div>
+                </div>`).join("")}
+            </li>`).join("")}</ul>`
+        : `<p class="vide">Aucun point commun détecté entre plusieurs personnes sur le même sujet, parmi les déclarations vérifiées.</p>`}
+    </div>`);
+
+  return sections.join("");
+}
+
 function rendreBlocChronologie(donnees) {
   if (!donnees.chronologie_faits.length) {
     return `<div class="carte"><h2>Chronologie des faits</h2><p class="vide">Aucun fait extrait pour ce dossier.</p></div>`;
@@ -581,7 +649,10 @@ async function rendreDetailDossier(dossier) {
   if (dossier.statut === "erreur") {
     corps = `<div class="carte"><p class="erreur">${dossier.message_erreur || "Une erreur est survenue pendant le traitement."}</p></div>`;
   } else if (dossier.statut === "termine") {
-    let donnees = { resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [] };
+    let donnees = {
+      resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [],
+      duree_garde_a_vue: null, signalements: [], confrontations: [],
+    };
     let erreurDonnees = "";
     if (cacheDonnees.has(dossier.id)) {
       donnees = cacheDonnees.get(dossier.id);
@@ -615,14 +686,7 @@ async function rendreDetailDossier(dossier) {
 
     const panneauChrono = rendreBlocChronologie(donnees);
 
-    const panneauAnalyse = `
-      <div class="carte bloc-analyse-ia">
-        <div class="icone-analyse-ia">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.9 4.9L19 8.8l-4.9 1.9L12 15.6l-1.9-4.9L5 8.8l4.9-1.9L12 2z"></path><path d="M19 15l.9 2.2L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.8L19 15z"></path></svg>
-        </div>
-        <h3>Analyse IA</h3>
-        <p>Bientôt disponible — détection automatique de points d'attention procéduraux, à partir des faits et de la chronologie déjà vérifiés ci-dessus.</p>
-      </div>`;
+    const panneauAnalyse = rendreBlocAnalyseIA(donnees);
 
     corps = `
       <div class="barre-onglets">
