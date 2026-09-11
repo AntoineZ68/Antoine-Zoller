@@ -223,6 +223,16 @@
   .etat-vide { text-align: center; padding: 60px 20px; color: var(--texte-att); }
   .etat-vide p { font-size: 14px; max-width: 320px; margin: 0 auto; }
 
+  .chargement {
+    display: flex; align-items: center; justify-content: center; gap: 10px; padding: 70px 20px;
+    color: var(--texte-att); font-size: 13.5px;
+  }
+  .spinner {
+    width: 15px; height: 15px; border: 2px solid var(--bordure); border-top-color: var(--accent);
+    border-radius: 50%; flex-shrink: 0; animation: tourner 0.7s linear infinite;
+  }
+  @keyframes tourner { to { transform: rotate(360deg); } }
+
   .entete-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   #bouton-supprimer-dossier { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
   #bouton-supprimer-dossier:hover { border-color: var(--erreur); color: var(--erreur); }
@@ -468,6 +478,10 @@ window.telechargerLivrable = telechargerLivrable;
 
 let dossiers = [];
 let dossierOuvertId = null;
+// Un dossier "terminé" ne change plus jamais : une fois ses données lues
+// depuis le Storage, inutile de retélécharger et reparser tout le fichier
+// SQLite à chaque clic si l'avocat revient dessus dans la même session.
+const cacheDonnees = new Map();
 
 const listeDossiersEl = document.getElementById("liste-dossiers");
 const vueNouveau = document.getElementById("vue-nouveau");
@@ -569,10 +583,15 @@ async function rendreDetailDossier(dossier) {
   } else if (dossier.statut === "termine") {
     let donnees = { resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [] };
     let erreurDonnees = "";
-    try {
-      donnees = await appelApi(`/api/dossiers/${dossier.id}/donnees`);
-    } catch (erreur) {
-      erreurDonnees = erreur.message;
+    if (cacheDonnees.has(dossier.id)) {
+      donnees = cacheDonnees.get(dossier.id);
+    } else {
+      try {
+        donnees = await appelApi(`/api/dossiers/${dossier.id}/donnees`);
+        cacheDonnees.set(dossier.id, donnees);
+      } catch (erreur) {
+        erreurDonnees = erreur.message;
+      }
     }
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
 
@@ -675,8 +694,21 @@ async function ouvrirDossier(id) {
   dossierOuvertId = id;
   rendreListeLaterale();
   afficherVue("dossier");
+  // Retour visuel immédiat : sans ça, l'ancien contenu (ou rien) reste
+  // affiché pendant les appels réseau, ce qui donne l'impression que le
+  // clic n'a rien fait plutôt que d'être en train de charger.
+  vueDossier.innerHTML = `<div class="chargement"><span class="spinner"></span> Chargement du dossier…</div>`;
   try {
-    const dossier = await appelApi(`/api/dossiers/${id}`);
+    // La liste des dossiers (déjà en mémoire) porte tout ce qu'il faut pour
+    // un dossier terminé ou en erreur — seul un dossier encore en cours a
+    // besoin du détail des étapes, qu'elle ne contient pas. Éviter cet
+    // appel réseau superflu au clic est ce qui coûtait le plus de délai
+    // perçu, puisque c'est de loin le cas le plus fréquent (revoir un
+    // dossier déjà traité).
+    let dossier = dossiers.find((d) => d.id === id);
+    if (!dossier || dossier.statut === "en_cours" || dossier.statut === "en_attente") {
+      dossier = await appelApi(`/api/dossiers/${id}`);
+    }
     if (dossierOuvertId === id) await rendreDetailDossier(dossier);
   } catch (erreur) {
     if (dossierOuvertId === id) vueDossier.innerHTML = `<p class="erreur">${erreur.message}</p>`;
