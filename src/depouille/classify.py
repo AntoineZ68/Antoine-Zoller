@@ -50,6 +50,10 @@ CATEGORIES = [
     "Soit-transmis",
     "Enquête de personnalité",
     "Casier judiciaire",
+    "Relevé bancaire",
+    "Facture",
+    "Signalement (article 40 CPP ou L.823-12 du Code de commerce)",
+    "Correspondance saisie (e-mail, courrier, SMS)",
     "Pièce de procédure – autre",
     "Non identifié",
 ]
@@ -85,6 +89,15 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["TRANSCRIPTION"], "Retranscription"),
     (["AUDITION LIBRE"], "PV d'audition libre"),
     (["AUDITION"], "PV d'audition"),
+    # Pièces documentaires saisies comme preuve plutôt que rédigées par un
+    # service enquêteur : leur en-tête suit un format bancaire/commercial
+    # standardisé, pas la nomenclature des PV — reconnaissables sur un
+    # mot-clé aussi fiable qu'un intitulé de PV classique.
+    (["EXTRAIT DE COMPTE"], "Relevé bancaire"),
+    (["RELEVÉ DE COMPTE"], "Relevé bancaire"),
+    (["RELEVÉ BANCAIRE"], "Relevé bancaire"),
+    (["FACTURE"], "Facture"),
+    (["INVOICE"], "Facture"),
 ]
 
 RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()/\-–—\s.,]{8,}$")

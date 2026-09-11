@@ -135,6 +135,23 @@ def test_entete_titre_apres_des_lignes_de_reference() -> None:
     assert confiance == 1.0
 
 
+def test_reconnait_les_pieces_documentaires_saisies() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur (affaire
+    financière) : un dossier pénal économique repose souvent davantage sur
+    des pièces saisies comme preuve (factures, relevés bancaires) que sur
+    des PV classiques — sans catégorie ni règle dédiées, ces pièces
+    tombaient systématiquement en "Non identifié", qu'elles soient
+    reconnaissables ou non."""
+    entete_facture_fr = _entete_etendu("FACTURE D'INTERVENTION N° F-25-884\nALSACE CAFÉ PRO SERVICES\n")
+    assert _classifier_type_deterministe(entete_facture_fr) == ("Facture", 1.0)
+
+    entete_facture_en = _entete_etendu("KRONOS CONSULTING LTD INVOICE\nStrategic Management Advisory\n")
+    assert _classifier_type_deterministe(entete_facture_en) == ("Facture", 1.0)
+
+    entete_releve = _entete_etendu("EXTRAIT DE COMPTE COURANT PROFESSIONNEL\nPériode du 01/09/2025 au 30/09/2025\n")
+    assert _classifier_type_deterministe(entete_releve) == ("Relevé bancaire", 1.0)
+
+
 def test_entete_titre_apres_champ_libre_non_enumere() -> None:
     """Régression sur un vrai dossier testé par l'utilisateur : la ligne
     "Officier : Capitaine MOREL David, OPJ" arrêtait la lecture de l'en-tête
