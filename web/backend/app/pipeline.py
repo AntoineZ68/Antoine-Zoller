@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, TypeVar
 
 from rich.console import Console
 
@@ -58,15 +60,40 @@ def _config_llm(offline: bool) -> Config:
     )
 
 
+T = TypeVar("T")
+
+
+def _avec_retries(requete: Callable[[], T], tentatives: int = 3, delai_s: float = 2.0) -> T:
+    """Un traitement dure plusieurs minutes et écrit sa progression vers
+    Supabase des dizaines de fois — une passerelle qui répond mal une seule
+    fois (504 Gateway Timeout, panne transitoire) ne doit pas faire échouer
+    tout un traitement par ailleurs réussi. Observé en réel : un dossier
+    entièrement traité (les 6 étapes, tous les livrables déjà envoyés dans
+    le Storage) est parti en erreur à cause d'un seul timeout sur une simple
+    mise à jour de statut."""
+    derniere_erreur: Exception | None = None
+    for tentative in range(tentatives):
+        try:
+            return requete()
+        except Exception as exc:  # noqa: BLE001
+            derniere_erreur = exc
+            if tentative < tentatives - 1:
+                time.sleep(delai_s * (tentative + 1))
+    assert derniere_erreur is not None
+    raise derniere_erreur
+
+
 def _maj_dossier(supabase, dossier_id: str, **champs) -> None:
-    supabase.table("dossiers").update(champs).eq("id", dossier_id).execute()
+    _avec_retries(lambda: supabase.table("dossiers").update(champs).eq("id", dossier_id).execute())
 
 
 def _maj_etape(supabase, dossier_id: str, etape: str, **champs) -> None:
-    supabase.table("traitement_etapes").upsert(
-        {"dossier_id": dossier_id, "etape": etape, **champs},
-        on_conflict="dossier_id,etape",
-    ).execute()
+    _avec_retries(
+        lambda: supabase.table("traitement_etapes").upsert(
+            {"dossier_id": dossier_id, "etape": etape, **champs},
+            on_conflict="dossier_id,etape",
+        ).execute()
+    )
 
 
 def _cout_etape(db, nom_etape: str) -> tuple[float, int, int]:
@@ -111,7 +138,14 @@ def _televerser_resultats(supabase, dossier_id: str, affaire_dir: Path) -> None:
         if chemin.exists():
             bucket.upload(f"{dossier_id}/out/{nom}", str(chemin), _options_upload(chemin))
 
-    _maj_dossier(supabase, dossier_id, resultat_db_path=f"{dossier_id}/depouille.db")
+    try:
+        _maj_dossier(supabase, dossier_id, resultat_db_path=f"{dossier_id}/depouille.db")
+    except Exception as exc:  # noqa: BLE001 — champ purement informatif, jamais relu
+        # ailleurs (donnees_dossier reconstruit le chemin directement à partir
+        # de dossier_id) : son échec, même après retries, ne doit pas faire
+        # basculer en erreur un dossier dont tous les fichiers sont pourtant
+        # déjà bien présents dans le Storage à ce stade.
+        print(f"[pipeline] échec non bloquant de la mise à jour de resultat_db_path pour {dossier_id} : {exc}")
 
 
 def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bool = False) -> None:
@@ -171,10 +205,16 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
             _maj_dossier(supabase, dossier_id, statut="termine", etape_courante=None, nb_pages=nb_pages)
 
         except Exception as exc:  # noqa: BLE001
-            _maj_dossier(
-                supabase, dossier_id,
-                statut="erreur",
-                message_erreur=(str(exc) + "\n" + traceback.format_exc())[-1000:],
-            )
+            try:
+                _maj_dossier(
+                    supabase, dossier_id,
+                    statut="erreur",
+                    message_erreur=(str(exc) + "\n" + traceback.format_exc())[-1000:],
+                )
+            except Exception as exc_signalement:  # noqa: BLE001 — au pire ce
+                # dossier reste bloqué "en cours" (récupérable via le bouton
+                # Supprimer), mais la tâche de fond ne doit jamais planter
+                # sans laisser au moins une trace dans les logs.
+                print(f"[pipeline] échec du signalement d'erreur pour {dossier_id} : {exc_signalement}")
         finally:
             db.close()
