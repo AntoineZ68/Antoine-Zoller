@@ -226,6 +226,27 @@
   .entete-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   #bouton-supprimer-dossier { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
   #bouton-supprimer-dossier:hover { border-color: var(--erreur); color: var(--erreur); }
+
+  .barre-onglets {
+    display: flex; gap: 4px; background: var(--fond-barre); border: 1px solid var(--bordure-douce);
+    border-radius: 999px; padding: 4px; margin-bottom: 22px; width: fit-content; max-width: 100%;
+  }
+  .onglet {
+    display: flex; align-items: center; gap: 7px; border: none; border-radius: 999px; padding: 8px 16px;
+    font-size: 13px; font-weight: 500; color: var(--texte-att); background: transparent; white-space: nowrap;
+  }
+  .onglet:hover { color: var(--texte); border-color: transparent; }
+  .onglet.actif { background: var(--carte); color: var(--accent-clair); box-shadow: var(--ombre-douce); }
+  .onglet svg { flex-shrink: 0; }
+  .panneau-onglet[hidden] { display: none !important; }
+
+  .bloc-analyse-ia { text-align: center; padding: 48px 24px; }
+  .bloc-analyse-ia .icone-analyse-ia {
+    width: 44px; height: 44px; border-radius: 12px; background: rgba(201,161,90,0.12); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;
+  }
+  .bloc-analyse-ia h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: var(--texte); }
+  .bloc-analyse-ia p { margin: 0; font-size: 13.5px; color: var(--texte-att); max-width: 360px; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -327,6 +348,20 @@ const LIVRABLES = [
 ];
 
 const ICONE_DOCUMENT = `<svg class="icone-doc" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>`;
+
+const ONGLETS_DOSSIER = [
+  ["infos", "Informations générales", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`],
+  ["chrono", "Chronologie", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`],
+  ["analyse", "Analyse IA", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.9 4.9L19 8.8l-4.9 1.9L12 15.6l-1.9-4.9L5 8.8l4.9-1.9L12 2z"></path><path d="M19 15l.9 2.2L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.8L19 15z"></path></svg>`],
+];
+let ongletDossierActif = "infos";
+
+function basculerOnglet(nom) {
+  ongletDossierActif = nom;
+  document.querySelectorAll(".onglet").forEach((b) => b.classList.toggle("actif", b.dataset.onglet === nom));
+  document.querySelectorAll(".panneau-onglet").forEach((p) => { p.hidden = p.dataset.panneau !== nom; });
+}
+window.basculerOnglet = basculerOnglet;
 
 const ETAPES = ["ingest", "classify", "index", "chrono", "decl", "build"];
 const ETAPES_LABELS = {
@@ -541,7 +576,7 @@ async function rendreDetailDossier(dossier) {
     }
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
 
-    corps = `
+    const panneauInfos = `
       <div class="carte bloc-resume">
         <h2>Résumé de l'affaire</h2>
         ${donnees.resume
@@ -550,7 +585,6 @@ async function rendreDetailDossier(dossier) {
       </div>
       ${erreurDonnees ? `<div class="carte"><p class="erreur">${erreurDonnees}</p></div>` : ""}
       ${rendreBlocInformations(donnees)}
-      ${rendreBlocChronologie(donnees)}
       <div class="carte">
         <h2>Documents générés</h2>
         <div class="grille-livrables">
@@ -559,6 +593,30 @@ async function rendreDetailDossier(dossier) {
           ).join("")}
         </div>
       </div>`;
+
+    const panneauChrono = rendreBlocChronologie(donnees);
+
+    const panneauAnalyse = `
+      <div class="carte bloc-analyse-ia">
+        <div class="icone-analyse-ia">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.9 4.9L19 8.8l-4.9 1.9L12 15.6l-1.9-4.9L5 8.8l4.9-1.9L12 2z"></path><path d="M19 15l.9 2.2L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.8L19 15z"></path></svg>
+        </div>
+        <h3>Analyse IA</h3>
+        <p>Bientôt disponible — détection automatique de points d'attention procéduraux, à partir des faits et de la chronologie déjà vérifiés ci-dessus.</p>
+      </div>`;
+
+    corps = `
+      <div class="barre-onglets">
+        ${ONGLETS_DOSSIER.map(([id, libelle, icone]) => `
+          <button type="button" class="onglet ${ongletDossierActif === id ? 'actif' : ''}" data-onglet="${id}" onclick="basculerOnglet('${id}')">
+            ${icone}<span>${libelle}</span>
+          </button>
+        `).join("")}
+      </div>
+      <div class="panneau-onglet" data-panneau="infos" ${ongletDossierActif === "infos" ? "" : "hidden"}>${panneauInfos}</div>
+      <div class="panneau-onglet" data-panneau="chrono" ${ongletDossierActif === "chrono" ? "" : "hidden"}>${panneauChrono}</div>
+      <div class="panneau-onglet" data-panneau="analyse" ${ongletDossierActif === "analyse" ? "" : "hidden"}>${panneauAnalyse}</div>
+    `;
   } else {
     const etapesParNom = Object.fromEntries((dossier.etapes || []).map((e) => [e.etape, e]));
     corps = `
@@ -613,6 +671,7 @@ async function supprimerDossier(id, bouton) {
 window.supprimerDossier = supprimerDossier;
 
 async function ouvrirDossier(id) {
+  if (id !== dossierOuvertId) ongletDossierActif = "infos";
   dossierOuvertId = id;
   rendreListeLaterale();
   afficherVue("dossier");
