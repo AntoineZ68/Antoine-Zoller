@@ -19,7 +19,13 @@ class AnthropicProvider(LLMProvider):
             )
         import anthropic  # import différé : jamais chargé en mode offline
 
-        self._client = anthropic.Anthropic(api_key=api_key)
+        # Sans timeout explicite, le SDK attend par défaut plusieurs minutes
+        # avant d'abandonner un appel qui ne répond plus — observé en réel :
+        # une étape du pipeline restait bloquée "en cours" en apparence sans
+        # jamais échouer ni aboutir. 60 s (même valeur que MistralProvider)
+        # borne l'attente à une durée raisonnable pour une réponse dont le
+        # nombre de tokens de sortie reste modéré (max_tokens=4096).
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
 
     def appeler(self, systeme: str, prompt: str, modele: str) -> ReponseLLM:
         reponse = self._client.messages.create(
