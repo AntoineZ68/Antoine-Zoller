@@ -8,7 +8,13 @@ from __future__ import annotations
 import sqlite3
 
 from depouille.chrono import RE_RETROACTIF, _extraire_evenements_piece, _personne_par_nom
-from depouille.classify import _classifier_type_deterministe, _detecter_pieces_par_page, _entete_etendu, _est_titre
+from depouille.classify import (
+    _classifier_type_deterministe,
+    _detecter_pieces_par_page,
+    _entete_etendu,
+    _est_titre,
+    _premiere_mention_hors_titres,
+)
 from depouille.regex_patterns import (
     detecter_cote,
     detecter_date_acte,
@@ -319,6 +325,23 @@ def test_notification_de_mesure_reconnue_comme_placement() -> None:
     entete = "COTE C-010 / PROCES-VERBAL DE NOTIFICATION DE MESURE DE GARDE A VUE"
     type_, _ = _classifier_type_deterministe(entete)
     assert type_ == "PV de notification de placement en garde à vue"
+
+
+def test_premiere_mention_ignore_lavocat_honorifique_abrege() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur (escroquerie
+    Colmar) : "Me SCHMITT" (l'avocat de la défense, mentionné en passant)
+    matchait le même motif Prénom-NOM que "Jean-Marc TARDIEU" — "Me" a une
+    majuscule suivie d'une minuscule, "SCHMITT" est tout en capitales.
+    Résultat : l'avocat était pris pour le mis en cause. "TARDIEU
+    Jean-Marc" lui-même, écrit NOM Prénom dans un champ encadré
+    ("Personne : ..."), n'était pas reconnu du tout par l'ancien motif —
+    les deux bugs se combinaient pour identifier la mauvaise personne."""
+    texte = (
+        "Personne : TARDIEU Jean-Marc\n"
+        "Informons M. TARDIEU de son placement en garde à vue ce jour à 07h00.\n"
+        "Demande à s'entretenir avec un avocat (Me SCHMITT). Avocat avisé à 11h50.\n"
+    )
+    assert _premiere_mention_hors_titres(texte) == ("Jean-Marc", "TARDIEU")
 
 
 def test_date_acte_reconnue_dans_un_champ_encadre() -> None:

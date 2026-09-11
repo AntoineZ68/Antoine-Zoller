@@ -330,14 +330,41 @@ TITRES_A_EXCLURE = {
     "adjudant", "gardien", "maréchal", "docteur", "maître", "monsieur", "madame",
 }
 
+# Abréviations d'honorifiques ("Me SCHMITT") : elles matchent le même motif
+# Prénom-NOM que "Jean-Marc TARDIEU" (une majuscule suivie de minuscules,
+# puis un mot tout en capitales) — sans cette exclusion, le premier avocat
+# mentionné en passant ("Demande à s'entretenir avec un avocat (Me
+# SCHMITT)") est pris pour la personne concernée par la pièce, alors qu'il
+# ne l'est jamais.
+HONORIFIQUES_ABREGES = {"me", "mme", "mlle", "m"}
+
+# Certains PV donnent l'identité de la personne concernée dans un champ
+# encadré ("Personne : TARDIEU Jean-Marc") plutôt qu'en prose — et
+# l'écrivent alors NOM Prénom, jamais Prénom NOM (RE_PERSONNE ne la
+# reconnaît donc pas du tout : "TARDIEU" est tout en capitales, pas
+# "Majuscule puis minuscules"). Motif dédié, volontairement ancré à ce
+# libellé de champ précis plutôt que généralisé à tout le texte : une
+# règle "NOM Prénom" sans ancrage confondrait presque tout titre en
+# capitales suivi d'un mot de la phrase suivante avec un nom de personne.
+RE_PERSONNE_CHAMP = re.compile(
+    r"\bPersonne\s*:\s*([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
+)
+
 
 def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
     """Le premier nom "Prénom NOM" mentionné n'est pas forcément le mis en
     cause : les PV nomment très souvent l'officier rédacteur ("nous,
     capitaine Élodie BASTIER...") avant de nommer la personne concernée. On
     exclut donc les mentions immédiatement précédées d'un titre ou d'un
-    grade — la personne concernée par la pièce est cherchée après ça."""
+    grade, ou dont le "prénom" capturé n'est en réalité qu'un honorifique
+    abrégé — la personne concernée par la pièce est cherchée après ça."""
+    m_champ = RE_PERSONNE_CHAMP.search(texte)
+    if m_champ:
+        return m_champ.group(2), m_champ.group(1)
+
     for m in RE_PERSONNE.finditer(texte):
+        if m.group(1).lower() in HONORIFIQUES_ABREGES:
+            continue
         avant = texte[: m.start()].rstrip().split()
         dernier_mot = avant[-1].lower().rstrip(",.") if avant else ""
         if dernier_mot in TITRES_A_EXCLURE:
