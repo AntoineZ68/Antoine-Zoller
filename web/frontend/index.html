@@ -666,40 +666,51 @@ async function rendreDetailDossier(dossier) {
     }
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
 
-    const panneauInfos = `
-      <div class="carte bloc-resume">
-        <h2>Résumé de l'affaire</h2>
-        ${donnees.resume
-          ? `<p class="texte-resume">${donnees.resume}</p><p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés ci-dessous — à recouper, jamais à citer tel quel.</p>`
-          : `<p class="vide">Aucun résumé disponible pour ce dossier (généré uniquement en mode connecté, avec au moins un fait vérifié).</p>`}
-      </div>
-      ${erreurDonnees ? `<div class="carte"><p class="erreur">${erreurDonnees}</p></div>` : ""}
-      ${rendreBlocInformations(donnees)}
-      <div class="carte">
-        <h2>Documents générés</h2>
-        <div class="grille-livrables">
-          ${LIVRABLES.map(([nom, libelle]) =>
-            `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${ICONE_DOCUMENT}<span>${libelle}</span></button>`
-          ).join("")}
+    if (erreurDonnees) {
+      // Ne jamais construire les onglets sur des données vides : Chronologie
+      // et Analyse IA afficheraient silencieusement "rien trouvé" comme si
+      // l'analyse n'avait vraiment rien donné, alors que c'est le chargement
+      // lui-même qui a échoué (réseau, cold start...).
+      corps = `
+        <div class="carte">
+          <p class="erreur">${erreurDonnees}</p>
+          <button type="button" onclick="ouvrirDossier('${dossier.id}')" style="margin-top:12px;">Réessayer</button>
+        </div>`;
+    } else {
+      const panneauInfos = `
+        <div class="carte bloc-resume">
+          <h2>Résumé de l'affaire</h2>
+          ${donnees.resume
+            ? `<p class="texte-resume">${donnees.resume}</p><p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés ci-dessous — à recouper, jamais à citer tel quel.</p>`
+            : `<p class="vide">Aucun résumé disponible pour ce dossier (généré uniquement en mode connecté, avec au moins un fait vérifié).</p>`}
         </div>
-      </div>`;
+        ${rendreBlocInformations(donnees)}
+        <div class="carte">
+          <h2>Documents générés</h2>
+          <div class="grille-livrables">
+            ${LIVRABLES.map(([nom, libelle]) =>
+              `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${ICONE_DOCUMENT}<span>${libelle}</span></button>`
+            ).join("")}
+          </div>
+        </div>`;
 
-    const panneauChrono = rendreBlocChronologie(donnees);
+      const panneauChrono = rendreBlocChronologie(donnees);
 
-    const panneauAnalyse = rendreBlocAnalyseIA(donnees);
+      const panneauAnalyse = rendreBlocAnalyseIA(donnees);
 
-    corps = `
-      <div class="barre-onglets">
-        ${ONGLETS_DOSSIER.map(([id, libelle, icone]) => `
-          <button type="button" class="onglet ${ongletDossierActif === id ? 'actif' : ''}" data-onglet="${id}" onclick="basculerOnglet('${id}')">
-            ${icone}<span>${libelle}</span>
-          </button>
-        `).join("")}
-      </div>
-      <div class="panneau-onglet" data-panneau="infos" ${ongletDossierActif === "infos" ? "" : "hidden"}>${panneauInfos}</div>
-      <div class="panneau-onglet" data-panneau="chrono" ${ongletDossierActif === "chrono" ? "" : "hidden"}>${panneauChrono}</div>
-      <div class="panneau-onglet" data-panneau="analyse" ${ongletDossierActif === "analyse" ? "" : "hidden"}>${panneauAnalyse}</div>
-    `;
+      corps = `
+        <div class="barre-onglets">
+          ${ONGLETS_DOSSIER.map(([id, libelle, icone]) => `
+            <button type="button" class="onglet ${ongletDossierActif === id ? 'actif' : ''}" data-onglet="${id}" onclick="basculerOnglet('${id}')">
+              ${icone}<span>${libelle}</span>
+            </button>
+          `).join("")}
+        </div>
+        <div class="panneau-onglet" data-panneau="infos" ${ongletDossierActif === "infos" ? "" : "hidden"}>${panneauInfos}</div>
+        <div class="panneau-onglet" data-panneau="chrono" ${ongletDossierActif === "chrono" ? "" : "hidden"}>${panneauChrono}</div>
+        <div class="panneau-onglet" data-panneau="analyse" ${ongletDossierActif === "analyse" ? "" : "hidden"}>${panneauAnalyse}</div>
+      `;
+    }
   } else {
     const etapesParNom = Object.fromEntries((dossier.etapes || []).map((e) => [e.etape, e]));
     corps = `
@@ -742,6 +753,7 @@ async function supprimerDossier(id, bouton) {
   try {
     await appelApi(`/api/dossiers/${id}`, { method: "DELETE" });
     dossiers = dossiers.filter((d) => d.id !== id);
+    cacheDonnees.delete(id);
     dossierOuvertId = null;
     rendreListeLaterale();
     afficherVue("vide");
@@ -846,8 +858,13 @@ function demarrerSuiviAutomatique() {
   }, 6000);
 }
 
-supabaseClient.auth.onAuthStateChange((_evenement, session) => {
+supabaseClient.auth.onAuthStateChange((evenement, session) => {
   afficherEtatConnecte(!!session);
+  // Supabase déclenche cet évènement aussi pour un simple renouvellement de
+  // jeton en arrière-plan (toutes les ~heures, ou au retour sur l'onglet) —
+  // sans cette garde, l'appli revenait silencieusement sur l'écran vide en
+  // pleine lecture d'un dossier, alors que rien n'avait vraiment changé.
+  if (evenement === "TOKEN_REFRESHED" || evenement === "USER_UPDATED") return;
   if (session) {
     document.getElementById("email-utilisateur").textContent = session.user.email;
     afficherVue("vide");

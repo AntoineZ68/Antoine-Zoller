@@ -120,22 +120,32 @@ async def creer_dossier(
     dossier_id = dossier["id"]
 
     repertoire_local = Path(tempfile.mkdtemp(prefix=f"depouille_upload_{dossier_id}_"))
-    chemins_locaux: list[Path] = []
-    bucket_source = client_service().storage.from_("dossiers-source")
-    for fichier in fichiers:
-        nom_fichier = _nom_disponible(repertoire_local, fichier.filename or "dossier.pdf")
-        chemin_local = repertoire_local / nom_fichier
-        with chemin_local.open("wb") as f:
-            shutil.copyfileobj(fichier.file, f)
-        await fichier.close()
-        chemins_locaux.append(chemin_local)
+    try:
+        chemins_locaux: list[Path] = []
+        bucket_source = client_service().storage.from_("dossiers-source")
+        for fichier in fichiers:
+            nom_fichier = _nom_disponible(repertoire_local, fichier.filename or "dossier.pdf")
+            chemin_local = repertoire_local / nom_fichier
+            with chemin_local.open("wb") as f:
+                shutil.copyfileobj(fichier.file, f)
+            await fichier.close()
+            chemins_locaux.append(chemin_local)
 
-        chemin_storage = f"{utilisateur_id}/{dossier_id}/{nom_fichier}"
-        bucket_source.upload(chemin_storage, str(chemin_local), {"upsert": "true", "content-type": "application/pdf"})
+            chemin_storage = f"{utilisateur_id}/{dossier_id}/{nom_fichier}"
+            bucket_source.upload(chemin_storage, str(chemin_local), {"upsert": "true", "content-type": "application/pdf"})
 
-    supabase.table("dossiers").update(
-        {"fichier_source_path": f"{utilisateur_id}/{dossier_id}/"}
-    ).eq("id", dossier_id).execute()
+        supabase.table("dossiers").update(
+            {"fichier_source_path": f"{utilisateur_id}/{dossier_id}/"}
+        ).eq("id", dossier_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        # Un fichier sur plusieurs qui échoue à l'envoi (réseau, Storage
+        # indisponible) laissait sinon un dossier fantôme en base — jamais
+        # traité puisqu'on n'atteint la planification de la tâche de fond
+        # qu'après cette boucle — et son répertoire temporaire local fuyait
+        # sur le disque, faute d'être jamais nettoyé par _traiter_puis_nettoyer.
+        shutil.rmtree(repertoire_local, ignore_errors=True)
+        supabase.table("dossiers").delete().eq("id", dossier_id).execute()
+        raise HTTPException(status_code=502, detail="Échec de l'envoi des fichiers, réessaie.") from exc
 
     background_tasks.add_task(_traiter_puis_nettoyer, dossier_id, chemins_locaux, repertoire_local, mode_offline)
 
