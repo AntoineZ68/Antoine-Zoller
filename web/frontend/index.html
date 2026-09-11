@@ -542,6 +542,22 @@ const LIBELLES_ROLE = {
 };
 const NB_FAITS_APERCU = 4;
 
+const LIBELLES_NATURE_PROCEDURE = {
+  interpellation: "Interpellation",
+  placement_garde_a_vue: "Placement en garde à vue",
+  notification_droits: "Notification des droits",
+  prolongation_garde_a_vue: "Prolongation de garde à vue",
+  fin_garde_a_vue: "Fin de garde à vue",
+  demande_examen_medical: "Demande d'examen médical",
+  realisation_examen_medical: "Examen médical réalisé",
+  demande_entretien_avocat: "Demande d'entretien avocat",
+  realisation_entretien_avocat: "Entretien avocat réalisé",
+  debut_perquisition: "Début de perquisition",
+  fin_perquisition: "Fin de perquisition",
+  debut_audition: "Début d'audition",
+  fin_audition: "Fin d'audition",
+};
+
 function rendreBlocInformations(donnees) {
   if (!donnees.personnes.length) {
     return `<div class="carte"><h2>Informations</h2><p class="vide">Aucune personne identifiée dans ce dossier.</p></div>`;
@@ -573,6 +589,24 @@ function rendreBlocAnalyseIA(donnees) {
       </div>`);
   }
 
+  if (donnees.chronologie_procedure.length) {
+    sections.push(`
+      <div class="carte">
+        <h2>Frise de la procédure</h2>
+        <ul class="liste-faits frise">
+          ${donnees.chronologie_procedure.map((e) => `
+            <li>
+              <div class="fait-entete">
+                <span class="fait-page">${e.date ? `${e.date}${e.heure ? " à " + e.heure : ""} — ` : ""}Page ${e.page}</span>
+                ${e.personne ? `<span class="fait-personne">${e.personne}</span>` : ""}
+              </div>
+              <div class="fait-description">${LIBELLES_NATURE_PROCEDURE[e.nature] || e.nature}</div>
+              <blockquote class="fait-citation">« ${e.citation} »</blockquote>
+            </li>`).join("")}
+        </ul>
+      </div>`);
+  }
+
   sections.push(`
     <div class="carte">
       <h2>Points d'attention structurels</h2>
@@ -599,7 +633,7 @@ function rendreBlocAnalyseIA(donnees) {
                   <div class="citation-declarant">« ${d.citation} »</div>
                 </div>`).join("")}
             </li>`).join("")}</ul>`
-        : `<p class="vide">Aucun point commun détecté entre plusieurs personnes sur le même sujet, parmi les déclarations vérifiées.</p>`}
+        : `<p class="vide">Aucun point commun détecté automatiquement — le rapprochement se fait sur la question posée : deux personnes interrogées avec des formulations différentes sur le même sujet peuvent ne pas être rapprochées ici. Vérifie la chronologie des faits et les documents pour une lecture complète.</p>`}
     </div>`);
 
   return sections.join("");
