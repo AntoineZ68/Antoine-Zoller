@@ -9,6 +9,7 @@ ou OCR) — jamais une estimation.
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -22,10 +23,30 @@ from .regex_patterns import detecter_cote
 
 SEUIL_OCR_CARACTERES = 50
 
+RE_ESPACES_MULTIPLES = re.compile(r"[ \t]{2,}")
+
+
+def _texte_page(page: pdfplumber.page.Page) -> str:
+    """Extrait le texte d'une page en respectant la position horizontale des
+    fragments (layout=True) plutôt que le seul ordre de lecture par défaut de
+    pdfplumber, qui suppose un texte à une colonne. Sur des en-têtes à deux
+    colonnes (ex. "N° Procédure : ... / Date : ... / Officier : ...") ou en
+    présence d'un élément décoratif (logo, tampon) mal positionné dans le
+    flux du PDF, l'ordre par défaut recolle des fragments sans rapport les
+    uns aux autres sur une même ligne, ou les intercale au milieu d'une
+    phrase — cassant aussi bien la détection du titre de la pièce que la
+    citation exacte des faits. layout=True introduit en échange de larges
+    espaces destinés à préserver l'alignement visuel des colonnes ; on les
+    réduit à une espace simple, qui ne change rien à la position relative
+    des mots dans une phrase normale."""
+    brut = page.extract_text(layout=True) or ""
+    lignes = [RE_ESPACES_MULTIPLES.sub(" ", ligne.strip()) for ligne in brut.splitlines()]
+    return "\n".join(lignes).strip("\n")
+
 
 def _extraire_textes_natifs(chemin_pdf: Path) -> list[str]:
     with pdfplumber.open(chemin_pdf) as pdf:
-        return [(page.extract_text() or "") for page in pdf.pages]
+        return [_texte_page(page) for page in pdf.pages]
 
 
 def _empreinte(texte: str, secours: bytes = b"") -> str:

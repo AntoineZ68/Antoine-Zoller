@@ -135,6 +135,31 @@ def test_entete_titre_apres_des_lignes_de_reference() -> None:
     assert confiance == 1.0
 
 
+def test_entete_titre_apres_champ_libre_non_enumere() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur : la ligne
+    "Officier : Capitaine MOREL David, OPJ" arrêtait la lecture de l'en-tête
+    juste avant "PROCÈS-VERBAL D'AUDITION..." car "Officier" ne figurait pas
+    dans la liste énumérée de mots-clés de champs (N°, Feuillet, Date,
+    Heure, Procédure) — aucune énumération de libellés de champ ne peut
+    être exhaustive face à la variété des PV réels (Rédacteur, Enquêteur,
+    Unité, Grade...) : on reconnaît maintenant n'importe quel champ de la
+    forme "Libellé : valeur" plutôt qu'une liste figée."""
+    texte_page = (
+        "DIRECTION ZONALE DE LA POLICE NATIONALE EST\n"
+        "Procédure N° : 2026/DEF/8904\n"
+        "Date : 12 Octobre 2026\n"
+        "Heure : 10h15\n"
+        "Officier : Capitaine MOREL David, OPJ\n"
+        "PROCÈS-VERBAL D'AUDITION DE GARDE À VUE\n"
+        "L'an deux mille vingt-six, le douze octobre à dix heures quinze.\n"
+    )
+    entete = _entete_etendu(texte_page)
+    assert "AUDITION" in entete.upper()
+    type_, confiance = _classifier_type_deterministe(entete)
+    assert type_ == "PV d'audition"
+    assert confiance == 1.0
+
+
 def test_entete_titre_pollue_par_colonne_voisine() -> None:
     """Régression sur un vrai dossier testé par l'utilisateur : certains PV
     mettent le titre et les repères (feuillet, date, heure) sur deux

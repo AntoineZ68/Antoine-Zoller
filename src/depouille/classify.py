@@ -145,7 +145,10 @@ def _est_titre(ligne: str) -> bool:
     return bool(ligne) and len(ligne) >= 8 and bool(RE_TITRE.match(ligne))
 
 
-RE_METADONNEE_ENTETE = re.compile(r"^(N°\s|N°$|FEUILLET\b|DATE\b|HEURE\b|PROCÉDURE\b)", re.IGNORECASE)
+RE_METADONNEE_ENTETE = re.compile(
+    r"^(N°\s|N°$|FEUILLET\b|DATE\b|HEURE\b|PROCÉDURE\b|[A-Za-zÀ-ÿ°'\s]{1,30}:\s*\S)",
+    re.IGNORECASE,
+)
 
 
 def _entete_etendu(texte_page: str) -> str:
