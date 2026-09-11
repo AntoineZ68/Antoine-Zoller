@@ -247,6 +247,16 @@ RE_FORMULE_OUVERTURE_LETTRES = re.compile(
     re.IGNORECASE,
 )
 
+# Troisième formule d'ouverture rencontrée en pratique : ni la prose "L'an
+# ...", ni "Le [date] à [heure]", mais un champ encadré en tête de PV
+# ("Date : ...", "Date de placement : ...", "Date et Heure : ..."). Exclut
+# explicitement "Date de naissance"/"Date de délivrance", qui identifient
+# une personne ou un document, jamais l'acte lui-même.
+RE_DATE_BOITE_ACTE = re.compile(
+    rf"\bDate\b(?!\s+de\s+(?:naissance|d[ée]livrance))[^:\n]{{0,30}}:\s*{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}",
+    re.IGNORECASE,
+)
+
 
 def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:
     """Date et heure de l'acte lui-même, reconnues via l'une des deux
@@ -268,6 +278,10 @@ def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:
             return date, heure
 
     m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}\b", texte, re.IGNORECASE)
+    if m:
+        return normaliser_date(m.group(1)), normaliser_heure(m.group(2))
+
+    m = RE_DATE_BOITE_ACTE.search(texte)
     if m:
         return normaliser_date(m.group(1)), normaliser_heure(m.group(2))
 

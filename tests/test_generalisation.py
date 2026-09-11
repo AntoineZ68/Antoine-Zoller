@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from depouille.chrono import RE_RETROACTIF, _personne_par_nom
+from depouille.chrono import RE_RETROACTIF, _extraire_evenements_piece, _personne_par_nom
 from depouille.classify import _classifier_type_deterministe, _detecter_pieces_par_page, _entete_etendu, _est_titre
 from depouille.regex_patterns import (
     detecter_cote,
@@ -319,3 +319,56 @@ def test_notification_de_mesure_reconnue_comme_placement() -> None:
     entete = "COTE C-010 / PROCES-VERBAL DE NOTIFICATION DE MESURE DE GARDE A VUE"
     type_, _ = _classifier_type_deterministe(entete)
     assert type_ == "PV de notification de placement en garde à vue"
+
+
+def test_date_acte_reconnue_dans_un_champ_encadre() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur (escroquerie
+    Colmar) : certains PV donnent la date/l'heure de l'acte dans un champ
+    encadré en tête de document ("Date de placement : 15 Octobre 2026 à
+    07h00") plutôt que dans la formule de prose "Le [date] à [heure]" —
+    seule forme reconnue jusqu'ici. Sans ce troisième motif, l'heure de
+    placement en garde à vue n'était jamais détectée, et par ricochet
+    aucune durée ni aucun signalement n'était jamais calculé."""
+    assert detecter_date_heure_acte("Date de placement : 15 Octobre 2026 à 07h00") == ("15/10/2026", "07h00")
+    assert detecter_date_heure_acte("Date et Heure : 15 Octobre 2026 à 06h15") == ("15/10/2026", "06h15")
+    # Une date de naissance n'est jamais la date de l'acte lui-même.
+    assert detecter_date_heure_acte("Date de naissance : 14/05/1972") == (None, None)
+
+
+def test_placement_et_notification_droits_dans_le_meme_pv() -> None:
+    """Régression sur le même dossier : le placement en garde à vue et la
+    notification (différée) des droits sont souvent racontés dans UN SEUL
+    PV, pas deux pièces distinctes — jusqu'ici seul le placement était
+    extrait, le délai de notification (souvent le point le plus
+    significatif du dossier) n'était jamais calculé. La notification ne
+    répète pas la date ("n'a pu lui être faite qu'à 11h45") : celle du
+    placement s'applique, le même jour."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE pieces (id INTEGER, type TEXT, personne_principale_id INTEGER)")
+    db.execute("INSERT INTO pieces VALUES (1, 'PV de notification de placement en garde à vue', 1)")
+    piece = db.execute("SELECT * FROM pieces").fetchone()
+
+    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    texte_page = (
+        "PROCÈS-VERBAL DE PLACEMENT EN GARDE À VUE\n"
+        "Personne : TARDIEU Jean-Marc\n"
+        "Date de placement : 15 Octobre 2026 à 07h00\n"
+        "Vu les articles 62-2 et suivants du Code de Procédure Pénale.\n"
+        "Informons M. TARDIEU de son placement en garde à vue ce jour à 07h00.\n"
+        "NOTIFICATION DES DROITS :\n"
+        "En raison de la rédaction des actes de perquisition, du transport vers le "
+        "commissariat et de l'encombrement des cellules, la notification effective des "
+        "droits (droit au silence, droit à un avocat, droit à un médecin) n'a pu lui "
+        "être faite qu'à 11h45.\n"
+    )
+    db.execute("INSERT INTO pages VALUES (1, ?)", (texte_page,))
+    pages = db.execute("SELECT * FROM pages").fetchall()
+
+    evenements = _extraire_evenements_piece(db, piece, pages)
+    par_nature = {e["nature"]: e for e in evenements}
+
+    assert par_nature["placement_garde_a_vue"]["date"] == "15/10/2026"
+    assert par_nature["placement_garde_a_vue"]["heure"] == "07h00"
+    assert par_nature["notification_droits"]["date"] == "15/10/2026"
+    assert par_nature["notification_droits"]["heure"] == "11h45"

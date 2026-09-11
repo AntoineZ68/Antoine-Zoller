@@ -27,6 +27,7 @@ from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
     FRAGMENT_HEURE,
+    RE_DATE_BOITE_ACTE,
     normaliser_date,
     normaliser_heure,
     phrase_contenant,
@@ -63,6 +64,16 @@ RE_AUDITION_DEBUT = re.compile(
     rf"[Ll]e\s+{FRAGMENT_DATE},?\s*[Aa]udition\s+débutée\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
 )
 RE_AUDITION_FIN = re.compile(rf"[Aa]udition\s+close\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
+# Beaucoup de PV notifient le placement en garde à vue ET les droits dans
+# le même document plutôt que dans deux pièces distinctes — la mention
+# d'un retard de notification ("la notification ... n'a pu ... qu'à ...")
+# y figure alors comme une simple précision dans le corps du texte, jamais
+# comme une pièce séparée. Fenêtre bornée (pas de correspondance sur tout
+# le document) : les deux mots-clés et l'heure doivent se trouver proches
+# l'un de l'autre pour compter comme le même évènement.
+RE_NOTIFICATION_DROITS_DIFFEREE = re.compile(
+    rf"notification.{{0,60}}?droits.{{0,200}}?à\s+{FRAGMENT_HEURE}", re.IGNORECASE | re.DOTALL
+)
 
 NATURE_SIMPLE_PAR_TYPE = {
     "PV d'interpellation": "interpellation",
@@ -134,7 +145,7 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
 
     if type_ in NATURE_SIMPLE_PAR_TYPE:
         nature = NATURE_SIMPLE_PAR_TYPE[type_]
-        r = _chercher_sur_pages(pages, RE_DATE_HEURE_ACTE)
+        r = _chercher_sur_pages(pages, RE_DATE_HEURE_ACTE) or _chercher_sur_pages(pages, RE_DATE_BOITE_ACTE)
         if r:
             ajouter(nature, r, 1, 2)
 
@@ -151,6 +162,30 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
             r_interp = _chercher_sur_pages(pages, RE_INTERPELLATION)
             if r_interp:
                 ajouter("interpellation", r_interp, 1, 2)
+
+            # Beaucoup de PV notifient le placement et les droits dans le
+            # même document (voir RE_NOTIFICATION_DROITS_DIFFEREE) plutôt
+            # que dans deux pièces séparées — sans quoi le délai entre les
+            # deux, souvent le point le plus significatif, ne serait jamais
+            # calculé. La date n'est pas répétée dans ce genre de mention
+            # ("n'a pu être faite qu'à 11h45") : celle du placement, déjà
+            # établi ci-dessus, s'applique (même jour).
+            r_notif = _chercher_sur_pages(pages, RE_NOTIFICATION_DROITS_DIFFEREE)
+            if r_notif:
+                page, m, citation = r_notif
+                date_placement = next(
+                    (e["date"] for e in evenements if e["nature"] == "placement_garde_a_vue"), None
+                )
+                evenements.append(
+                    {
+                        "nature": "notification_droits",
+                        "date": date_placement,
+                        "heure": normaliser_heure(m.group(1)),
+                        "page": page,
+                        "citation": citation,
+                        "personne_id": personne_id,
+                    }
+                )
 
     elif type_ == "Certificat médical":
         r = _chercher_sur_pages(pages, RE_DEMANDE_MEDECIN)
