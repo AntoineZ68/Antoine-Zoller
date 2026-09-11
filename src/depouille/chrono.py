@@ -290,16 +290,28 @@ def _extraire_faits_llm(
         try:
             reponse = provider.appeler(
                 systeme=(
-                    "Tu extrais des affirmations factuelles d'une pièce de procédure pénale "
-                    "française. Pour chaque affirmation, cite le texte EXACT (mot pour mot, "
+                    "Tu extrais des affirmations factuelles d'une pièce d'un dossier pénal "
+                    "français. Pour chaque affirmation, cite le texte EXACT (mot pour mot, "
                     "sans reformuler) et le numéro de page où il apparaît. N'invente rien, ne "
                     "déduis rien. "
                     "Ignore les champs de référence purement administratifs de l'en-tête "
                     "(numéro de parquet, numéro d'enquête, et les lignes autonomes \"DATE :\" / "
                     "\"HEURE :\" qui ne font que répéter la date/l'heure de l'acte) : ce ne sont "
-                    "pas des faits narratifs, ne les extrais pas comme tels. Concentre-toi sur "
-                    "les événements, actions, déclarations et constatations qui font avancer le "
-                    "récit. "
+                    "pas des faits narratifs, ne les extrais pas comme tels. "
+                    "Certaines pièces sont des documents structurés (relevé bancaire, facture) "
+                    "plutôt que du récit : n'en extrais PAS chaque ligne ou chaque champ "
+                    "d'identification (adresse, devise, numéro de TVA, numéro de facture, code "
+                    "SWIFT/IBAN isolé sans lien avec l'affaire, ligne de découvert autorisé...). "
+                    "N'extrais une ligne de relevé bancaire ou de facture que si son contenu a "
+                    "un lien direct et visible avec l'affaire (ex. un virement vers une entité "
+                    "ou une personne déjà nommée ailleurs dans le dossier, un montant ou une "
+                    "date déjà mentionnés) — jamais une opération bancaire ou une ligne de "
+                    "facturation ordinaire (frais courants, achats, salaires, impôts) sans lien "
+                    "apparent. Dans le doute sur la pertinence d'une ligne purement "
+                    "administrative ou tabulaire, n'extrais pas. "
+                    "Concentre-toi sur les événements, actions, déclarations et constatations "
+                    "qui font avancer la compréhension de l'affaire pour un avocat qui découvre "
+                    "le dossier — pas sur une retranscription exhaustive du document. "
                     "Réponds en JSON : une liste d'objets "
                     '{"page": int, "citation": "...", "description": "...", "personne_source": "..."}.'
                 ),
