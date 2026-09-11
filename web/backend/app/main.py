@@ -235,7 +235,46 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
     return {"resume": resume, "personnes": personnes, "chronologie_faits": faits, "chronologie_procedure": procedure}
 
 
-@app.get("/api/dossiers/{dossier_id}/livrables/{nom_fichier}")
+def _lister_fichiers_recursif(bucket, prefixe: str) -> list[str]:
+    """Le Storage de Supabase ne liste qu'un niveau à la fois (les
+    sous-dossiers apparaissent comme des entrées sans id) — on descend donc
+    récursivement pour retrouver tous les fichiers réellement présents sous
+    un préfixe, plutôt que de deviner leurs noms."""
+    chemins: list[str] = []
+    for entree in bucket.list(prefixe.rstrip("/") or None) or []:
+        chemin = f"{prefixe}{entree['name']}"
+        if entree.get("id") is None:
+            chemins.extend(_lister_fichiers_recursif(bucket, chemin + "/"))
+        else:
+            chemins.append(chemin)
+    return chemins
+
+
+@app.delete("/api/dossiers/{dossier_id}", status_code=204)
+def supprimer_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> None:
+    """Supprime un dossier : d'abord ses fichiers dans le Storage (source et
+    résultats), puis sa ligne en base — jamais l'inverse, pour ne pas se
+    retrouver avec des fichiers orphelins qu'aucune ligne ne référence plus
+    et qu'on ne pourrait donc plus jamais retrouver pour les nettoyer."""
+    supabase, utilisateur_id = contexte
+    _dossier_ou_404(supabase, dossier_id)  # vérifie l'appartenance via la RLS
+
+    service = client_service()
+    try:
+        for nom_bucket, prefixe in (
+            ("dossiers-source", f"{utilisateur_id}/{dossier_id}/"),
+            ("dossiers-resultats", f"{dossier_id}/"),
+        ):
+            bucket = service.storage.from_(nom_bucket)
+            chemins = _lister_fichiers_recursif(bucket, prefixe)
+            if chemins:
+                bucket.remove(chemins)
+    except Exception:  # noqa: BLE001 — un fichier orphelin dans le Storage est
+        # rattrapable manuellement ; laisser un dossier bloqué dans la liste
+        # de l'avocat parce que le nettoyage du Storage a échoué ne l'est pas.
+        pass
+
+    supabase.table("dossiers").delete().eq("id", dossier_id).execute()
 def telecharger_livrable(
     dossier_id: str, nom_fichier: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)
 ) -> dict:

@@ -222,6 +222,10 @@
 
   .etat-vide { text-align: center; padding: 60px 20px; color: var(--texte-att); }
   .etat-vide p { font-size: 14px; max-width: 320px; margin: 0 auto; }
+
+  .entete-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  #bouton-supprimer-dossier { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
+  #bouton-supprimer-dossier:hover { border-color: var(--erreur); color: var(--erreur); }
 </style>
 </head>
 <body>
@@ -580,12 +584,33 @@ async function rendreDetailDossier(dossier) {
         <h2>${dossier.nom}</h2>
         ${dossier.reference ? `<div class="ref-detail">${dossier.reference}</div>` : ""}
       </div>
-      ${badge}
+      <div class="entete-actions">
+        ${badge}
+        <button type="button" id="bouton-supprimer-dossier" onclick="supprimerDossier('${dossier.id}', this)">Supprimer</button>
+      </div>
     </div>
     ${infos}
     ${corps}
   `;
 }
+
+async function supprimerDossier(id, bouton) {
+  if (!confirm("Supprimer définitivement ce dossier et tous ses documents ? Cette action est irréversible.")) return;
+  bouton.disabled = true;
+  bouton.textContent = "...";
+  try {
+    await appelApi(`/api/dossiers/${id}`, { method: "DELETE" });
+    dossiers = dossiers.filter((d) => d.id !== id);
+    dossierOuvertId = null;
+    rendreListeLaterale();
+    afficherVue("vide");
+  } catch (erreur) {
+    alert("Suppression impossible : " + erreur.message);
+    bouton.disabled = false;
+    bouton.textContent = "Supprimer";
+  }
+}
+window.supprimerDossier = supprimerDossier;
 
 async function ouvrirDossier(id) {
   dossierOuvertId = id;
