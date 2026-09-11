@@ -27,6 +27,8 @@ ROUTES_ATTENDUES = {
     ("GET", "/api/dossiers/{dossier_id}"),
     ("DELETE", "/api/dossiers/{dossier_id}"),
     ("GET", "/api/dossiers/{dossier_id}/donnees"),
+    ("GET", "/api/dossiers/{dossier_id}/documents"),
+    ("GET", "/api/dossiers/{dossier_id}/documents/{nom_fichier}"),
     ("GET", "/api/dossiers/{dossier_id}/livrables/{nom_fichier}"),
 }
 

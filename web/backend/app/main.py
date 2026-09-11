@@ -362,6 +362,46 @@ def supprimer_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_c
     supabase.table("dossiers").delete().eq("id", dossier_id).execute()
 
 
+@app.get("/api/dossiers/{dossier_id}/documents", response_model=list[str])
+def lister_documents_transmis(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> list[str]:
+    """Noms des PDF sources tels que transmis par l'avocat pour ce dossier —
+    lus directement depuis le Storage, jamais depuis une copie en base, et
+    donc disponibles même pendant que le traitement est en cours."""
+    supabase, utilisateur_id = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)  # vérifie l'appartenance via la RLS
+    prefixe = dossier.get("fichier_source_path") or f"{utilisateur_id}/{dossier_id}/"
+    bucket = client_service().storage.from_("dossiers-source")
+    chemins = _lister_fichiers_recursif(bucket, prefixe)
+    return sorted(chemin[len(prefixe):] for chemin in chemins)
+
+
+@app.get("/api/dossiers/{dossier_id}/documents/{nom_fichier}")
+def telecharger_document_transmis(
+    dossier_id: str, nom_fichier: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)
+) -> dict:
+    supabase, utilisateur_id = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)  # vérifie l'appartenance via la RLS
+    prefixe = dossier.get("fichier_source_path") or f"{utilisateur_id}/{dossier_id}/"
+    bucket = client_service().storage.from_("dossiers-source")
+
+    # nom_fichier vient du client : on ne construit le chemin Storage qu'à
+    # partir d'un nom réellement listé sous le préfixe du dossier, jamais
+    # directement, pour ne pas laisser un ".." ou un chemin absolu s'échapper
+    # du dossier de cet avocat.
+    noms_disponibles = {chemin[len(prefixe):] for chemin in _lister_fichiers_recursif(bucket, prefixe)}
+    if nom_fichier not in noms_disponibles:
+        raise HTTPException(status_code=404, detail="Document introuvable pour ce dossier.")
+
+    try:
+        reponse = bucket.create_signed_url(f"{prefixe}{nom_fichier}", 300)
+        url = reponse.get("signedURL") or reponse.get("signedUrl")
+    except Exception:  # noqa: BLE001
+        url = None
+    if not url:
+        raise HTTPException(status_code=404, detail="Impossible de générer un lien pour ce document.")
+    return {"url": url}
+
+
 @app.get("/api/dossiers/{dossier_id}/livrables/{nom_fichier}")
 def telecharger_livrable(
     dossier_id: str, nom_fichier: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)

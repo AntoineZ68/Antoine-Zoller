@@ -190,6 +190,16 @@
   .grille-livrables button:hover { background: rgba(201,161,90,0.06); }
   .icone-doc { flex-shrink: 0; color: var(--accent); opacity: 0.85; }
 
+  .liste-documents-transmis {
+    display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; padding-right: 4px;
+  }
+  .liste-documents-transmis button {
+    width: 100%; text-align: left; padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+    background: #0f1522; overflow: hidden;
+  }
+  .liste-documents-transmis button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .liste-documents-transmis button:hover { background: rgba(201,161,90,0.06); }
+
   .bloc-resume { border: 1px solid var(--bordure-douce); position: relative; overflow: hidden; }
   .bloc-resume::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(var(--accent-clair), var(--accent-fonce)); }
   .texte-resume { font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 18px; line-height: 1.5; margin: 0 0 10px; color: var(--texte); }
@@ -492,6 +502,27 @@ async function telechargerLivrable(dossierId, nomFichier, bouton) {
 }
 window.telechargerLivrable = telechargerLivrable;
 
+async function voirDocumentTransmis(dossierId, nomFichier, bouton) {
+  const texteInitial = bouton.innerHTML;
+  bouton.disabled = true;
+  const nouvelOnglet = window.open("", "_blank");
+  try {
+    const { url } = await appelApi(`/api/dossiers/${dossierId}/documents/${encodeURIComponent(nomFichier)}`);
+    if (nouvelOnglet) {
+      nouvelOnglet.location = url;
+    } else {
+      window.location.href = url;
+    }
+  } catch (erreur) {
+    if (nouvelOnglet) nouvelOnglet.close();
+    alert("Ouverture impossible : " + erreur.message);
+  } finally {
+    bouton.disabled = false;
+    bouton.innerHTML = texteInitial;
+  }
+}
+window.voirDocumentTransmis = voirDocumentTransmis;
+
 // --- État de l'appli : liste des dossiers (barre latérale) + dossier ouvert (zone principale) ---
 
 let dossiers = [];
@@ -505,6 +536,7 @@ let dossierOuvertDernierStatutAffiche = null;
 // depuis le Storage, inutile de retélécharger et reparser tout le fichier
 // SQLite à chaque clic si l'avocat revient dessus dans la même session.
 const cacheDonnees = new Map();
+const cacheDocuments = new Map();
 
 const listeDossiersEl = document.getElementById("liste-dossiers");
 const vueNouveau = document.getElementById("vue-nouveau");
@@ -721,6 +753,20 @@ async function rendreDetailDossier(dossier) {
     }
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
 
+    // Liste des PDF sources tels que transmis — jamais bloquante : un échec
+    // ici masquerait sinon toute la vue derrière une erreur qui n'a rien à
+    // voir avec l'analyse elle-même.
+    let documentsTransmis = cacheDocuments.get(dossier.id) || null;
+    if (!documentsTransmis) {
+      try {
+        documentsTransmis = await appelApi(`/api/dossiers/${dossier.id}/documents`);
+        cacheDocuments.set(dossier.id, documentsTransmis);
+      } catch (erreur) {
+        documentsTransmis = [];
+      }
+    }
+    if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
+
     if (erreurDonnees) {
       // Ne jamais construire les onglets sur des données vides : Chronologie
       // et Analyse IA afficheraient silencieusement "rien trouvé" comme si
@@ -747,6 +793,16 @@ async function rendreDetailDossier(dossier) {
               `<button type="button" onclick="telechargerLivrable('${dossier.id}','${nom}', this)">${ICONE_DOCUMENT}<span>${libelle}</span></button>`
             ).join("")}
           </div>
+        </div>
+        <div class="carte">
+          <h2>Documents transmis</h2>
+          ${documentsTransmis.length
+            ? `<div class="liste-documents-transmis">
+                ${documentsTransmis.map((nom) =>
+                  `<button type="button" onclick="voirDocumentTransmis('${dossier.id}','${nom.replace(/'/g, "\\'")}', this)">${ICONE_DOCUMENT}<span>${nom}</span></button>`
+                ).join("")}
+              </div>`
+            : `<p class="vide">Aucun document source retrouvé pour ce dossier.</p>`}
         </div>`;
 
       const panneauChrono = rendreBlocChronologie(donnees);
@@ -809,6 +865,7 @@ async function supprimerDossier(id, bouton) {
     await appelApi(`/api/dossiers/${id}`, { method: "DELETE" });
     dossiers = dossiers.filter((d) => d.id !== id);
     cacheDonnees.delete(id);
+    cacheDocuments.delete(id);
     dossierOuvertId = null;
     rendreListeLaterale();
     afficherVue("vide");
