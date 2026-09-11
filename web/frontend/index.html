@@ -635,10 +635,14 @@ async function rafraichirListe() {
   rendreListeLaterale();
   if (dossierOuvertId && !vueDossier.hidden) {
     const dossier = dossiers.find((d) => d.id === dossierOuvertId);
+    // Un dossier "terminé" ne change plus jamais : le re-rendre à chaque
+    // scrutation (toutes les 6 s, tant qu'UN SEUL dossier de la liste est
+    // encore en cours, même un autre que celui affiché) écrasait l'état
+    // d'affichage en cours — ex. la chronologie dépliée se refermait toute
+    // seule pendant la lecture. Ne re-rendre que s'il y a effectivement
+    // une progression à suivre.
     if (dossier && (dossier.statut === "en_cours" || dossier.statut === "en_attente")) {
       ouvrirDossier(dossierOuvertId); // récupère aussi le détail des étapes
-    } else if (dossier) {
-      ouvrirDossier(dossierOuvertId);
     }
   }
 }
