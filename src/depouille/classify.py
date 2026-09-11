@@ -186,7 +186,8 @@ NB_LIGNES_EXAMINEES_FRONTIERE = 3
 
 def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
     """Frontière déterministe : une page démarre une nouvelle pièce si l'une
-    de ses toutes premières lignes non vides est un intitulé en capitales ;
+    de ses toutes premières lignes non vides est un intitulé en capitales,
+    ou si elle provient d'un fichier PDF différent de la page précédente ;
     sinon elle prolonge la précédente.
 
     Certaines pages portent un tampon de transmission avant le vrai titre
@@ -194,11 +195,23 @@ def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
     PAGE 1/2") : cette ligne contient des ":" qui l'excluent d'office du
     test de titre (jamais dans un intitulé légitime), donc regarder
     uniquement la toute première ligne ratait le titre juste en dessous —
-    fusionnant deux pièces distinctes en une seule."""
+    fusionnant deux pièces distinctes en une seule.
+
+    Un dossier réel arrive souvent en plusieurs PDF distincts (un relevé
+    bancaire, un e-mail saisi, une facture...) dont beaucoup ne commencent
+    pas par un intitulé en capitales — un e-mail commence par "De :",
+    "Envoyé :". Sans ce second signal, deux fichiers sans rapport entre eux
+    finissaient purement et simplement fusionnés en une seule pièce, avec
+    le type, la date et les citations de l'un attribués à l'autre. Démarrer
+    systématiquement une nouvelle pièce à chaque changement de fichier est
+    plus sûr qu'un intitulé manqué : au pire une pièce réellement scindée
+    entre deux fichiers ressort en deux pièces "Non identifié" signalées
+    pour relecture — jamais une fusion silencieuse et invisible."""
     pieces: list[dict] = []
     for page in pages:
+        nouveau_fichier = bool(pieces) and page["fichier_source"] != pieces[-1]["pages"][-1]["fichier_source"]
         premieres_lignes = [l for l in page["texte"].splitlines() if l.strip()][:NB_LIGNES_EXAMINEES_FRONTIERE]
-        nouvelle_piece = not pieces or any(_est_titre(l) for l in premieres_lignes)
+        nouvelle_piece = not pieces or nouveau_fichier or any(_est_titre(l) for l in premieres_lignes)
         if nouvelle_piece:
             pieces.append({"page_debut": page["numero_global"], "page_fin": page["numero_global"], "pages": [page]})
         else:

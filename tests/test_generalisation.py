@@ -174,14 +174,15 @@ def test_entete_titre_pollue_par_colonne_voisine() -> None:
 
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    db.execute("CREATE TABLE pages (numero_global INTEGER, fichier_source TEXT, texte TEXT)")
     db.executemany(
-        "INSERT INTO pages VALUES (?, ?)",
+        "INSERT INTO pages VALUES (?, ?, ?)",
         [
-            (1, "PROCÈS-VERBAL DE SAISINE\nUn premier acte.\n"),
-            (2, "Suite du premier acte, sans nouvel intitulé.\n"),
+            (1, "dossier.pdf", "PROCÈS-VERBAL DE SAISINE\nUn premier acte.\n"),
+            (2, "dossier.pdf", "Suite du premier acte, sans nouvel intitulé.\n"),
             (
                 3,
+                "dossier.pdf",
                 "DIRECTION CENTRALE DE LA POLICE JUDICIAIRE Feuillet N° 1/2\n"
                 "BRIGADE DES STUPÉFIANTS - LYON Date : 02/09/2026\n"
                 "N° Procédure : 2026-LY-4521 Heure de début : 14h30\n"
@@ -196,6 +197,42 @@ def test_entete_titre_pollue_par_colonne_voisine() -> None:
     assert groupes[1]["page_debut"] == 3
 
 
+def test_frontiere_piece_a_chaque_nouveau_fichier_source() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur (affaire
+    financière à plusieurs PDF) : un relevé bancaire et un e-mail saisi,
+    envoyés comme deux fichiers PDF distincts, se retrouvaient fusionnés en
+    une seule pièce — l'e-mail ("De :", "Envoyé :", en casse mixte) ne
+    contient aucun intitulé en capitales sur ses premières lignes. Le type,
+    la date apparente et les citations de l'un se retrouvaient alors
+    attribués à l'autre. Un changement de fichier source doit à lui seul
+    déclencher une nouvelle pièce, même sans intitulé reconnu."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE pages (numero_global INTEGER, fichier_source TEXT, texte TEXT)")
+    db.executemany(
+        "INSERT INTO pages VALUES (?, ?, ?)",
+        [
+            (
+                1,
+                "releve_cic.pdf",
+                "CIC EST\nAGENCE STRASBOURG KLÉBER\nEXTRAIT DE COMPTE COURANT PROFESSIONNEL\n",
+            ),
+            (
+                2,
+                "email_saisi.pdf",
+                "De: Marc Vandal <m.vandal@bati-est.fr>\n"
+                "Envoyé: Jeudi 4 septembre 2025 18:42\n"
+                "À: Sylvie RENAUD (Comptabilité)\n",
+            ),
+        ],
+    )
+    pages = db.execute("SELECT * FROM pages ORDER BY numero_global").fetchall()
+    groupes = _detecter_pieces_par_page(pages)
+    assert len(groupes) == 2
+    assert groupes[0]["page_debut"] == 1 and groupes[0]["page_fin"] == 1
+    assert groupes[1]["page_debut"] == 2 and groupes[1]["page_fin"] == 2
+
+
 def test_frontiere_piece_apres_tampon_de_fax() -> None:
     """Régression sur un vrai dossier testé par l'utilisateur : une page
     reçue par fax porte un tampon de transmission au-dessus du titre
@@ -206,13 +243,14 @@ def test_frontiere_piece_apres_tampon_de_fax() -> None:
     personne concernée par la première pièce)."""
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    db.execute("CREATE TABLE pages (numero_global INTEGER, fichier_source TEXT, texte TEXT)")
     db.executemany(
-        "INSERT INTO pages VALUES (?, ?)",
+        "INSERT INTO pages VALUES (?, ?, ?)",
         [
-            (1, "PROCÈS-VERBAL D'AUDITION\nUn premier acte.\n"),
+            (1, "dossier.pdf", "PROCÈS-VERBAL D'AUDITION\nUn premier acte.\n"),
             (
                 2,
+                "dossier.pdf",
                 "FAX FROM: COMMISSARIAT VENISSIEUX -- TO: PJ LYON STUPS -- DATE: 03/09/2026 09:42 -- PAGE 1/2\n"
                 "PROCÈS-VERBAL D'AUDITION DE TÉMOIN\n"
                 "(ARTICLE 62 DU CODE DE PROCÉDURE PÉNALE)\n"
