@@ -275,6 +275,9 @@ def supprimer_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_c
         pass
 
     supabase.table("dossiers").delete().eq("id", dossier_id).execute()
+
+
+@app.get("/api/dossiers/{dossier_id}/livrables/{nom_fichier}")
 def telecharger_livrable(
     dossier_id: str, nom_fichier: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)
 ) -> dict:
