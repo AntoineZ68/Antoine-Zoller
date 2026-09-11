@@ -1,6 +1,21 @@
 from __future__ import annotations
 
+from depouille.ingest import SEUIL_OCR_CARACTERES, _longueur_contenu
+
 from .conftest import DossierTraite
+
+
+def test_longueur_contenu_ignore_les_lignes_vides_de_mise_en_page() -> None:
+    """Régression : l'extraction en layout=True (voir ingest._texte_page)
+    reproduit fidèlement les espaces blancs visuels d'une page sous forme
+    de lignes vides — une page quasiment blanche (juste un tampon, par
+    exemple) ne doit pas paraître au-dessus du seuil de déclenchement de
+    l'OCR simplement parce qu'elle contient beaucoup de lignes vides."""
+    page_presque_blanche = "\n" * 40 + "Tampon" + "\n" * 40
+    assert _longueur_contenu(page_presque_blanche) < SEUIL_OCR_CARACTERES
+
+    page_avec_contenu_reel = "Un paragraphe de texte tout à fait normal, avec plusieurs mots.\n" * 2
+    assert _longueur_contenu(page_avec_contenu_reel) >= SEUIL_OCR_CARACTERES
 
 
 def test_nombre_de_pages(dossier_traite: DossierTraite) -> None:

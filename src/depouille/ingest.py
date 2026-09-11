@@ -54,8 +54,18 @@ def _empreinte(texte: str, secours: bytes = b"") -> str:
     return hashlib.sha256(contenu).hexdigest()
 
 
+def _longueur_contenu(texte: str) -> int:
+    """Longueur du texte hors tout espacement — l'extraction en layout=True
+    (voir _texte_page) reproduit fidèlement les espaces blancs visuels d'une
+    page sous forme de lignes vides, qui gonfleraient artificiellement la
+    longueur mesurée sans qu'il y ait le moindre caractère de contenu réel
+    en plus. Le seuil de déclenchement de l'OCR doit rester une mesure de
+    contenu, pas de mise en page."""
+    return len("".join(texte.split()))
+
+
 def _ocr_si_necessaire(chemin_pdf: Path, textes_natifs: list[str], dossier_travail: Path, console: Console) -> Path:
-    pages_a_ocr = [i + 1 for i, t in enumerate(textes_natifs) if len(t.strip()) < SEUIL_OCR_CARACTERES]
+    pages_a_ocr = [i + 1 for i, t in enumerate(textes_natifs) if _longueur_contenu(t) < SEUIL_OCR_CARACTERES]
     if not pages_a_ocr:
         return chemin_pdf
 
@@ -124,7 +134,7 @@ def lancer_ingestion(
         for i, texte in enumerate(textes_finaux):
             numero_global += 1
             page_fichier = i + 1
-            ocr_applique = len(textes_natifs[i].strip()) < SEUIL_OCR_CARACTERES
+            ocr_applique = _longueur_contenu(textes_natifs[i]) < SEUIL_OCR_CARACTERES
             cote = detecter_cote(texte)
 
             db.execute(
