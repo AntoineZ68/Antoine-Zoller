@@ -23,6 +23,7 @@ from supabase import Client
 
 from depouille.chrono import calculer_durees
 from depouille.conformite import detecter_signalements
+from depouille.recoupements import detecter_recoupements
 
 from . import schemas
 from .pipeline import NOMS_LIVRABLES, traiter_dossier
@@ -288,6 +289,22 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 for point_factuel, decls in groupes_confrontation.items()
                 if len({d["personne"] for d in decls if d["personne"]}) >= 2
             ]
+
+            # Recoupement d'identifiants exacts (téléphone, plaque, IBAN,
+            # adresse) sur l'ensemble du texte du dossier — entièrement
+            # déterministe, complémentaire des confrontations ci-dessus qui
+            # ne portent que sur les déclarations déjà extraites.
+            recoupements = [
+                {
+                    "type_entite": e.type_entite,
+                    "valeur": e.valeur,
+                    "occurrences": [
+                        {"page": o.page, "citation": o.citation, "valeur_brute": o.valeur_brute}
+                        for o in e.occurrences
+                    ],
+                }
+                for e in detecter_recoupements(db)
+            ]
         finally:
             db.close()
 
@@ -299,6 +316,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         "duree_garde_a_vue": duree_garde_a_vue,
         "signalements": signalements,
         "confrontations": confrontations,
+        "recoupements": recoupements,
     }
 
 

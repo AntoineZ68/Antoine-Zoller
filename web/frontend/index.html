@@ -627,6 +627,22 @@ function rendreBlocAnalyseIA(donnees) {
 
   sections.push(`
     <div class="carte">
+      <h2>Identifiants recoupés</h2>
+      ${donnees.recoupements.length
+        ? `<ul class="liste-confrontations">${donnees.recoupements.map((e) => `
+            <li class="confrontation">
+              <div class="point-factuel">${e.type_entite} — ${e.valeur}</div>
+              ${e.occurrences.map((o) => `
+                <div class="declaration-personne">
+                  <div class="nom-declarant">Page ${o.page}</div>
+                  <div class="citation-declarant">« ${o.citation} »</div>
+                </div>`).join("")}
+            </li>`).join("")}</ul>`
+        : `<p class="vide">Aucun téléphone, plaque d'immatriculation, IBAN ou adresse retrouvé à l'identique sur plusieurs pages du dossier.</p>`}
+    </div>`);
+
+  sections.push(`
+    <div class="carte">
       <h2>Points communs entre plusieurs personnes</h2>
       ${donnees.confrontations.length
         ? `<ul class="liste-confrontations">${donnees.confrontations.map((c) => `
@@ -690,7 +706,7 @@ async function rendreDetailDossier(dossier) {
   } else if (dossier.statut === "termine") {
     let donnees = {
       resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [],
-      duree_garde_a_vue: null, signalements: [], confrontations: [],
+      duree_garde_a_vue: null, signalements: [], confrontations: [], recoupements: [],
     };
     let erreurDonnees = "";
     if (cacheDonnees.has(dossier.id)) {

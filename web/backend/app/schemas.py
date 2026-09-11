@@ -84,6 +84,18 @@ class PointConfrontation(BaseModel):
     declarations: list[DeclarationConfrontation]
 
 
+class OccurrenceEntite(BaseModel):
+    page: int
+    citation: str
+    valeur_brute: str
+
+
+class EntiteCommune(BaseModel):
+    type_entite: str
+    valeur: str
+    occurrences: list[OccurrenceEntite]
+
+
 class DonneesDossier(BaseModel):
     resume: str | None = None
     personnes: list[Personne] = []
@@ -92,3 +104,4 @@ class DonneesDossier(BaseModel):
     duree_garde_a_vue: DureesGardeAVue | None = None
     signalements: list[Signalement] = []
     confrontations: list[PointConfrontation] = []
+    recoupements: list[EntiteCommune] = []
