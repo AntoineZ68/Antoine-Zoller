@@ -496,6 +496,11 @@ window.telechargerLivrable = telechargerLivrable;
 
 let dossiers = [];
 let dossierOuvertId = null;
+// Dernier statut affiché à l'écran pour le dossier ouvert — sert à
+// détecter la transition "en cours" -> "terminé"/"erreur" (voir
+// rafraichirListe) sans dépendre d'un intervalle qui peut s'arrêter juste
+// avant que le traitement ne se termine réellement.
+let dossierOuvertDernierStatutAffiche = null;
 // Un dossier "terminé" ne change plus jamais : une fois ses données lues
 // depuis le Storage, inutile de retélécharger et reparser tout le fichier
 // SQLite à chaque clic si l'avocat revient dessus dans la même session.
@@ -819,7 +824,10 @@ async function ouvrirDossier(id) {
     if (!dossier || dossier.statut === "en_cours" || dossier.statut === "en_attente") {
       dossier = await appelApi(`/api/dossiers/${id}`);
     }
-    if (dossierOuvertId === id) await rendreDetailDossier(dossier);
+    if (dossierOuvertId === id) {
+      dossierOuvertDernierStatutAffiche = dossier.statut;
+      await rendreDetailDossier(dossier);
+    }
   } catch (erreur) {
     if (dossierOuvertId === id) vueDossier.innerHTML = `<p class="erreur">${erreur.message}</p>`;
   }
@@ -840,9 +848,13 @@ async function rafraichirListe() {
     // scrutation (toutes les 6 s, tant qu'UN SEUL dossier de la liste est
     // encore en cours, même un autre que celui affiché) écrasait l'état
     // d'affichage en cours — ex. la chronologie dépliée se refermait toute
-    // seule pendant la lecture. Ne re-rendre que s'il y a effectivement
-    // une progression à suivre.
-    if (dossier && (dossier.statut === "en_cours" || dossier.statut === "en_attente")) {
+    // seule pendant la lecture. Mais il faut quand même re-rendre UNE
+    // dernière fois au moment précis où le statut affiché devient périmé
+    // (passage "en cours" -> "terminé"/"erreur") : sinon, dès que le
+    // traitement se termine, cette condition devenait fausse pile au tour
+    // de scrutation qui l'aurait détecté, et l'écran restait figé sur la
+    // dernière étape en cours jusqu'à un rechargement manuel de la page.
+    if (dossier && (dossier.statut === "en_cours" || dossier.statut === "en_attente" || dossier.statut !== dossierOuvertDernierStatutAffiche)) {
       ouvrirDossier(dossierOuvertId); // récupère aussi le détail des étapes
     }
   }
