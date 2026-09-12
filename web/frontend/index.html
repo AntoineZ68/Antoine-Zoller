@@ -243,6 +243,8 @@
   }
   @keyframes tourner { to { transform: rotate(360deg); } }
 
+  #liste-dossiers .chargement { padding: 16px 4px; justify-content: flex-start; }
+
   .entete-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   #bouton-supprimer-dossier { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
   #bouton-supprimer-dossier:hover { border-color: var(--erreur); color: var(--erreur); }
@@ -527,6 +529,12 @@ window.voirDocumentTransmis = voirDocumentTransmis;
 
 let dossiers = [];
 let dossierOuvertId = null;
+// Le tout premier chargement de la liste peut prendre jusqu'à 50 s (serveur
+// backend en veille sur Render) : sans distinguer ce cas, le placeholder
+// statique "Aucun dossier pour l'instant." de la page reste affiché pendant
+// toute l'attente, donnant l'impression trompeuse que le chargement est déjà
+// terminé et n'a rien trouvé.
+let listeChargeeUneFois = false;
 // Survit à un vrai rechargement de l'onglet (Chrome décharge en mémoire les
 // onglets d'arrière-plan quand il en a beaucoup d'ouverts, ce qui repart de
 // zéro côté JS) : on retrouve le dossier qu'on lisait plutôt que de laisser
@@ -929,12 +937,16 @@ async function ouvrirDossier(id) {
 window.ouvrirDossier = ouvrirDossier;
 
 async function rafraichirListe() {
+  if (!listeChargeeUneFois) {
+    listeDossiersEl.innerHTML = `<div class="chargement"><span class="spinner"></span> Chargement…</div>`;
+  }
   try {
     dossiers = await appelApi("/api/dossiers");
   } catch (erreur) {
     listeDossiersEl.innerHTML = `<p class="erreur">${erreur.message}</p>`;
     return;
   }
+  listeChargeeUneFois = true;
   rendreListeLaterale();
   if (dossierOuvertId && !vueDossier.hidden) {
     const dossier = dossiers.find((d) => d.id === dossierOuvertId);
