@@ -527,6 +527,24 @@ window.voirDocumentTransmis = voirDocumentTransmis;
 
 let dossiers = [];
 let dossierOuvertId = null;
+// Survit à un vrai rechargement de l'onglet (Chrome décharge en mémoire les
+// onglets d'arrière-plan quand il en a beaucoup d'ouverts, ce qui repart de
+// zéro côté JS) : on retrouve le dossier qu'on lisait plutôt que de laisser
+// l'avocat retomber sur l'écran vide.
+const CLE_DOSSIER_OUVERT = "depouille_dossier_ouvert";
+function sauvegarderDossierOuvert(id) {
+  try {
+    if (id) sessionStorage.setItem(CLE_DOSSIER_OUVERT, id);
+    else sessionStorage.removeItem(CLE_DOSSIER_OUVERT);
+  } catch { /* stockage indisponible (navigation privée...) : dégrade sans casser l'appli */ }
+}
+function lireDossierOuvertSauvegarde() {
+  try {
+    return sessionStorage.getItem(CLE_DOSSIER_OUVERT);
+  } catch {
+    return null;
+  }
+}
 // Dernier statut affiché à l'écran pour le dossier ouvert — sert à
 // détecter la transition "en cours" -> "terminé"/"erreur" (voir
 // rafraichirListe) sans dépendre d'un intervalle qui peut s'arrêter juste
@@ -551,6 +569,7 @@ function afficherVue(nom) {
 
 document.getElementById("bouton-nouveau").addEventListener("click", () => {
   dossierOuvertId = null;
+  sauvegarderDossierOuvert(null);
   document.getElementById("form-envoi").reset();
   rendreListeLaterale();
   afficherVue("nouveau");
@@ -867,6 +886,7 @@ async function supprimerDossier(id, bouton) {
     cacheDonnees.delete(id);
     cacheDocuments.delete(id);
     dossierOuvertId = null;
+    sauvegarderDossierOuvert(null);
     rendreListeLaterale();
     afficherVue("vide");
   } catch (erreur) {
@@ -880,6 +900,7 @@ window.supprimerDossier = supprimerDossier;
 async function ouvrirDossier(id) {
   if (id !== dossierOuvertId) ongletDossierActif = "infos";
   dossierOuvertId = id;
+  sauvegarderDossierOuvert(id);
   rendreListeLaterale();
   afficherVue("dossier");
   // Retour visuel immédiat : sans ça, l'ancien contenu (ou rien) reste
@@ -977,24 +998,47 @@ function demarrerSuiviAutomatique() {
   }, 6000);
 }
 
+let dernierJetonConnu = null;
+
 supabaseClient.auth.onAuthStateChange((evenement, session) => {
   afficherEtatConnecte(!!session);
-  // Supabase déclenche cet évènement aussi pour un simple renouvellement de
-  // jeton en arrière-plan (toutes les ~heures, ou au retour sur l'onglet) —
-  // sans cette garde, l'appli revenait silencieusement sur l'écran vide en
-  // pleine lecture d'un dossier, alors que rien n'avait vraiment changé.
+  // Supabase redéclenche cet évènement pour un simple renouvellement de jeton
+  // en arrière-plan (toutes les ~heures), mais aussi — selon les versions —
+  // au simple retour sur l'onglet alors que le jeton n'a pas changé du tout
+  // (parfois même sous "SIGNED_IN", pas seulement "TOKEN_REFRESHED"). Sans
+  // filtrer sur le jeton lui-même plutôt que sur le seul nom de l'évènement,
+  // l'appli revenait silencieusement sur l'écran vide en pleine lecture d'un
+  // dossier à chaque changement d'onglet, alors que rien n'avait vraiment
+  // changé côté session.
   if (evenement === "TOKEN_REFRESHED" || evenement === "USER_UPDATED") return;
+  if (session && session.access_token === dernierJetonConnu) return;
+  dernierJetonConnu = session ? session.access_token : null;
   if (session) {
     document.getElementById("email-utilisateur").textContent = session.user.email;
-    afficherVue("vide");
+    const idARestaurer = dossierOuvertId || lireDossierOuvertSauvegarde();
+    if (idARestaurer) {
+      vueDossier.innerHTML = `<div class="chargement"><span class="spinner"></span> Chargement du dossier…</div>`;
+      afficherVue("dossier");
+    } else {
+      afficherVue("vide");
+    }
     rafraichirListe().then(() => {
+      if (idARestaurer && dossiers.some((d) => d.id === idARestaurer)) {
+        ouvrirDossier(idARestaurer);
+      } else if (idARestaurer) {
+        sauvegarderDossierOuvert(null);
+        afficherVue("vide");
+      }
       if (dossiers.some((d) => d.statut === "en_attente" || d.statut === "en_cours")) {
         demarrerSuiviAutomatique();
       }
     });
-  } else if (minuteurSuivi) {
-    clearInterval(minuteurSuivi);
-    minuteurSuivi = null;
+  } else {
+    sauvegarderDossierOuvert(null);
+    if (minuteurSuivi) {
+      clearInterval(minuteurSuivi);
+      minuteurSuivi = null;
+    }
   }
 });
 
