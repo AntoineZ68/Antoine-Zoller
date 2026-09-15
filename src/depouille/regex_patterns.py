@@ -227,11 +227,29 @@ def _heure_depuis_mots(texte: str) -> str | None:
     return f"{heure:02d}h{minute:02d}"
 
 
+def _heure_chiffres_en_mots(texte: str) -> str | None:
+    """Convertit une heure en chiffres mais suivie du mot "heures"/"minutes"
+    en toutes lettres ("17 heures 52 minutes", "9 heures") plutôt que de
+    l'abréviation compacte "17h52" — aussi répandu en style administratif
+    français que l'abréviation, mais reconnu par aucun des deux autres
+    formats (ni normaliser_heure, qui exige la lettre "h" ; ni
+    _heure_depuis_mots, qui exige un nombre entièrement en toutes lettres)."""
+    m = re.match(r"^(\d{1,2})\s*heures?(?:\s+(\d{1,2})\s*minutes?)?\.?$", texte.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    heure = int(m.group(1))
+    minute = int(m.group(2)) if m.group(2) else 0
+    if not (0 <= heure <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{heure:02d}h{minute:02d}"
+
+
 def _normaliser_heure_libre(texte: str) -> str | None:
-    """Tente le format chiffré ("14h30") puis les toutes lettres ("quatorze
-    heures trente") — jamais de valeur approchée si ni l'un ni l'autre ne
-    correspond avec certitude."""
-    return normaliser_heure(texte) or _heure_depuis_mots(texte)
+    """Tente le format chiffré ("14h30"), puis chiffré-en-mots ("14 heures
+    30 minutes"), puis les toutes lettres ("quatorze heures trente") —
+    jamais de valeur approchée si aucun des trois ne correspond avec
+    certitude."""
+    return normaliser_heure(texte) or _heure_chiffres_en_mots(texte) or _heure_depuis_mots(texte)
 
 
 # Formule d'ouverture la plus répandue des PV français : l'année est
@@ -243,7 +261,11 @@ def _normaliser_heure_libre(texte: str) -> str | None:
 RE_FORMULE_OUVERTURE_LETTRES = re.compile(
     r"\bl['’]an\s+(?P<annee>deux\s+mille(?:[\s-]+[a-zà-ÿ]+){0,3})\s*,\s*"
     rf"le\s+(?P<jour>\d{{1,2}}(?:er)?|[a-zà-ÿ]+(?:[\s-][a-zà-ÿ]+)?)\s+(?P<mois>{_NOMS_MOIS})"
-    r"(?:\s+à\s+(?P<heure>[^.,;\n]{1,40}))?",
+    # Une virgule sépare parfois le mois de l'heure ("le 14 septembre, à 19
+    # heures 45 minutes") — sans la tolérer ici, l'heure de l'acte n'était
+    # jamais capturée du tout sur ce genre de PV, la formule entière
+    # "réussissant" quand même puisque ce groupe est optionnel.
+    r"(?:\s*,?\s+à\s+(?P<heure>[^.,;\n]{1,40}))?",
     re.IGNORECASE,
 )
 
@@ -258,14 +280,18 @@ RE_DATE_BOITE_ACTE = re.compile(
 )
 
 
-def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:
-    """Date et heure de l'acte lui-même, reconnues via l'une des deux
-    formules d'ouverture standard des PV français : "Le [date complète] à
-    [heure]" (année accolée, chiffres) ou "L'an [année en toutes lettres],
-    le [jour] [mois] à [heure]" (année déclarée séparément — la plus
-    répandue en pratique). Jour et heure peuvent être en chiffres ou en
-    toutes lettres dans les deux cas. Ne renvoie jamais de valeur
-    approchée : à défaut d'une reconnaissance complète, None."""
+def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Match | None]:
+    """Comme detecter_date_heure_acte ci-dessous, mais renvoie aussi le
+    Match ayant permis la détection — sa position sert à construire une
+    citation exacte (voir chrono.py). Centralise les 3 formules d'ouverture
+    en un seul endroit : un module qui les réimplémenterait à côté avec un
+    jeu plus restreint (ex. seulement "Le [date] à [heure]", sans la
+    formule "L'an ...") risque de laisser une formule d'ouverture non
+    reconnue tomber sur la correspondance suivante, non liée, plus bas dans
+    la page — observé en réel sur un PV où "L'an deux mille vingt-six, le
+    14 septembre, à 19 heures 45 minutes." n'était pas reconnu, et l'acte
+    se voyait attribuer à la place l'heure d'un "avis donné à Madame la
+    Procureure ... à 20h15" sans rapport, plus bas sur la même page."""
     m = RE_FORMULE_OUVERTURE_LETTRES.search(texte)
     if m:
         annee = _annee_depuis_texte(m.group("annee"))
@@ -275,16 +301,30 @@ def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:
             date = f"{jour:02d}/{mois:02d}/{annee}"
             heure_brute = m.group("heure")
             heure = _normaliser_heure_libre(heure_brute) if heure_brute else None
-            return date, heure
+            return date, heure, m
 
     m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}\b", texte, re.IGNORECASE)
     if m:
-        return normaliser_date(m.group(1)), normaliser_heure(m.group(2))
+        return normaliser_date(m.group(1)), normaliser_heure(m.group(2)), m
 
     m = RE_DATE_BOITE_ACTE.search(texte)
     if m:
-        return normaliser_date(m.group(1)), normaliser_heure(m.group(2))
+        return normaliser_date(m.group(1)), normaliser_heure(m.group(2)), m
 
+    return None, None, None
+
+
+def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:
+    """Date et heure de l'acte lui-même, reconnues via l'une des trois
+    formules d'ouverture standard des PV français : "Le [date complète] à
+    [heure]" (année accolée, chiffres), "L'an [année en toutes lettres],
+    le [jour] [mois] à [heure]" (année déclarée séparément — la plus
+    répandue en pratique), ou un champ encadré ("Date : ..."). Jour et
+    heure peuvent être en chiffres ou en toutes lettres. Ne renvoie jamais
+    de valeur approchée : à défaut d'une reconnaissance complète, None."""
+    date, heure, m = detecter_ouverture_acte(texte)
+    if m is not None:
+        return date, heure
     return detecter_date_acte(texte), None
 
 

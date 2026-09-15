@@ -14,6 +14,7 @@ from depouille.classify import (
     _entete_etendu,
     _est_titre,
     _premiere_mention_hors_titres,
+    _premiere_mention_ou_creation,
 )
 from depouille.regex_patterns import (
     detecter_cote,
@@ -356,6 +357,117 @@ def test_date_acte_reconnue_dans_un_champ_encadre() -> None:
     assert detecter_date_heure_acte("Date et Heure : 15 Octobre 2026 à 06h15") == ("15/10/2026", "06h15")
     # Une date de naissance n'est jamais la date de l'acte lui-même.
     assert detecter_date_heure_acte("Date de naissance : 14/05/1972") == (None, None)
+
+
+def test_heure_en_chiffres_suivie_du_mot_heures_minutes() -> None:
+    """Régression sur un vrai dossier testé par l'utilisateur (Lyon,
+    BENALI Sofiane) : "17 heures 52 minutes" (heure/minute en chiffres,
+    mais avec les mots "heures"/"minutes" plutôt que l'abréviation "h")
+    n'était reconnue ni par normaliser_heure (qui exige la lettre "h"), ni
+    par la conversion toutes-lettres (qui exige un nombre entièrement en
+    toutes lettres, ex. "dix-sept heures") — un troisième format, tout
+    aussi courant en style administratif français."""
+    texte = "L'an deux mille vingt-six, le 14 septembre, à 19 heures 45 minutes.\nNous, Gilles GAUTHIER..."
+    assert detecter_date_heure_acte(texte) == ("14/09/2026", "19h45")
+
+
+def test_ouverture_lan_ne_cede_pas_a_une_mention_non_liee_plus_bas() -> None:
+    """Régression exacte sur le dossier Lyon : la pièce ne réutilisait pas
+    la fonction centrale de détection d'ouverture (3 formules) pour les
+    évènements de procédure simples, mais un motif local ne couvrant que
+    "Le [date] à [heure]" — en l'absence de correspondance pour "L'an ...",
+    ce motif tombait alors sur une mention non liée plus bas sur la même
+    page ("Avis donné à Madame la Procureure ... le 14 septembre 2026 à
+    20h15"), attribuant à tort cette heure au placement en garde à vue."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE pieces (id INTEGER, type TEXT, personne_principale_id INTEGER)")
+    db.execute("INSERT INTO pieces VALUES (1, 'PV de notification de placement en garde à vue', 1)")
+    piece = db.execute("SELECT * FROM pieces").fetchone()
+
+    db.execute("CREATE TABLE pages (numero_global INTEGER, texte TEXT)")
+    texte_page = (
+        "PROCÈS-VERBAL DE PLACEMENT EN GARDE À VUE ET NOTIFICATION DES DROITS\n"
+        "L'an deux mille vingt-six, le 14 septembre, à 19 heures 45 minutes.\n"
+        "Nous, Gilles GAUTHIER, Capitaine de Police, Officier de Police Judiciaire.\n"
+        "Informons l'intéressé qu'il est placé sous le régime de la GARDE À VUE à "
+        "compter du 14 septembre 2026 à 17 heures 52 minutes (heure de son "
+        "interpellation effective), pour une durée de 24 heures.\n"
+        "Avis donné à Madame la Procureure de la République adjointe le 14 "
+        "septembre 2026 à 20h15 par voie électronique et téléphonique.\n"
+    )
+    db.execute("INSERT INTO pages VALUES (1, ?)", (texte_page,))
+    pages = db.execute("SELECT * FROM pages").fetchall()
+
+    evenements = _extraire_evenements_piece(db, piece, pages)
+    placement = next(e for e in evenements if e["nature"] == "placement_garde_a_vue")
+    assert placement["heure"] == "17h52"
+    assert "avis" not in placement["citation"].lower()
+
+
+def test_retroactivite_sans_le_mot_retroactivement() -> None:
+    """"à compter du [date] à [heure] (heure de son interpellation
+    effective)" exprime le même effet rétroactif (art. 63 CPP) que
+    "rétroactivement", sans jamais employer ce mot — la formulation
+    réellement rencontrée sur le dossier Lyon."""
+    texte = (
+        "il est placé sous le régime de la GARDE À VUE à compter du 14 septembre "
+        "2026 à 17 heures 52 minutes (heure de son interpellation effective), pour "
+        "une durée de 24 heures."
+    )
+    m = RE_RETROACTIF.search(texte)
+    assert m is not None
+    assert normaliser_date(m.group(1)) == "14/09/2026"
+
+
+def test_officier_redacteur_non_pris_pour_le_mis_en_cause() -> None:
+    """Régression sur le dossier Lyon : "Nous, Gilles GAUTHIER, Capitaine
+    de Police..." est la formule d'auto-présentation universelle de
+    l'officier rédacteur — le titre suit le nom, séparé par une virgule,
+    au lieu de le précéder ("Capitaine GAUTHIER"). L'ancienne exclusion ne
+    vérifiait que le mot précédent, jamais le mot suivant : l'officier
+    était pris pour le mis en cause."""
+    texte = (
+        "Nous, Gilles GAUTHIER, Capitaine de Police, Officier de Police Judiciaire.\n"
+        "Constatons la présence de la personne dénommée : BENALI Sofiane, né le "
+        "12/05/2001 à Lyon 4e.\n"
+    )
+    assert _premiere_mention_hors_titres(texte) == ("Sofiane", "BENALI")
+
+
+def test_personne_denommee_reconnue_nom_prenom() -> None:
+    """"la personne dénommée : NOM Prénom" est une formule aussi standard
+    que le champ encadré "Personne : ..." pour donner l'identité dans
+    l'ordre NOM Prénom — observée sur le dossier Lyon, sans le mot
+    "Personne" ni les deux-points en tête de ligne qu'exige RE_PERSONNE_CHAMP."""
+    texte = "Constatons la présence dans nos locaux de la personne dénommée : BENALI Sofiane, né le 12/05/2001."
+    assert _premiere_mention_hors_titres(texte) == ("Sofiane", "BENALI")
+
+
+def test_deux_colonnes_ne_cree_pas_une_fausse_personne() -> None:
+    """Régression exacte sur le dossier Lyon : un document à deux colonnes
+    juxtapose sur une même ligne physique la fin d'un bloc d'adresse
+    ("...Cabinet du Procureur de la République") et le titre du PV qui
+    suit ("PROCÈS-VERBAL DE PLACEMENT...") — recollés par pdfplumber,
+    "République" (majuscule-minuscules) suivi d'un mot tout en capitales
+    matchait par erreur le motif Prénom-NOM, créant une fausse personne
+    "République PROCÈS-VERBAL". _premiere_mention_ou_creation doit
+    débarrasser le texte de ses titres avant de chercher une personne."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE personnes (id INTEGER PRIMARY KEY, nom TEXT, role TEXT)")
+    texte_page = (
+        "PROCÉDURE N° 2026/00482 Cabinet du Procureur de la République\n"
+        "PROCÈS-VERBAL DE PLACEMENT EN GARDE À VUE ET NOTIFICATION DES DROITS\n"
+        "L'an deux mille vingt-six, le 14 septembre, à 19 heures 45 minutes.\n"
+        "Nous, Gilles GAUTHIER, Capitaine de Police.\n"
+        "Constatons la présence de la personne dénommée : BENALI Sofiane, né le "
+        "12/05/2001 à Lyon 4e.\n"
+    )
+    personne_id = _premiere_mention_ou_creation(db, texte_page, "mis_en_cause")
+    assert personne_id is not None
+    nom = db.execute("SELECT nom FROM personnes WHERE id = ?", (personne_id,)).fetchone()["nom"]
+    assert nom == "Sofiane BENALI"
 
 
 def test_placement_et_notification_droits_dans_le_meme_pv() -> None:

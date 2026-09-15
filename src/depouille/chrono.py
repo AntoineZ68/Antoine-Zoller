@@ -27,7 +27,8 @@ from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
     FRAGMENT_HEURE,
-    RE_DATE_BOITE_ACTE,
+    _normaliser_heure_libre,
+    detecter_ouverture_acte,
     normaliser_date,
     normaliser_heure,
     phrase_contenant,
@@ -35,16 +36,22 @@ from .regex_patterns import (
 )
 from .verification import verifier_table
 
-RE_DATE_HEURE_ACTE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}\b", re.IGNORECASE)
 RE_INTERPELLATION = re.compile(
     rf"[Ii]nterpellation\s+effectuée\s+le\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE
 )
 # Une garde à vue notifiée après coup peut prendre effet "rétroactivement" à
 # l'heure de l'interpellation (article 63 CPP) : quand le texte le dit
 # explicitement, c'est cette date/heure-là qui compte comme début réel de la
-# mesure, pas l'heure de rédaction du PV de notification.
+# mesure, pas l'heure de rédaction du PV de notification. "à compter du
+# [date] à [heure] (heure de son interpellation effective)" exprime le même
+# effet rétroactif sans jamais employer le mot "rétroactivement" lui-même —
+# aussi répandu en pratique, et observé sur un vrai dossier testé par
+# l'utilisateur. L'heure y est presque toujours écrite en toutes lettres
+# accolées à des chiffres ("17 heures 52 minutes"), jamais au format compact
+# ("17h52") : capture libre + _normaliser_heure_libre, comme la formule
+# d'ouverture "L'an ...", plutôt que FRAGMENT_HEURE qui l'exigerait.
 RE_RETROACTIF = re.compile(
-    rf"rétroactivement.{{0,80}}?{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}",
+    rf"(?:rétroactivement|à\s+compter\s+du)\s*.{{0,60}}?{FRAGMENT_DATE}\s+à\s+([^.,;\n(]{{1,40}})",
     re.IGNORECASE | re.DOTALL,
 )
 RE_DEMANDE_MEDECIN = re.compile(rf"réquisition\s+du\s+{FRAGMENT_DATE}\s+reçue\s+à\s+{FRAGMENT_HEURE}", re.IGNORECASE)
@@ -122,6 +129,20 @@ def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[in
     return None
 
 
+def _chercher_ouverture_acte_sur_pages(pages: list[sqlite3.Row]) -> tuple[int, str | None, str | None, str] | None:
+    """Comme _chercher_sur_pages, mais pour la date/heure de l'acte
+    lui-même : passe par detecter_ouverture_acte (les 3 formules
+    d'ouverture standard) plutôt que par un motif local plus restreint —
+    voir le commentaire de detecter_ouverture_acte pour l'incident que
+    cette duplication a causé en réel."""
+    for page in pages:
+        bloc = texte_sans_entete(page["texte"], _est_titre)
+        date, heure, m = detecter_ouverture_acte(bloc)
+        if m is not None:
+            return page["numero_global"], date, heure, phrase_contenant(bloc, m.start())
+    return None
+
+
 def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages: list[sqlite3.Row]) -> list[dict]:
     type_ = piece["type"]
     # Calculé une seule fois pendant la classification (identifier_personne_principale)
@@ -136,7 +157,7 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
             {
                 "nature": nature,
                 "date": normaliser_date(date_brute) if date_brute else None,
-                "heure": normaliser_heure(m.group(heure_idx)),
+                "heure": _normaliser_heure_libre(m.group(heure_idx)),
                 "page": page,
                 "citation": citation,
                 "personne_id": personne if personne is not None else personne_id,
@@ -145,9 +166,19 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
 
     if type_ in NATURE_SIMPLE_PAR_TYPE:
         nature = NATURE_SIMPLE_PAR_TYPE[type_]
-        r = _chercher_sur_pages(pages, RE_DATE_HEURE_ACTE) or _chercher_sur_pages(pages, RE_DATE_BOITE_ACTE)
-        if r:
-            ajouter(nature, r, 1, 2)
+        r_ouverture = _chercher_ouverture_acte_sur_pages(pages)
+        if r_ouverture:
+            page, date, heure, citation = r_ouverture
+            evenements.append(
+                {
+                    "nature": nature,
+                    "date": date,
+                    "heure": heure,
+                    "page": page,
+                    "citation": citation,
+                    "personne_id": personne_id,
+                }
+            )
 
         if type_ == "PV de notification de placement en garde à vue":
             r_retro = _chercher_sur_pages(pages, RE_RETROACTIF)

@@ -24,7 +24,7 @@ from rich.table import Table
 
 from .config import Config
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
-from .regex_patterns import detecter_date_heure_acte
+from .regex_patterns import detecter_date_heure_acte, texte_sans_entete
 
 CATEGORIES = [
     "PV d'audition",
@@ -350,17 +350,32 @@ RE_PERSONNE_CHAMP = re.compile(
     r"\bPersonne\s*:\s*([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
 )
 
+# Autre formulation, tout aussi standard, du même besoin NOM Prénom : "la
+# personne dénommée : NOM Prénom" (constatation de présence, notification de
+# placement...). Ancré sur ce tour de phrase précis plutôt que généralisé à
+# tout "NOM Prénom" du texte, pour la même raison que RE_PERSONNE_CHAMP.
+RE_PERSONNE_DENOMMEE = re.compile(
+    r"\b[Dd]énommée?\s*:?\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
+)
+
 
 def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
     """Le premier nom "Prénom NOM" mentionné n'est pas forcément le mis en
-    cause : les PV nomment très souvent l'officier rédacteur ("nous,
-    capitaine Élodie BASTIER...") avant de nommer la personne concernée. On
-    exclut donc les mentions immédiatement précédées d'un titre ou d'un
-    grade, ou dont le "prénom" capturé n'est en réalité qu'un honorifique
-    abrégé — la personne concernée par la pièce est cherchée après ça."""
+    cause : les PV nomment très souvent l'officier rédacteur, selon deux
+    formulations — le titre AVANT le nom ("nous, capitaine Élodie
+    BASTIER...") ou APRÈS, séparé par une virgule ("Nous, Gilles GAUTHIER,
+    Capitaine de Police...", la formule d'auto-présentation la plus
+    universelle des PV français). On exclut donc les mentions précédées OU
+    suivies d'un titre ou d'un grade, ou dont le "prénom" capturé n'est en
+    réalité qu'un honorifique abrégé — la personne concernée par la pièce
+    est cherchée après ça."""
     m_champ = RE_PERSONNE_CHAMP.search(texte)
     if m_champ:
         return m_champ.group(2), m_champ.group(1)
+
+    m_denommee = RE_PERSONNE_DENOMMEE.search(texte)
+    if m_denommee:
+        return m_denommee.group(2), m_denommee.group(1)
 
     for m in RE_PERSONNE.finditer(texte):
         if m.group(1).lower() in HONORIFIQUES_ABREGES:
@@ -368,6 +383,10 @@ def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
         avant = texte[: m.start()].rstrip().split()
         dernier_mot = avant[-1].lower().rstrip(",.") if avant else ""
         if dernier_mot in TITRES_A_EXCLURE:
+            continue
+        apres = texte[m.end() :].lstrip(" ,")
+        premier_mot_apres = apres.split(" ", 1)[0].split(",", 1)[0].lower().rstrip(",.") if apres else ""
+        if premier_mot_apres in TITRES_A_EXCLURE:
             continue
         return m.group(1), m.group(2)
     return None
@@ -381,8 +400,17 @@ def _premiere_mention_ou_creation(db: sqlite3.Connection, texte: str, role_par_d
     prolongation, perquisition...), donc si la personne n'est pas encore
     enregistrée, on la crée avec le rôle par défaut plutôt que d'échouer
     silencieusement faute d'un tag qu'aucun de ces PV n'écrit jamais
-    explicitement."""
-    trouve = _premiere_mention_hors_titres(texte)
+    explicitement.
+
+    Le texte est d'abord débarrassé de ses en-têtes/titres (texte_sans_entete) :
+    un document à deux colonnes juxtapose parfois, sur la même ligne
+    physique, la fin d'un bloc d'adresse ("...Cabinet du Procureur de la
+    République") et le titre du PV qui suit ("PROCÈS-VERBAL DE...") — une
+    fois recollés par pdfplumber, "République" (majuscule-minuscules) suivi
+    d'un mot tout en capitales matche par erreur le motif Prénom-NOM, sans
+    rapport avec la personne concernée. Observé en réel sur un vrai
+    dossier."""
+    trouve = _premiere_mention_hors_titres(texte_sans_entete(texte, _est_titre))
     if not trouve:
         return None
     prenom, nom_famille = trouve
