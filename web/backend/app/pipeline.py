@@ -157,7 +157,12 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
     utilisateur et la RLS, que le dossier appartient bien à l'appelant.
     """
     supabase = client_service()
-    console = Console(quiet=True)
+    # quiet=True supprimait TOUT l'affichage du pipeline, y compris les
+    # messages d'erreur destinés au développeur (ex. "[chrono] échec
+    # extraction des faits...") — une vraie panne (clé LLM invalide, réponse
+    # mal formée) devenait alors indiscernable d'un cas où il n'y avait
+    # simplement rien à extraire, sans aucune trace dans les logs Render.
+    console = Console()
     config = _config_llm(offline)
 
     with tempfile.TemporaryDirectory(prefix="depouille_") as tmp:

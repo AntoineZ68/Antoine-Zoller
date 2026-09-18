@@ -4,6 +4,16 @@
 # fournit pas d'office.
 FROM python:3.11-slim
 
+# Sans ça, la sortie standard est mise en mémoire tampon par blocs dès
+# qu'elle n'est pas connectée à un terminal (systématique dans un conteneur) :
+# tous les console.print() du pipeline (ingest/classify/chrono/decl/build),
+# lancé en tâche de fond pour chaque dossier, restaient invisibles dans les
+# logs Render — la seule fenêtre sur les vraies erreurs de traitement en
+# production (clé LLM invalide, réponse mal formée...). Seuls les logs HTTP
+# d'uvicorn passaient, car ils empruntent un mécanisme de journalisation
+# différent, avec vidage explicite.
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-fra \
