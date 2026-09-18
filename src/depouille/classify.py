@@ -318,7 +318,15 @@ def identifier_declarant(db: sqlite3.Connection, page_entete: str) -> int | None
 
 
 def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
-    row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
+    """Recherche par nom seul, jamais par (nom, rôle) : la même personne
+    réelle, reconnue par deux pièces différentes avec un rôle différent
+    (une pièce mal ciblée lui attribue par erreur le rôle par défaut d'une
+    autre), ne doit jamais se retrouver dupliquée dans la table — un
+    avocat qui voit "Julie DUPONT" citée deux fois avec deux rôles
+    différents croit à deux personnes distinctes. Le rôle du premier
+    enregistrement l'emporte ; un tel désaccord signale un bug d'extraction
+    en amont à corriger à la source, pas quelque chose à trancher ici."""
+    row = db.execute("SELECT id FROM personnes WHERE nom = ?", (nom,)).fetchone()
     if row:
         return row["id"]
     cur = db.execute("INSERT INTO personnes (nom, role) VALUES (?, ?)", (nom, role))
@@ -350,12 +358,25 @@ RE_PERSONNE_CHAMP = re.compile(
     r"\bPersonne\s*:\s*([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
 )
 
-# Autre formulation, tout aussi standard, du même besoin NOM Prénom : "la
+# Autres formulations, tout aussi standard, du même besoin NOM Prénom : "la
 # personne dénommée : NOM Prénom" (constatation de présence, notification de
-# placement...). Ancré sur ce tour de phrase précis plutôt que généralisé à
-# tout "NOM Prénom" du texte, pour la même raison que RE_PERSONNE_CHAMP.
+# placement...) et "déclare se nommer (verbalement) : NOM Prénom"
+# (interpellation — l'individu s'identifie lui-même). Une seule expression
+# régulière plutôt que plusieurs motifs testés indépendamment : search()
+# doit renvoyer la toute première déclaration d'identité de la page, quelle
+# que soit sa formulation — jamais "dénommé(e)" par défaut même quand une
+# autre déclaration légitime la précède. Régression réelle : sur un PV
+# d'interpellation, le suspect se nomme lui-même en premier ("se nommer
+# verbalement : BENALI Sofiane"), et la victime n'est que "dénommée" bien
+# plus loin, en passant, comme propriétaire des objets volés retrouvés sur
+# lui — sans cette unification, "dénommée" gagnait toujours, quelle que
+# soit sa position, et la victime héritait par erreur du rôle par défaut
+# "mis_en_cause" de cette pièce. Ancré sur ces tours de phrase précis
+# plutôt que généralisé à tout "NOM Prénom" du texte, pour la même raison
+# que RE_PERSONNE_CHAMP.
 RE_PERSONNE_DENOMMEE = re.compile(
-    r"\b[Dd]énommée?\s*:?\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
+    r"\b(?:d[ée]nomm[ée]e?|se\s+nomm(?:e|er|ant))\b[^:\n]{0,20}:?\s+"
+    r"([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
 )
 
 

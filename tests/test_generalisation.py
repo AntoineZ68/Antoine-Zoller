@@ -15,6 +15,7 @@ from depouille.classify import (
     _est_titre,
     _premiere_mention_hors_titres,
     _premiere_mention_ou_creation,
+    _upsert_personne,
 )
 from depouille.regex_patterns import (
     detecter_cote,
@@ -507,3 +508,42 @@ def test_placement_et_notification_droits_dans_le_meme_pv() -> None:
     assert par_nature["placement_garde_a_vue"]["heure"] == "07h00"
     assert par_nature["notification_droits"]["date"] == "15/10/2026"
     assert par_nature["notification_droits"]["heure"] == "11h45"
+
+
+def test_suspect_qui_se_nomme_prime_sur_victime_dite_denommee() -> None:
+    """Régression sur le dossier Lyon : un PV d'interpellation mentionne
+    souvent, en plus du suspect, une victime ou un tiers en passant
+    ("les effets personnels d'une dénommée DUPONT Julie") — alors que le
+    suspect s'est identifié bien plus tôt dans le texte, mais via "déclare
+    se nommer verbalement", pas "dénommé(e)". Sans unifier les deux
+    formulations dans un seul motif cherché par position, "dénommée"
+    l'emportait toujours quelle que soit sa position dans le texte, et la
+    victime héritait par erreur du rôle "mis_en_cause" par défaut de cette
+    pièce."""
+    texte = (
+        "L'individu déclare se nommer verbalement : BENALI Sofiane, né le 12 mai 2001 "
+        "à Lyon 4e, sans domicile stable déclaré, sans emploi.\n"
+        "Trouvons en sa possession un sac à main contenant les effets personnels "
+        "d'une dénommée DUPONT Julie.\n"
+    )
+    assert _premiere_mention_hors_titres(texte) == ("Sofiane", "BENALI")
+
+
+def test_upsert_personne_ne_duplique_pas_sur_role_different() -> None:
+    """Régression sur le dossier Lyon : "Julie DUPONT" apparaissait deux
+    fois dans l'interface — une fois comme "Client (mis en cause)" (pièce
+    d'interpellation mal ciblée, voir le test précédent) et une fois comme
+    "Victime" (sa propre audition, correctement identifiée par le modèle).
+    _upsert_personne cherchait par (nom, rôle), pas par nom seul : deux
+    rôles différents pour la même personne créaient deux lignes distinctes
+    plutôt qu'une seule — un avocat qui voit un nom cité deux fois avec
+    deux rôles croit à deux personnes réelles différentes."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE personnes (id INTEGER PRIMARY KEY, nom TEXT, role TEXT)")
+
+    id_mis_en_cause = _upsert_personne(db, "Julie DUPONT", "mis_en_cause")
+    id_victime = _upsert_personne(db, "Julie DUPONT", "victime")
+
+    assert id_mis_en_cause == id_victime
+    assert db.execute("SELECT COUNT(*) FROM personnes").fetchone()[0] == 1
