@@ -228,13 +228,15 @@ def _heure_depuis_mots(texte: str) -> str | None:
 
 
 def _heure_chiffres_en_mots(texte: str) -> str | None:
-    """Convertit une heure en chiffres mais suivie du mot "heures"/"minutes"
-    en toutes lettres ("17 heures 52 minutes", "9 heures") plutôt que de
-    l'abréviation compacte "17h52" — aussi répandu en style administratif
+    """Convertit une heure en chiffres mais suivie du mot "heures" en toutes
+    lettres ("17 heures 52 minutes", "14 heures 00", "9 heures") plutôt que
+    de l'abréviation compacte "17h52" — aussi répandu en style administratif
     français que l'abréviation, mais reconnu par aucun des deux autres
     formats (ni normaliser_heure, qui exige la lettre "h" ; ni
-    _heure_depuis_mots, qui exige un nombre entièrement en toutes lettres)."""
-    m = re.match(r"^(\d{1,2})\s*heures?(?:\s+(\d{1,2})\s*minutes?)?\.?$", texte.strip(), re.IGNORECASE)
+    _heure_depuis_mots, qui exige un nombre entièrement en toutes lettres).
+    Le mot "minutes" lui-même est souvent omis quand les minutes sont à
+    zéro ou rondes ("à 14 heures 00", pas "14 heures 00 minutes") : facultatif."""
+    m = re.match(r"^(\d{1,2})\s*heures?(?:\s+(\d{1,2})(?:\s*minutes?)?)?\.?$", texte.strip(), re.IGNORECASE)
     if not m:
         return None
     heure = int(m.group(1))
@@ -303,9 +305,18 @@ def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Matc
             heure = _normaliser_heure_libre(heure_brute) if heure_brute else None
             return date, heure, m
 
-    m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+{FRAGMENT_HEURE}\b", texte, re.IGNORECASE)
+    # Heure libre ([^.,;\n]) plutôt que FRAGMENT_HEURE (compact "14h00"
+    # uniquement) : "Le 15 septembre 2026 à 14 heures 00." est tout aussi
+    # standard. Sans cette tolérance, cette formule ne matchait jamais sur
+    # ce genre de PV, et retombait plus bas dans la page sur la première
+    # heure au format compact venue — même en plein milieu d'un récit
+    # narratif sans rapport avec l'acte lui-même (observé en réel : un
+    # rapport de synthèse ouvrant sur "Le 15 septembre 2026 à 14 heures 00"
+    # voyait tous ses faits datés du "14 septembre 2026 à 17h35" d'un fait
+    # divers raconté plus loin dans le corps du texte).
+    m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+([^.,;\n]{{1,40}})", texte, re.IGNORECASE)
     if m:
-        return normaliser_date(m.group(1)), normaliser_heure(m.group(2)), m
+        return normaliser_date(m.group(1)), _normaliser_heure_libre(m.group(2)), m
 
     m = RE_DATE_BOITE_ACTE.search(texte)
     if m:

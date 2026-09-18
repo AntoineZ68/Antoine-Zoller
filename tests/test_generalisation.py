@@ -18,6 +18,7 @@ from depouille.classify import (
     _upsert_personne,
 )
 from depouille.regex_patterns import (
+    _normaliser_heure_libre,
     detecter_cote,
     detecter_date_acte,
     detecter_date_heure_acte,
@@ -547,3 +548,34 @@ def test_upsert_personne_ne_duplique_pas_sur_role_different() -> None:
 
     assert id_mis_en_cause == id_victime
     assert db.execute("SELECT COUNT(*) FROM personnes").fetchone()[0] == 1
+
+
+def test_heure_en_chiffres_sans_le_mot_minutes() -> None:
+    """"14 heures 00" (minutes à zéro) omet souvent le mot "minutes" —
+    contrairement à "17 heures 52 minutes" où il est présent. Sans le
+    rendre facultatif, cette écriture pourtant très répandue n'était
+    reconnue par aucune des fonctions de normalisation d'heure."""
+    assert _normaliser_heure_libre("14 heures 00") == "14h00"
+    assert _normaliser_heure_libre("9 heures") == "09h00"
+    assert _normaliser_heure_libre("17 heures 52 minutes") == "17h52"
+
+
+def test_formule_le_date_a_heure_tolere_heure_en_toutes_lettres() -> None:
+    """Régression exacte sur le dossier Lyon : un rapport de synthèse
+    ouvre sur "Le 15 septembre 2026 à 14 heures 00." (heure en toutes
+    lettres, sans le mot "minutes"). Le deuxième palier de
+    detecter_ouverture_acte n'acceptait que l'heure compacte ("14h00") —
+    faute de correspondance sur la vraie ouverture de l'acte, il retombait
+    plus bas dans la même page sur "Le 14 septembre 2026 à 17h35, Mme
+    DUPONT Julie a été victime...", une date de fait divers racontée dans
+    le corps du texte, sans aucun rapport avec la date du rapport
+    lui-même. Résultat en réel : tous les faits de cette pièce héritaient
+    de la date/heure du fait divers plutôt que de la date du rapport."""
+    texte = (
+        "1. FAITS ET PROCÉDURE :\n"
+        "Le 15 septembre 2026 à 14 heures 00.\n"
+        "Rapport d'enquête rédigé par le Capitaine de Police G. GAUTHIER, OPJ.\n"
+        "Le 14 septembre 2026 à 17h35, Mme DUPONT Julie a été victime d'une "
+        "agression physique violente cours Gambetta / place Péri à Lyon 7e."
+    )
+    assert detecter_date_heure_acte(texte) == ("15/09/2026", "14h00")
