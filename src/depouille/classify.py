@@ -317,6 +317,24 @@ def identifier_declarant(db: sqlite3.Connection, page_entete: str) -> int | None
     return row["id"] if row else None
 
 
+RE_MOT = re.compile(r"[0-9A-Za-zÀ-ÿ]+")
+
+
+def _mots(texte: str) -> frozenset[str]:
+    """Ensemble des mots d'un texte, insensible à la ponctuation, à la casse
+    et aux traits d'union — sert à comparer deux écritures d'un même nom
+    ("DUPONT Julie" / "Julie DUPONT" / "Julie, Clémence DUPONT") sans exiger
+    une chaîne identique. Même raisonnement que _personne_par_nom dans
+    chrono.py, qui résout déjà ce problème de l'autre côté du pipeline : le
+    français administratif écrit NOM Prénom, un modèle reformule
+    spontanément en Prénom NOM, et c'est la même personne.
+
+    Les mots d'une seule lettre sont ignorés : une initiale ("É. COMBES")
+    n'apporte rien à la comparaison et ferait échouer un rapprochement par
+    ailleurs correct."""
+    return frozenset(m.group(0).lower() for m in RE_MOT.finditer(texte) if len(m.group(0)) > 1)
+
+
 def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
     """Recherche par nom seul, jamais par (nom, rôle) : la même personne
     réelle, reconnue par deux pièces différentes avec un rôle différent
@@ -459,10 +477,20 @@ def identifier_personne_via_llm(
     identifiées ailleurs, pour qu'il puisse la reconnaître par le contexte.
     Mais la vérifiabilité reste non négociable : le nom renvoyé doit soit
     correspondre à une personne déjà établie (donc déjà une identité
-    vérifiée, pas une invention), soit être retrouvé littéralement dans le
-    texte de cette pièce précise. Un nom qui ne remplit aucune des deux
-    conditions est rejeté, quelle que soit la confiance apparente du
-    modèle."""
+    vérifiée, pas une invention), soit être composé de mots réellement
+    présents dans le texte de cette pièce précise. Un nom qui ne remplit
+    aucune des deux conditions est rejeté, quelle que soit la confiance
+    apparente du modèle.
+
+    La comparaison se fait par ensemble de mots, pas par chaîne exacte : un
+    PV écrit couramment l'identité en champs éclatés ("Nom : DUPONT
+    Prénom : Julie, Clémence"), si bien que la chaîne "Julie DUPONT"
+    n'existe littéralement nulle part dans la pièce — alors même que le
+    modèle a parfaitement identifié la bonne personne. Exiger la chaîne
+    exacte faisait rejeter en silence des identifications correctes, et le
+    garde-fou anti-invention rejetait donc aussi les bonnes réponses. Un
+    nom inventé reste rejeté : chacun de ses mots doit figurer dans la
+    pièce."""
     try:
         provider = obtenir_provider(config)
         liste_connues = "\n".join(f"- {nom} ({role})" for nom, role in personnes_connues) or "(aucune)"
@@ -494,7 +522,18 @@ def identifier_personne_via_llm(
         noms_connus = {n.lower(): n for n, _ in personnes_connues}
         if nom.lower() in noms_connus:
             return noms_connus[nom.lower()], role
+
+        mots_nom = _mots(nom)
+        for connu, _ in personnes_connues:
+            if _mots(connu) == mots_nom:
+                return connu, role
+
         if nom.lower() in texte_piece.lower():
+            return nom, role
+        # Au moins deux mots exigés : un nom d'un seul mot ("Dupont") se
+        # retrouve trop facilement par hasard dans une page pour valoir
+        # vérification.
+        if len(mots_nom) >= 2 and mots_nom <= _mots(texte_piece):
             return nom, role
 
         console.print(
@@ -533,7 +572,15 @@ def identifier_personne_principale(
         if personne_id is not None:
             return personne_id, "premiere_mention"
 
-    if type_piece in TYPES_AUDITION and not config.offline:
+    # Repli sur le modèle pour TOUT type de pièce, pas seulement les
+    # auditions : une pièce dont la règle déterministe n'a rien tiré ne
+    # renvoyait jusqu'ici aucune personne du tout, alors que le modèle sait
+    # très souvent la lire. Les formulations d'identité varient bien plus
+    # d'un service à l'autre qu'aucun jeu de motifs ne peut couvrir —
+    # ajouter une regex par tournure rencontrée est sans fin ; le modèle
+    # absorbe cette variété, et la vérification ci-dessus (chaque mot du nom
+    # doit figurer dans la pièce) garde l'invention à distance.
+    if not config.offline:
         personnes_connues = [(r["nom"], r["role"]) for r in db.execute("SELECT DISTINCT nom, role FROM personnes")]
         resultat = identifier_personne_via_llm(config, texte_complet, personnes_connues, console, compteur)
         if resultat is not None:

@@ -7,16 +7,22 @@ from __future__ import annotations
 
 import sqlite3
 
+from rich.console import Console
+
+from depouille import classify
 from depouille.chrono import RE_RETROACTIF, _extraire_evenements_piece, _personne_par_nom
 from depouille.classify import (
     _classifier_type_deterministe,
     _detecter_pieces_par_page,
     _entete_etendu,
     _est_titre,
+    _mots,
     _premiere_mention_hors_titres,
     _premiere_mention_ou_creation,
     _upsert_personne,
+    identifier_personne_principale,
 )
+from depouille.config import Config
 from depouille.regex_patterns import (
     _normaliser_heure_libre,
     detecter_cote,
@@ -579,3 +585,56 @@ def test_formule_le_date_a_heure_tolere_heure_en_toutes_lettres() -> None:
         "agression physique violente cours Gambetta / place Péri à Lyon 7e."
     )
     assert detecter_date_heure_acte(texte) == ("15/09/2026", "14h00")
+
+
+# --- Identification de personne : ordre des mots et repli sur le modèle ---
+
+
+def test_nom_reconnu_quel_que_soit_lordre_des_mots() -> None:
+    """Régression sur le dossier Lyon : la victime avait disparu de
+    l'analyse. Son identité est écrite en champs éclatés dans son audition
+    ("Nom : DUPONT  Prénom : Julie, Clémence"), si bien que la chaîne
+    "DUPONT Julie" n'existe littéralement nulle part dans la pièce. La
+    vérification anti-invention, qui exigeait la chaîne exacte, rejetait
+    donc en silence une identification pourtant correcte du modèle."""
+    page = (
+        "PROCÈS-VERBAL D'AUDITION DE VICTIME ET PLAINTE\n"
+        "Comparaît la personne ci-après dénommée :\n"
+        "Nom : DUPONT      Prénom : Julie, Clémence\n"
+        "Née le 18 août 1996 à Villeurbanne (69).\n"
+    )
+    mots_page = _mots(page)
+
+    # Les trois écritures légitimes du même nom doivent passer.
+    for ecriture in ("Julie DUPONT", "DUPONT Julie", "DUPONT Julie, Clémence"):
+        assert _mots(ecriture) <= mots_page, ecriture
+
+    # Un nom inventé, ou une personne absente de cette pièce, reste rejeté.
+    for absent in ("Marc INVENTE", "Sofiane BENALI"):
+        assert not _mots(absent) <= mots_page, absent
+
+
+def test_repli_modele_jamais_en_mode_offline(monkeypatch) -> None:
+    """L'élargissement du repli sur le modèle à tous les types de pièces
+    (voir test_identification_llm.py) ne doit pas percer l'interdit
+    --offline : aucun appel réseau, quel que soit le type de pièce."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE personnes (id INTEGER PRIMARY KEY, nom TEXT, role TEXT)")
+
+    def interdit(*args, **kwargs):
+        raise AssertionError("aucun appel au modèle ne doit avoir lieu en --offline")
+
+    monkeypatch.setattr(classify, "identifier_personne_via_llm", interdit)
+
+    personne_id, methode = identifier_personne_principale(
+        db,
+        Config(offline=True, provider="offline"),
+        "PV de synthèse",
+        "Rapport de synthèse concernant BENALI Sofiane.",
+        Console(quiet=True),
+        {"tokens_in": 0, "tokens_out": 0},
+    )
+
+    assert personne_id is None
+    assert methode == "non_identifie"

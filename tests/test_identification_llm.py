@@ -95,10 +95,17 @@ def test_identification_llm_rejetee_si_role_invalide(monkeypatch, db, config_en_
     assert methode == "non_identifie"
 
 
-def test_pas_dappel_llm_hors_types_audition(monkeypatch, db, config_en_ligne) -> None:
-    """Le repli LLM ne doit se déclencher que pour les auditions — pas pour
-    un type de pièce où on considère qu'une absence de tag signifie
-    simplement "non identifié"."""
+def test_repli_llm_tente_sur_tout_type_de_piece(monkeypatch, db, config_en_ligne) -> None:
+    """Ce test vérifiait auparavant l'inverse : le repli n'était tenté que
+    pour les auditions, une absence de tag valant "non identifié" partout
+    ailleurs. Décision inversée après des essais sur de vrais dossiers —
+    des pièces entières restaient sans personne alors que le modèle savait
+    parfaitement les lire, simplement parce que leur tournure d'identité
+    n'était couverte par aucun motif. Les formulations varient trop d'un
+    service à l'autre pour qu'un jeu de regex les épuise : ajouter un motif
+    par tournure rencontrée est sans fin. Le modèle absorbe cette variété,
+    et la vérification du nom (chaque mot doit figurer dans la pièce) tient
+    l'invention à distance — voir les tests de rejet ci-dessus, inchangés."""
     faux = FauxProvider('{"nom": "Yanis BELKACEM", "role": "mis_en_cause"}')
     monkeypatch.setattr(classify_module, "obtenir_provider", lambda config: faux)
 
@@ -107,9 +114,37 @@ def test_pas_dappel_llm_hors_types_audition(monkeypatch, db, config_en_ligne) ->
         db, config_en_ligne, "Rapport d'expertise", TEXTE_AUDITION, Console(quiet=True), compteur
     )
 
-    assert personne_id is None
-    assert methode == "non_identifie"
-    assert faux.appels == 0
+    assert methode == "llm"
+    assert personne_id is not None
+    assert faux.appels == 1
+
+
+def test_nom_accepte_meme_ecrit_dans_un_autre_ordre(monkeypatch, db, config_en_ligne) -> None:
+    """Régression sur un vrai dossier (Lyon) : la victime avait disparu de
+    l'analyse. Son identité est écrite en champs éclatés dans son audition
+    ("Nom : DUPONT  Prénom : Julie, Clémence"), si bien que la chaîne
+    "DUPONT Julie" n'existe littéralement nulle part dans la pièce. La
+    vérification exigeait la chaîne exacte : elle rejetait donc en silence
+    une identification pourtant juste. La comparaison se fait maintenant
+    par ensemble de mots, comme le fait déjà _personne_par_nom dans
+    chrono.py pour exactement cette raison."""
+    texte = (
+        "PROCES-VERBAL D'AUDITION DE VICTIME ET PLAINTE\n"
+        "Comparaît la personne ci-après dénommée :\n"
+        "Nom : DUPONT      Prénom : Julie, Clémence\n"
+        "Née le 18 août 1996 à Villeurbanne (69).\n"
+    )
+    faux = FauxProvider('{"nom": "DUPONT Julie", "role": "victime"}')
+    monkeypatch.setattr(classify_module, "obtenir_provider", lambda config: faux)
+
+    compteur = {"tokens_in": 0, "tokens_out": 0}
+    personne_id, methode = identifier_personne_principale(
+        db, config_en_ligne, "PV d'audition", texte, Console(quiet=True), compteur
+    )
+
+    assert methode == "llm"
+    row = db.execute("SELECT nom, role FROM personnes WHERE id = ?", (personne_id,)).fetchone()
+    assert row["role"] == "victime"
 
 
 def test_identification_par_personne_deja_connue(monkeypatch, db, config_en_ligne) -> None:
