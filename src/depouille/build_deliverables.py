@@ -25,6 +25,7 @@ from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
 from .index_builder import _cle_tri_date
+from .qualite_texte import grouper_en_plages, pages_peu_lisibles
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
 from .resume import generer_resume
 from .surlignage import construire_pdf_surligne
@@ -290,6 +291,8 @@ def _construire_controle(db: sqlite3.Connection, chemin: Path, stats_surlignage:
     nb_services_non_trouves = db.execute("SELECT COUNT(*) FROM pieces WHERE service_redacteur IS NULL").fetchone()[0]
     nb_cotes_non_trouvees = db.execute("SELECT COUNT(*) FROM pages WHERE cote_detectee IS NULL").fetchone()[0]
 
+    pages_illisibles = pages_peu_lisibles(db)
+
     nb_floue_ocr = 0
     for table in ("evenements_procedure", "evenements_faits", "declarations"):
         nb_floue_ocr += db.execute(
@@ -371,6 +374,27 @@ def _construire_controle(db: sqlite3.Connection, chemin: Path, stats_surlignage:
         f"{nb_floue_ocr} citation(s) validée(s) par tolérance floue plutôt que par exactitude "
         "littérale stricte — à relire en priorité même si elles ne sont pas rejetées."
     )
+    lignes.append("")
+
+    lignes.append("## Pages dont le texte est peu lisible (à relire sur l'original)\n")
+    if pages_illisibles:
+        lignes.append(
+            "Sur ces pages, la reconnaissance de caractères rend un texte partiellement faux "
+            "(page manuscrite, scan dégradé, photocopie). Tout élément extrait de ces pages, "
+            "y compris s'il est marqué vérifié, doit être relu sur le document d'origine : la "
+            "vérification confirme que la citation figure bien dans le texte reconnu, pas que "
+            "le texte reconnu correspond à ce qui est écrit sur le papier."
+        )
+        lignes.append("")
+        lignes.append("| Pages | Origine du texte |")
+        lignes.append("|---|---|")
+        for debut_plage, fin_plage in grouper_en_plages([n for n, _, _ in pages_illisibles]):
+            ocr_maison = any(ocr for n, _, ocr in pages_illisibles if debut_plage <= n <= fin_plage)
+            origine = "OCR appliqué par l'outil" if ocr_maison else "couche de texte déjà présente dans le PDF fourni"
+            etiquette = f"{debut_plage} à {fin_plage}" if fin_plage > debut_plage else str(debut_plage)
+            lignes.append(f"| {etiquette} | {origine} |")
+    else:
+        lignes.append("Aucune.")
     lignes.append("")
 
     chemin.write_text("\n".join(lignes), encoding="utf-8")

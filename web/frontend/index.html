@@ -218,6 +218,11 @@
     white-space: nowrap;
   }
   .badge-source:hover { color: var(--accent-clair); border-color: var(--accent-fonce); }
+  /* Page dont le texte reconnu est douteux : l'avertissement doit se voir
+     sur l'élément lui-même, pas seulement dans un rapport annexe que
+     personne n'ouvre. */
+  .badge-source.source-illisible { border-color: #8a6d1f; color: #d8b04a; }
+  .badge-source.source-illisible::after { content: " ⚠"; }
 
   /* --- Appli sur mobile : la barre latérale et la zone de contenu ne
      tiennent pas côte à côte sur un écran de téléphone (~390-430px de
@@ -709,11 +714,15 @@ function basculerModeClasseur(mode) {
 }
 window.basculerModeClasseur = basculerModeClasseur;
 
+const AVERTISSEMENT_ILLISIBLE =
+  "Texte de cette page mal reconnu (page manuscrite ou scan dégradé) : à relire sur l'original.";
+
 function libelleSource(page) {
   const source = sourcesParPage.get(page);
   if (!source) return "";
   const cote = source.cote ? ` · cote ${source.cote}` : "";
-  return `${source.fichier_source} · p.${source.page_fichier}${cote}`;
+  const alerte = source.illisible ? ` — ${AVERTISSEMENT_ILLISIBLE}` : "";
+  return `${source.fichier_source} · p.${source.page_fichier}${cote}${alerte}`;
 }
 
 function majNavigationClasseur() {
@@ -803,7 +812,12 @@ function badgeSource(page) {
   const source = sourcesParPage.get(page);
   const cote = source && source.cote ? ` · ${source.cote}` : "";
   const infobulle = libelleSource(page) || "Voir la page dans le dossier";
-  return `<button type="button" class="badge-source" title="${infobulle}" onclick="ouvrirClasseur(${page})">Page ${page}${cote}</button>`;
+  // Une citation issue d'une page mal reconnue peut être « vérifiée » et
+  // pourtant ne pas correspondre à ce qui est écrit sur le papier : la
+  // vérification porte sur le texte reconnu, pas sur l'original. Le badge
+  // le dit là où l'élément se lit.
+  const classe = source && source.illisible ? "badge-source source-illisible" : "badge-source";
+  return `<button type="button" class="${classe}" title="${infobulle}" onclick="ouvrirClasseur(${page})">Page ${page}${cote}</button>`;
 }
 
 // --- État de l'appli : liste des dossiers (barre latérale) + dossier ouvert (zone principale) ---

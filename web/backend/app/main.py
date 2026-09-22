@@ -23,6 +23,7 @@ from supabase import Client
 
 from depouille.chrono import calculer_durees
 from depouille.conformite import detecter_signalements
+from depouille.qualite_texte import pages_peu_lisibles
 from depouille.recoupements import detecter_recoupements
 
 from . import schemas
@@ -313,8 +314,13 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             # La cote de la pièce prime sur celle détectée sur la page :
             # c'est la même information, mais établie sur l'ensemble de la
             # pièce plutôt que sur une page isolée.
+            # Le drapeau `illisible` voyage dans cette même table : les
+            # éléments extraits résolvent déjà leur page ici, l'avertissement
+            # « page peu lisible, à relire sur l'original » les suit donc
+            # partout sans élargir aucune autre structure.
+            pages_illisibles = {n for n, _, _ in pages_peu_lisibles(db)}
             sources = [
-                dict(r)
+                dict(r, illisible=r["page"] in pages_illisibles)
                 for r in db.execute(
                     """SELECT pg.numero_global AS page, pg.fichier_source, pg.page_fichier,
                               COALESCE(pi.cote, pg.cote_detectee) AS cote, pi.type AS type_piece

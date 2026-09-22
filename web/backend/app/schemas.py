@@ -113,6 +113,10 @@ class SourcePage(BaseModel):
     page_fichier: int
     cote: str | None = None
     type_piece: str | None = None
+    # Le texte reconnu sur cette page s'écarte trop de la forme d'un texte
+    # écrit pour être tenu pour fidèle (page manuscrite, scan dégradé) : tout
+    # ce qui en est extrait doit être relu sur le document d'origine.
+    illisible: bool = False
 
 
 class PieceIndex(BaseModel):

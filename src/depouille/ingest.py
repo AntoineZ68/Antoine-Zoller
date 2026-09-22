@@ -9,6 +9,7 @@ ou OCR) — jamais une estimation.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import sqlite3
@@ -45,8 +46,18 @@ def _texte_page(page: pdfplumber.page.Page) -> str:
 
 
 def _extraire_textes_natifs(chemin_pdf: Path) -> list[str]:
+    """Libère chaque page après l'avoir lue : pdfplumber garde sinon en
+    mémoire, pour toute la durée de l'ouverture, la liste des objets de
+    CHAQUE page déjà parcourue (caractères, tracés, images). Sur un dossier
+    de quelques pages ça ne se voit pas ; sur un dossier de soixante pages
+    scannées, cette accumulation est ce qui sépare un run qui aboutit d'un
+    run tué par le noyau — et un run tué ne rend aucun livrable."""
+    textes = []
     with pdfplumber.open(chemin_pdf) as pdf:
-        return [_texte_page(page) for page in pdf.pages]
+        for page in pdf.pages:
+            textes.append(_texte_page(page))
+            page.close()
+    return textes
 
 
 def _empreinte(texte: str, secours: bytes = b"") -> str:
@@ -64,14 +75,66 @@ def _longueur_contenu(texte: str) -> int:
     return len("".join(texte.split()))
 
 
+# Chaque page en cours de reconnaissance est décompressée en bitmap plein
+# format : c'est le poste de dépense mémoire du pipeline, et il est
+# proportionnel au nombre de pages traitées EN PARALLÈLE. Mesuré sur un
+# dossier de 47 pages dont 5 scannées : 338 Mo de pic à 4 pages en
+# parallèle, 166 Mo à une seule. Sur un conteneur à 512 Mo, un dossier
+# entièrement scanné de 60 pages y laisserait le processus tué par le
+# noyau — et un run tué ne rend rien du tout, alors que 0,3 s de plus par
+# page ne coûte qu'une poignée de secondes sur un dossier entier.
+MEMOIRE_BASE_MO = 250
+MEMOIRE_PAR_TRAVAILLEUR_MO = 150
+
+
+CHEMINS_LIMITE_CGROUP = (
+    "/sys/fs/cgroup/memory.max",  # cgroup v2
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # cgroup v1
+)
+
+
+def _memoire_disponible_mo(chemins: tuple[str, ...] = CHEMINS_LIMITE_CGROUP) -> int:
+    """Limite mémoire réellement applicable au processus : celle du conteneur
+    (cgroup) si elle existe, sinon la mémoire physique de la machine. Sur
+    Render, la machine hôte est grande et le conteneur petit — lire la
+    seconde donnerait une réponse fausse et dangereuse."""
+    for chemin in chemins:
+        try:
+            valeur = Path(chemin).read_text().strip()
+        except OSError:
+            continue
+        if valeur == "max":
+            break
+        try:
+            octets = int(valeur)
+        except ValueError:
+            continue
+        # Une limite absurdement grande signifie « pas de limite » : les
+        # cgroups non plafonnés portent la valeur maximale d'un entier 64 bits.
+        if 0 < octets < (1 << 60):
+            return octets // (1024 * 1024)
+    try:
+        return (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) // (1024 * 1024)
+    except (ValueError, OSError):
+        return MEMOIRE_BASE_MO + MEMOIRE_PAR_TRAVAILLEUR_MO
+
+
+def _travailleurs_ocr() -> int:
+    budget = _memoire_disponible_mo() - MEMOIRE_BASE_MO
+    par_memoire = budget // MEMOIRE_PAR_TRAVAILLEUR_MO
+    return max(1, min(par_memoire, os.cpu_count() or 1))
+
+
 def _ocr_si_necessaire(chemin_pdf: Path, textes_natifs: list[str], dossier_travail: Path, console: Console) -> Path:
     pages_a_ocr = [i + 1 for i, t in enumerate(textes_natifs) if _longueur_contenu(t) < SEUIL_OCR_CARACTERES]
     if not pages_a_ocr:
         return chemin_pdf
 
+    travailleurs = _travailleurs_ocr()
     console.print(
         f"  [OCR] {len(pages_a_ocr)} page(s) sous le seuil de {SEUIL_OCR_CARACTERES} caractères "
-        f"({chemin_pdf.name}) -> passage à l'OCR (français)."
+        f"({chemin_pdf.name}) -> passage à l'OCR (français), {travailleurs} page(s) en parallèle "
+        f"pour {_memoire_disponible_mo()} Mo de mémoire disponible."
     )
     import ocrmypdf
 
@@ -83,6 +146,7 @@ def _ocr_si_necessaire(chemin_pdf: Path, textes_natifs: list[str], dossier_trava
         language="fra",
         skip_text=True,
         progress_bar=False,
+        jobs=travailleurs,
     )
     return chemin_ocr
 

@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Config
-from .llm import ErreurModeOffline, extraire_json, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, obtenir_provider, tranches_de_texte
 from .regex_patterns import detecter_date_heure_acte, texte_sans_entete
 
 CATEGORIES = [
@@ -179,13 +179,27 @@ def _entete_etendu(texte_page: str) -> str:
     phrase (ex. un interrogatoire qui évoque "le réquisitoire introductif"
     en référence à une autre pièce du dossier).
 
-    Certains PV placent une ligne de référence ("N° Procédure : ...",
-    "Feuillet N° 1/2", "Date : ...") AVANT le titre plutôt qu'après — la
-    casse mixte de ces lignes les exclut de la capture, mais elles ne
-    doivent pas non plus arrêter la lecture avant d'atteindre le vrai
-    titre. On les saute (nombre borné, jamais le corps du texte)."""
+    Certains PV placent des lignes de référence ("N° Procédure : ...",
+    "Feuillet N° 1/2", "COMMISSARIAT DE ... COTE : D.3") AVANT le titre
+    plutôt qu'après. Elles ne sont pas des titres — elles ne doivent pas
+    non plus arrêter la lecture avant d'avoir atteint le vrai titre.
+
+    Tant qu'aucun titre n'a encore été rencontré, on saute donc ces lignes
+    de tête, quelle que soit leur forme (nombre borné). Auparavant seul un
+    motif de métadonnée précis était sauté, et toute autre ligne arrêtait
+    net la lecture : un en-tête sur deux colonnes, que l'extraction PDF
+    recolle en une seule ligne mêlant service et référence ("COMMISSARIAT
+    DE POLICE DE LYON 3/6 COTE : D.3"), n'était ni un titre (il contient
+    ":") ni une métadonnée reconnue (trop longue, avec des chiffres). Le
+    titre placé juste en dessous n'était alors JAMAIS lu, et toutes les
+    pièces du dossier retombaient en "Non identifié" — mesuré sur un
+    dossier d'essai de 47 pages : 10 pièces sur 10 non classées.
+
+    Une fois le titre trouvé, en revanche, la première ligne qui n'en est
+    pas un arrête bien la lecture : c'est le début du corps du texte, et
+    le classer par mots-clés ferait dériver la classification."""
     lignes_entete = []
-    lignes_metadonnees_sautees = 0
+    lignes_tete_sautees = 0
     for ligne in texte_page.splitlines():
         ligne_nettoyee = ligne.strip()
         if not ligne_nettoyee:
@@ -193,8 +207,8 @@ def _entete_etendu(texte_page: str) -> str:
         if _est_titre(ligne_nettoyee):
             lignes_entete.append(ligne_nettoyee)
             continue
-        if lignes_metadonnees_sautees < 6 and RE_METADONNEE_ENTETE.match(ligne_nettoyee):
-            lignes_metadonnees_sautees += 1
+        if lignes_tete_sautees < 6 and (not lignes_entete or RE_METADONNEE_ENTETE.match(ligne_nettoyee)):
+            lignes_tete_sautees += 1
             continue
         break
     return " ".join(lignes_entete)
@@ -460,6 +474,13 @@ def _premiere_mention_ou_creation(db: sqlite3.Connection, texte: str, role_par_d
     return _upsert_personne(db, nom, role_par_defaut)
 
 
+# Au-delà, on cesse de chercher : une identité qui n'apparaît ni dans les
+# ~24 000 premiers caractères d'une pièce ni parmi les personnes déjà
+# identifiées ne sera pas trouvée en continuant, et chaque tranche coûte un
+# appel.
+MAX_TRANCHES_IDENTIFICATION = 3
+
+
 def identifier_personne_via_llm(
     config: Config,
     texte_piece: str,
@@ -490,56 +511,76 @@ def identifier_personne_via_llm(
     exacte faisait rejeter en silence des identifications correctes, et le
     garde-fou anti-invention rejetait donc aussi les bonnes réponses. Un
     nom inventé reste rejeté : chacun de ses mots doit figurer dans la
-    pièce."""
+    pièce.
+
+    Une pièce longue est parcourue par tranches successives plutôt que
+    tronquée à la première : l'identité peut être déclarée ailleurs qu'en
+    tête (reprise d'audition, pièce jointe en fin de PV). On s'arrête dès
+    qu'une tranche donne un nom vérifié, si bien que le cas courant ne coûte
+    qu'un seul appel."""
+    noms_connus = {n.lower(): n for n, _ in personnes_connues}
+    mots_connus = {frozenset(_mots(n)): n for n, _ in personnes_connues}
+    mots_piece = _mots(texte_piece)
+    dernier_rejet: str | None = None
+
     try:
         provider = obtenir_provider(config)
         liste_connues = "\n".join(f"- {nom} ({role})" for nom, role in personnes_connues) or "(aucune)"
-        reponse = provider.appeler(
-            systeme=(
-                "Tu identifies la personne interrogée ou concernée par cette pièce de "
-                "procédure pénale française, et son rôle. Rôles possibles, à l'exclusion "
-                "de tout autre : " + ", ".join(ROLES_VALIDES) + ".\n"
-                "Personnes déjà identifiées ailleurs dans ce dossier :\n"
-                f"{liste_connues}\n"
-                "Si cette pièce concerne l'une d'entre elles — même si le texte ne la "
-                'nomme pas explicitement (ex. "le gardé à vue", "l\'intéressé") — réponds '
-                "avec son nom EXACTEMENT comme il apparaît dans cette liste. Sinon, si le "
-                "texte nomme explicitement quelqu'un d'autre, recopie ce nom EXACTEMENT "
-                'comme il apparaît dans le texte. Réponds uniquement en JSON : '
-                '{"nom": "...", "role": "..."}. Si tu ne peux déterminer la personne avec '
-                'certitude ni par la liste ni par le texte, réponds {"nom": null, "role": null}.'
-            ),
-            prompt=texte_piece[:4000],
-            modele=config.modele_classification,
+        systeme = (
+            "Tu identifies la personne interrogée ou concernée par cette pièce de "
+            "procédure pénale française, et son rôle. Rôles possibles, à l'exclusion "
+            "de tout autre : " + ", ".join(ROLES_VALIDES) + ".\n"
+            "Personnes déjà identifiées ailleurs dans ce dossier :\n"
+            f"{liste_connues}\n"
+            "Si cette pièce concerne l'une d'entre elles — même si le texte ne la "
+            'nomme pas explicitement (ex. "le gardé à vue", "l\'intéressé") — réponds '
+            "avec son nom EXACTEMENT comme il apparaît dans cette liste. Sinon, si le "
+            "texte nomme explicitement quelqu'un d'autre, recopie ce nom EXACTEMENT "
+            "comme il apparaît dans le texte. Le texte peut provenir d'une page "
+            "numérisée mal reconnue : ne devine pas un nom à partir de caractères "
+            "douteux. Réponds uniquement en JSON : "
+            '{"nom": "...", "role": "..."}. Si tu ne peux déterminer la personne avec '
+            'certitude ni par la liste ni par le texte, réponds {"nom": null, "role": null}.'
         )
-        compteur["tokens_in"] += reponse.tokens_in
-        compteur["tokens_out"] += reponse.tokens_out
-        data = extraire_json(reponse.texte)
-        nom, role = data.get("nom"), data.get("role")
-        if not nom or role not in ROLES_VALIDES:
-            return None
 
-        noms_connus = {n.lower(): n for n, _ in personnes_connues}
-        if nom.lower() in noms_connus:
-            return noms_connus[nom.lower()], role
+        for tranche in tranches_de_texte(texte_piece)[:MAX_TRANCHES_IDENTIFICATION]:
+            reponse = provider.appeler(
+                systeme=systeme,
+                prompt=tranche,
+                modele=config.modele_classification,
+            )
+            compteur["tokens_in"] += reponse.tokens_in
+            compteur["tokens_out"] += reponse.tokens_out
+            data = extraire_json(reponse.texte)
+            nom, role = data.get("nom"), data.get("role")
+            if not nom or role not in ROLES_VALIDES:
+                continue
 
-        mots_nom = _mots(nom)
-        for connu, _ in personnes_connues:
-            if _mots(connu) == mots_nom:
-                return connu, role
+            if nom.lower() in noms_connus:
+                return noms_connus[nom.lower()], role
 
-        if nom.lower() in texte_piece.lower():
-            return nom, role
-        # Au moins deux mots exigés : un nom d'un seul mot ("Dupont") se
-        # retrouve trop facilement par hasard dans une page pour valoir
-        # vérification.
-        if len(mots_nom) >= 2 and mots_nom <= _mots(texte_piece):
-            return nom, role
+            mots_nom = _mots(nom)
+            if mots_nom in mots_connus:
+                return mots_connus[mots_nom], role
 
-        console.print(
-            f"  [classify] identification par le modèle rejetée : {nom!r} ni retrouvé "
-            "littéralement dans la pièce, ni parmi les personnes déjà identifiées."
-        )
+            # La vérification porte sur la pièce ENTIÈRE, pas sur la seule
+            # tranche soumise : le nom peut être écrit en champs éclatés à un
+            # endroit et repris au fil du texte à un autre.
+            if nom.lower() in texte_piece.lower():
+                return nom, role
+            # Au moins deux mots exigés : un nom d'un seul mot ("Dupont") se
+            # retrouve trop facilement par hasard dans une page pour valoir
+            # vérification.
+            if len(mots_nom) >= 2 and mots_nom <= mots_piece:
+                return nom, role
+
+            dernier_rejet = nom
+
+        if dernier_rejet is not None:
+            console.print(
+                f"  [classify] identification par le modèle rejetée : {dernier_rejet!r} ni retrouvé "
+                "littéralement dans la pièce, ni parmi les personnes déjà identifiées."
+            )
         return None
     except ErreurModeOffline:
         raise

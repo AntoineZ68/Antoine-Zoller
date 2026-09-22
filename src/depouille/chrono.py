@@ -23,7 +23,7 @@ from rich.table import Table
 
 from .classify import _est_titre
 from .config import Config
-from .llm import ErreurModeOffline, extraire_json, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, lots_de_pages, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
     FRAGMENT_HEURE,
@@ -344,6 +344,47 @@ TYPES_SANS_FAITS_NARRATIFS = (
 )
 
 
+PROMPT_EXTRACTION_FAITS = (
+    "Tu extrais des affirmations factuelles d'une pièce d'un dossier pénal "
+    "français. Pour chaque affirmation, cite le texte EXACT (mot pour mot, "
+    "sans reformuler) et le numéro de page où il apparaît. N'invente rien, ne "
+    "déduis rien. "
+    "Ignore les champs de référence purement administratifs de l'en-tête "
+    "(numéro de parquet, numéro d'enquête, et les lignes autonomes \"DATE :\" / "
+    "\"HEURE :\" qui ne font que répéter la date/l'heure de l'acte) : ce ne sont "
+    "pas des faits narratifs, ne les extrais pas comme tels. "
+    "Certaines pièces sont des documents structurés (relevé bancaire, facture) "
+    "plutôt que du récit : n'en extrais PAS chaque ligne ou chaque champ "
+    "d'identification (adresse, devise, numéro de TVA, numéro de facture, code "
+    "SWIFT/IBAN isolé sans lien avec l'affaire, ligne de découvert autorisé...). "
+    "N'extrais une ligne de relevé bancaire ou de facture que si son contenu a "
+    "un lien direct et visible avec l'affaire (ex. un virement vers une entité "
+    "ou une personne déjà nommée ailleurs dans le dossier, un montant ou une "
+    "date déjà mentionnés) — jamais une opération bancaire ou une ligne de "
+    "facturation ordinaire (frais courants, achats, salaires, impôts) sans lien "
+    "apparent. Dans le doute sur la pertinence d'une ligne purement "
+    "administrative ou tabulaire, n'extrais pas. "
+    "Un rapport de synthèse (ou tout document qui récapitule l'enquête) "
+    "reraconte volontairement, souvent phrase par phrase, des faits déjà "
+    "détaillés ailleurs dans le dossier (interpellation, auditions...) : "
+    "n'extrais PAS ce récapitulatif comme autant de nouveaux faits distincts. "
+    "N'extrais d'un tel document que ce qui est réellement nouveau et "
+    "n'apparaît dans aucune autre pièce — une décision (défèrement, "
+    "réquisitions, mesure ordonnée), une date d'audience, un motif juridique "
+    "retenu — jamais un résumé d'un événement déjà raconté en détail plus tôt "
+    "dans le dossier. "
+    "Le texte peut provenir d'une page numérisée mal reconnue : des mots "
+    "déformés ou des caractères parasites sont possibles. N'extrais que ce que "
+    "tu peux citer mot pour mot tel qu'écrit, sans corriger ni deviner ; si un "
+    "passage est trop dégradé pour être cité fidèlement, ne l'extrais pas. "
+    "Concentre-toi sur les événements, actions, déclarations et constatations "
+    "qui font avancer la compréhension de l'affaire pour un avocat qui découvre "
+    "le dossier — pas sur une retranscription exhaustive du document. "
+    "Réponds en JSON : une liste d'objets "
+    '{"page": int, "citation": "...", "description": "...", "personne_source": "..."}.'
+)
+
+
 def _extraire_faits_llm(
     db: sqlite3.Connection, config: Config, pieces: list[sqlite3.Row], console: Console, compteur: dict[str, int]
 ) -> int:
@@ -356,65 +397,37 @@ def _extraire_faits_llm(
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
             (piece["page_debut"], piece["page_fin"]),
         ).fetchall()
-        texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in pages)
-        try:
-            reponse = provider.appeler(
-                systeme=(
-                    "Tu extrais des affirmations factuelles d'une pièce d'un dossier pénal "
-                    "français. Pour chaque affirmation, cite le texte EXACT (mot pour mot, "
-                    "sans reformuler) et le numéro de page où il apparaît. N'invente rien, ne "
-                    "déduis rien. "
-                    "Ignore les champs de référence purement administratifs de l'en-tête "
-                    "(numéro de parquet, numéro d'enquête, et les lignes autonomes \"DATE :\" / "
-                    "\"HEURE :\" qui ne font que répéter la date/l'heure de l'acte) : ce ne sont "
-                    "pas des faits narratifs, ne les extrais pas comme tels. "
-                    "Certaines pièces sont des documents structurés (relevé bancaire, facture) "
-                    "plutôt que du récit : n'en extrais PAS chaque ligne ou chaque champ "
-                    "d'identification (adresse, devise, numéro de TVA, numéro de facture, code "
-                    "SWIFT/IBAN isolé sans lien avec l'affaire, ligne de découvert autorisé...). "
-                    "N'extrais une ligne de relevé bancaire ou de facture que si son contenu a "
-                    "un lien direct et visible avec l'affaire (ex. un virement vers une entité "
-                    "ou une personne déjà nommée ailleurs dans le dossier, un montant ou une "
-                    "date déjà mentionnés) — jamais une opération bancaire ou une ligne de "
-                    "facturation ordinaire (frais courants, achats, salaires, impôts) sans lien "
-                    "apparent. Dans le doute sur la pertinence d'une ligne purement "
-                    "administrative ou tabulaire, n'extrais pas. "
-                    "Un rapport de synthèse (ou tout document qui récapitule l'enquête) "
-                    "reraconte volontairement, souvent phrase par phrase, des faits déjà "
-                    "détaillés ailleurs dans le dossier (interpellation, auditions...) : "
-                    "n'extrais PAS ce récapitulatif comme autant de nouveaux faits distincts. "
-                    "N'extrais d'un tel document que ce qui est réellement nouveau et "
-                    "n'apparaît dans aucune autre pièce — une décision (défèrement, "
-                    "réquisitions, mesure ordonnée), une date d'audience, un motif juridique "
-                    "retenu — jamais un résumé d'un événement déjà raconté en détail plus tôt "
-                    "dans le dossier. "
-                    "Concentre-toi sur les événements, actions, déclarations et constatations "
-                    "qui font avancer la compréhension de l'affaire pour un avocat qui découvre "
-                    "le dossier — pas sur une retranscription exhaustive du document. "
-                    "Réponds en JSON : une liste d'objets "
-                    '{"page": int, "citation": "...", "description": "...", "personne_source": "..."}.'
-                ),
-                prompt=texte[:8000],
-                modele=config.modele_analyse,
-            )
-            compteur["tokens_in"] += reponse.tokens_in
-            compteur["tokens_out"] += reponse.tokens_out
-            faits = extraire_json(reponse.texte)
-        except ErreurModeOffline:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"  [chrono] échec extraction des faits pour la pièce {piece['id']} ({exc}), ignorée.")
-            continue
+        # Une pièce longue est analysée en plusieurs appels successifs plutôt
+        # que tronquée à la taille d'un seul : voir lots_de_pages.
+        for lot in lots_de_pages(pages):
+            texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in lot)
+            try:
+                reponse = provider.appeler(
+                    systeme=PROMPT_EXTRACTION_FAITS,
+                    prompt=texte,
+                    modele=config.modele_analyse,
+                )
+                compteur["tokens_in"] += reponse.tokens_in
+                compteur["tokens_out"] += reponse.tokens_out
+                faits = extraire_json(reponse.texte)
+            except ErreurModeOffline:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                console.print(
+                    f"  [chrono] échec extraction des faits pour la pièce {piece['id']} "
+                    f"(pages {lot[0]['numero_global']}-{lot[-1]['numero_global']}) : {exc}, lot ignoré."
+                )
+                continue
 
-        for fait in faits:
-            personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
-            db.execute(
-                """INSERT INTO evenements_faits
-                   (piece_id, page, citation, personne_id_source, description, statut_verif)
-                   VALUES (?, ?, ?, ?, ?, 'a_faire')""",
-                (piece["id"], fait["page"], fait["citation"], personne_id, fait.get("description", "")),
-            )
-            nb += 1
+            for fait in faits:
+                personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
+                db.execute(
+                    """INSERT INTO evenements_faits
+                       (piece_id, page, citation, personne_id_source, description, statut_verif)
+                       VALUES (?, ?, ?, ?, ?, 'a_faire')""",
+                    (piece["id"], fait["page"], fait["citation"], personne_id, fait.get("description", "")),
+                )
+                nb += 1
     db.commit()
     return nb
 

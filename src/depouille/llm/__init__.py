@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from ..config import Config
-from .base import ErreurModeOffline, LLMProvider, OfflineProvider, ReponseLLM, extraire_json
+from .base import (
+    ErreurModeOffline,
+    LLMProvider,
+    OfflineProvider,
+    ReponseLLM,
+    extraire_json,
+    lots_de_pages,
+    tranches_de_texte,
+)
 
 
 def obtenir_provider(config: Config) -> LLMProvider:
@@ -28,4 +36,6 @@ __all__ = [
     "ErreurModeOffline",
     "OfflineProvider",
     "extraire_json",
+    "lots_de_pages",
+    "tranches_de_texte",
 ]

@@ -20,6 +20,62 @@ class ReponseLLM:
     tokens_out: int
 
 
+TAILLE_LOT_CARACTERES = 8000
+
+
+def lots_de_pages(pages, taille_max: int = TAILLE_LOT_CARACTERES) -> list[list]:
+    """Découpe les pages d'une pièce en lots tenant chacun dans un appel au
+    modèle, au lieu de tronquer la pièce à la taille d'un seul appel.
+
+    Une pièce longue (audition de garde à vue sur huit ou neuf pages) dépasse
+    largement la taille d'un prompt : la couper en gardant le début revenait
+    à ne jamais analyser la fin de l'interrogatoire — c'est-à-dire souvent
+    l'endroit où se trouvent les aveux, les rétractations ou les
+    contradictions. Et cette perte était SILENCIEUSE : ni message, ni trace.
+    Mesuré sur un dossier d'essai de 47 pages : 8 929 caractères de deux
+    auditions purement ignorés (32 % et 40 % de la pièce).
+
+    Le découpage se fait sur des frontières de pages, jamais au milieu : les
+    citations renvoyées par le modèle sont ancrées à un numéro de page, et
+    couper une page en deux produirait des citations à cheval, invérifiables.
+    Une page qui dépasse à elle seule la taille maximale forme son propre lot
+    (elle sera tronquée par l'appelant, faute de mieux — mais c'est alors une
+    page entière, pas la moitié d'une pièce)."""
+    lots: list[list] = []
+    lot_courant: list = []
+    taille_courante = 0
+    for page in pages:
+        taille_page = len(page["texte"])
+        if lot_courant and taille_courante + taille_page > taille_max:
+            lots.append(lot_courant)
+            lot_courant, taille_courante = [], 0
+        lot_courant.append(page)
+        taille_courante += taille_page
+    if lot_courant:
+        lots.append(lot_courant)
+    return lots
+
+
+def tranches_de_texte(texte: str, taille_max: int = TAILLE_LOT_CARACTERES) -> list[str]:
+    """Découpe un texte en tranches sur des frontières de lignes.
+
+    Sert là où on ne dispose que du texte concaténé d'une pièce et pas de ses
+    pages : couper en plein milieu d'un mot (`texte[:4000]`) pouvait amputer
+    précisément la ligne d'identité qu'on cherchait à lire."""
+    tranches: list[str] = []
+    courante: list[str] = []
+    taille = 0
+    for ligne in texte.splitlines(keepends=True):
+        if courante and taille + len(ligne) > taille_max:
+            tranches.append("".join(courante))
+            courante, taille = [], 0
+        courante.append(ligne)
+        taille += len(ligne)
+    if courante:
+        tranches.append("".join(courante))
+    return tranches
+
+
 _RE_BLOC_CODE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 

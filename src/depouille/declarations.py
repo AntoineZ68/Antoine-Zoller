@@ -30,7 +30,7 @@ from rich.table import Table
 
 from .classify import TYPES_AUDITION
 from .config import Config
-from .llm import ErreurModeOffline, extraire_json, obtenir_provider
+from .llm import ErreurModeOffline, extraire_json, lots_de_pages, obtenir_provider
 from .verification import _normaliser, verifier_table
 
 RE_QUESTION = re.compile(r"^(?:Question|Q)[.:\s]+(.+)$")
@@ -109,32 +109,47 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
     return resultats
 
 
+PROMPT_EXTRACTION_DECLARATIONS = (
+    "Tu extrais les points factuels déclarés par la personne auditionnée dans "
+    "cette pièce de procédure pénale française, rédigée en style narratif "
+    "(sans structure Question/Réponse explicite). Pour chaque point, cite le "
+    "texte EXACT (mot pour mot) et le numéro de page. N'invente rien, ne déduis "
+    "rien. Le texte peut provenir d'une page numérisée mal reconnue : n'extrais "
+    "que ce que tu peux citer mot pour mot tel qu'écrit, sans corriger ni "
+    "deviner ; si un passage est trop dégradé pour être cité fidèlement, ne "
+    "l'extrais pas. Réponds en JSON : une liste d'objets "
+    '{"page": int, "citation": "...", "point_factuel": "..."}.'
+)
+
+
 def _extraire_declarations_llm(
     config: Config, pages: list[sqlite3.Row], console: Console, compteur: dict[str, int]
 ) -> list[dict]:
+    """Une audition longue est analysée en plusieurs appels successifs plutôt
+    que tronquée à la taille d'un seul : la fin d'un interrogatoire (aveux,
+    rétractation, contradiction) est précisément ce qu'on ne peut pas perdre.
+    Voir lots_de_pages."""
     provider = obtenir_provider(config)
-    texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in pages)
-    try:
-        reponse = provider.appeler(
-            systeme=(
-                "Tu extrais les points factuels déclarés par la personne auditionnée dans "
-                "cette pièce de procédure pénale française, rédigée en style narratif "
-                "(sans structure Question/Réponse explicite). Pour chaque point, cite le "
-                "texte EXACT (mot pour mot) et le numéro de page. N'invente rien, ne déduis "
-                "rien. Réponds en JSON : une liste d'objets "
-                '{"page": int, "citation": "...", "point_factuel": "..."}.'
-            ),
-            prompt=texte[:8000],
-            modele=config.modele_analyse,
-        )
-        compteur["tokens_in"] += reponse.tokens_in
-        compteur["tokens_out"] += reponse.tokens_out
-        return extraire_json(reponse.texte)
-    except ErreurModeOffline:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        console.print(f"  [decl] échec extraction LLM ({exc}), pièce ignorée.")
-        return []
+    resultats: list[dict] = []
+    for lot in lots_de_pages(pages):
+        texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in lot)
+        try:
+            reponse = provider.appeler(
+                systeme=PROMPT_EXTRACTION_DECLARATIONS,
+                prompt=texte,
+                modele=config.modele_analyse,
+            )
+            compteur["tokens_in"] += reponse.tokens_in
+            compteur["tokens_out"] += reponse.tokens_out
+            resultats.extend(extraire_json(reponse.texte))
+        except ErreurModeOffline:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            console.print(
+                f"  [decl] échec extraction LLM pages "
+                f"{lot[0]['numero_global']}-{lot[-1]['numero_global']} ({exc}), lot ignoré."
+            )
+    return resultats
 
 
 def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, console: Console) -> None:
