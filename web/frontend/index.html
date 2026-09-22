@@ -145,10 +145,79 @@
     background: rgba(255,255,255,0.025); border: 1px solid var(--bordure-douce); border-radius: var(--rayon-sm);
   }
 
-  #zone-principale { flex: 1; overflow-y: auto; padding: 40px 32px; }
-  #zone-principale > div { max-width: 680px; margin: 0 auto; }
+  /* La zone principale se scinde en deux : la colonne de lecture (onglets)
+     et le classeur escamotable. Le défilement appartient à chaque colonne,
+     pas au conteneur : ouvrir le classeur ne doit pas décaler ni faire
+     défiler la lecture en cours. */
+  #zone-principale { flex: 1; display: flex; min-width: 0; overflow: hidden; }
+  #colonne-contenu { flex: 1; min-width: 0; overflow-y: auto; padding: 40px 32px; }
+  #colonne-contenu > div { max-width: 680px; margin: 0 auto; }
 
   #bouton-retour-mobile { display: none; }
+
+  /* --- Classeur (visionneuse du dossier source) --- */
+  #classeur {
+    width: 46%; min-width: 360px; max-width: 760px; flex-shrink: 0;
+    border-left: 1px solid var(--bordure); background: var(--fond-barre);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #classeur[hidden] { display: none; }
+  .classeur-entete {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 12px 14px; border-bottom: 1px solid var(--bordure-douce); flex-shrink: 0;
+  }
+  .classeur-modes { display: flex; gap: 4px; background: var(--fond); border-radius: 999px; padding: 3px; }
+  .mode-classeur {
+    border: none; background: transparent; color: var(--texte-att); font-size: 12.5px;
+    padding: 6px 14px; border-radius: 999px; font-weight: 500;
+  }
+  .mode-classeur.actif { background: var(--carte); color: var(--accent-clair); }
+  #fermer-classeur {
+    border: none; background: transparent; color: var(--texte-att-2); font-size: 15px;
+    padding: 4px 8px; line-height: 1;
+  }
+  #fermer-classeur:hover { color: var(--texte); }
+  .classeur-navigation {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--bordure-douce); font-size: 12.5px; color: var(--texte-att);
+    flex-shrink: 0;
+  }
+  .classeur-navigation button {
+    border: 1px solid var(--bordure-douce); background: none; color: var(--texte-att);
+    padding: 2px 10px; border-radius: var(--rayon-sm); font-size: 15px; line-height: 1.4;
+  }
+  .classeur-navigation button:hover:not(:disabled) { color: var(--texte); }
+  .classeur-navigation button:disabled { opacity: 0.35; }
+  #classeur-source {
+    margin-left: auto; font-size: 11.5px; color: var(--texte-att-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .classeur-corps { flex: 1; overflow-y: auto; padding: 14px; }
+  #classeur-piece canvas {
+    width: 100%; height: auto; display: block; border-radius: var(--rayon-sm);
+    background: #fff; box-shadow: var(--ombre-douce);
+  }
+
+  .liste-index { display: flex; flex-direction: column; gap: 4px; }
+  .entree-index {
+    width: 100%; text-align: left; background: none; border: 1px solid transparent;
+    border-left: 2px solid transparent; color: var(--texte); padding: 9px 11px;
+    border-radius: var(--rayon-sm); font-family: inherit; font-size: 13px;
+  }
+  .entree-index:hover { background: rgba(255,255,255,0.035); }
+  .entree-index.actif { background: rgba(201,161,90,0.10); border-left-color: var(--accent); }
+  .entree-index .type-piece { display: block; font-weight: 500; }
+  .entree-index .meta-piece { display: block; font-size: 11.5px; color: var(--texte-att-2); margin-top: 3px; }
+
+  /* Badge de traçabilité : rend chaque élément extrait cliquable vers sa
+     page d'origine. Discret par défaut — l'avocat lit d'abord le fait,
+     la source n'est là que pour être vérifiable en un clic. */
+  .badge-source {
+    border: 1px solid var(--bordure-douce); background: none; color: var(--texte-att-2);
+    font-family: inherit; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge-source:hover { color: var(--accent-clair); border-color: var(--accent-fonce); }
 
   /* --- Appli sur mobile : la barre latérale et la zone de contenu ne
      tiennent pas côte à côte sur un écran de téléphone (~390-430px de
@@ -157,7 +226,7 @@
      un bouton retour pour revenir à la liste. */
   @media (max-width: 720px) {
     #barre-laterale { width: 100%; }
-    #zone-principale { padding: 20px 16px; }
+    #colonne-contenu { padding: 20px 16px; }
     #appli.contenu-actif #barre-laterale { display: none; }
     #appli:not(.contenu-actif) #zone-principale { display: none; }
     #bouton-retour-mobile {
@@ -165,6 +234,10 @@
       background: none; border: 1px solid var(--bordure-douce); color: var(--texte-att);
       font-size: 12.5px; padding: 7px 12px; border-radius: var(--rayon-sm);
     }
+    /* Deux colonnes ne tiennent pas sur un téléphone : le classeur ouvert
+       prend tout l'écran et masque la lecture, comme la barre latérale. */
+    #classeur { width: 100%; min-width: 0; max-width: none; }
+    #zone-principale:has(#classeur:not([hidden])) #colonne-contenu { display: none; }
   }
 
   .carte { background: var(--carte); border: 1px solid var(--bordure-douce); border-radius: var(--rayon); padding: 24px 26px;
@@ -360,6 +433,7 @@
   </div>
 
   <div id="zone-principale">
+   <div id="colonne-contenu">
     <button type="button" id="bouton-retour-mobile" onclick="retourListeMobile()">← Retour aux dossiers</button>
     <div id="vue-nouveau" hidden>
       <div class="carte">
@@ -386,6 +460,33 @@
         <p>Sélectionne un dossier dans la liste, ou clique sur « + Nouveau dossier » pour en envoyer un.</p>
       </div>
     </div>
+   </div>
+
+   <!-- Le classeur vit HORS de #vue-dossier : cette vue est réécrite
+        entièrement à chaque rafraîchissement automatique (scrutation toutes
+        les 6 s pendant un traitement), ce qui détruirait sinon la
+        visionneuse et la page PDF en cours de lecture. -->
+   <aside id="classeur" hidden>
+     <header class="classeur-entete">
+       <div class="classeur-modes">
+         <button type="button" class="mode-classeur actif" data-mode="piece" onclick="basculerModeClasseur('piece')">Pièce</button>
+         <button type="button" class="mode-classeur" data-mode="index" onclick="basculerModeClasseur('index')">Index</button>
+       </div>
+       <button type="button" id="fermer-classeur" onclick="fermerClasseur()" title="Fermer le classeur">✕</button>
+     </header>
+
+     <div class="classeur-navigation" id="classeur-navigation">
+       <button type="button" onclick="allerPageClasseur(-1)" title="Page précédente">‹</button>
+       <span id="classeur-position">—</span>
+       <button type="button" onclick="allerPageClasseur(1)" title="Page suivante">›</button>
+       <span id="classeur-source"></span>
+     </div>
+
+     <div class="classeur-corps">
+       <div id="classeur-piece"></div>
+       <div id="classeur-index" hidden></div>
+     </div>
+   </aside>
   </div>
 </div>
 
@@ -546,6 +647,165 @@ async function voirDocumentTransmis(dossierId, nomFichier, bouton) {
 }
 window.voirDocumentTransmis = voirDocumentTransmis;
 
+// --- Classeur : visionneuse du dossier source, en panneau latéral ---
+//
+// Le document affiché est 00_dossier_surligne.pdf, le dossier fusionné déjà
+// produit par le moteur : sa page N EST la page N de l'outil (même
+// numérotation que tous les livrables), et les citations retenues y sont
+// déjà surlignées. D'où une visionneuse qui n'a ni à retrouver le bon
+// fichier d'origine, ni à rechercher la citation dans la page : il suffit
+// d'ouvrir ce PDF à la page annoncée. La correspondance page -> document
+// d'origine (`sources`) ne sert qu'à AFFICHER la référence à l'avocat.
+const URL_PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const URL_PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+let sourcesParPage = new Map();
+let indexPieces = [];
+let classeurDossierId = null;
+let classeurDoc = null;
+let classeurPage = 1;
+let rendusClasseur = 0;
+let promessePdfjs = null;
+
+function chargerPdfjs() {
+  // Chargé à la première ouverture du classeur seulement : inutile de
+  // ralentir le démarrage de l'appli pour un avocat qui ne l'ouvrira pas.
+  if (promessePdfjs) return promessePdfjs;
+  promessePdfjs = new Promise((resoudre, rejeter) => {
+    const script = document.createElement("script");
+    script.src = URL_PDFJS;
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL_PDFJS_WORKER;
+      resoudre(window.pdfjsLib);
+    };
+    script.onerror = () => {
+      promessePdfjs = null; // permet une nouvelle tentative au prochain clic
+      rejeter(new Error("Impossible de charger la visionneuse PDF."));
+    };
+    document.head.appendChild(script);
+  });
+  return promessePdfjs;
+}
+
+function reinitialiserClasseur() {
+  fermerClasseur();
+  if (classeurDoc) classeurDoc.destroy();
+  classeurDoc = null;
+  classeurDossierId = null;
+  classeurPage = 1;
+}
+
+function fermerClasseur() {
+  document.getElementById("classeur").hidden = true;
+}
+window.fermerClasseur = fermerClasseur;
+
+function basculerModeClasseur(mode) {
+  document.querySelectorAll(".mode-classeur").forEach((b) => b.classList.toggle("actif", b.dataset.mode === mode));
+  document.getElementById("classeur-piece").hidden = mode !== "piece";
+  document.getElementById("classeur-index").hidden = mode !== "index";
+  document.getElementById("classeur-navigation").hidden = mode !== "piece";
+  if (mode === "index") rendreIndexClasseur();
+}
+window.basculerModeClasseur = basculerModeClasseur;
+
+function libelleSource(page) {
+  const source = sourcesParPage.get(page);
+  if (!source) return "";
+  const cote = source.cote ? ` · cote ${source.cote}` : "";
+  return `${source.fichier_source} · p.${source.page_fichier}${cote}`;
+}
+
+function majNavigationClasseur() {
+  const total = classeurDoc ? classeurDoc.numPages : 0;
+  document.getElementById("classeur-position").textContent = total ? `Page ${classeurPage} / ${total}` : "—";
+  document.getElementById("classeur-source").textContent = libelleSource(classeurPage);
+  const boutons = document.querySelectorAll(".classeur-navigation button");
+  if (boutons.length === 2) {
+    boutons[0].disabled = classeurPage <= 1;
+    boutons[1].disabled = !total || classeurPage >= total;
+  }
+}
+
+async function afficherPageClasseur(numero) {
+  if (!classeurDoc) return;
+  classeurPage = Math.min(Math.max(1, numero), classeurDoc.numPages);
+  majNavigationClasseur();
+
+  // Un clic rapide sur plusieurs sources peut lancer deux rendus : seul le
+  // dernier demandé doit s'afficher, sinon la page affichée ne correspond
+  // plus à celle annoncée dans la barre de navigation.
+  const jeton = ++rendusClasseur;
+  const conteneur = document.getElementById("classeur-piece");
+  const page = await classeurDoc.getPage(classeurPage);
+  const largeur = conteneur.clientWidth || 460;
+  const echelle = largeur / page.getViewport({ scale: 1 }).width;
+  // Rendu à la densité réelle de l'écran : un PV scanné devient illisible
+  // si le canvas est rendu à 1x puis étiré par le navigateur.
+  const viewport = page.getViewport({ scale: echelle * Math.min(window.devicePixelRatio || 1, 2) });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  if (jeton === rendusClasseur) conteneur.replaceChildren(canvas);
+}
+
+function allerPageClasseur(delta) {
+  afficherPageClasseur(classeurPage + delta);
+}
+window.allerPageClasseur = allerPageClasseur;
+
+async function ouvrirClasseur(page) {
+  document.getElementById("classeur").hidden = false;
+  basculerModeClasseur("piece");
+  const conteneur = document.getElementById("classeur-piece");
+  if (classeurDoc && classeurDossierId === dossierOuvertId) {
+    afficherPageClasseur(page);
+    return;
+  }
+  conteneur.innerHTML = `<div class="chargement"><span class="spinner"></span> Ouverture du dossier…</div>`;
+  try {
+    const pdfjsLib = await chargerPdfjs();
+    const { url } = await appelApi(`/api/dossiers/${dossierOuvertId}/livrables/00_dossier_surligne.pdf`);
+    classeurDoc = await pdfjsLib.getDocument(url).promise;
+    classeurDossierId = dossierOuvertId;
+    await afficherPageClasseur(page);
+  } catch (erreur) {
+    conteneur.innerHTML = `<p class="erreur">${erreur.message}</p>`;
+  }
+}
+window.ouvrirClasseur = ouvrirClasseur;
+
+function rendreIndexClasseur() {
+  const element = document.getElementById("classeur-index");
+  if (!indexPieces.length) {
+    element.innerHTML = `<p class="vide">Aucune pièce indexée pour ce dossier.</p>`;
+    return;
+  }
+  // Ordre du dossier fusionné, pas tri par date : c'est l'ordre du classeur
+  // physique que l'avocat a sous les yeux. La date figure sur chaque entrée
+  // pour se repérer.
+  element.innerHTML = `<div class="liste-index">
+    ${indexPieces.map((p) => {
+      const pages = p.page_fin > p.page_debut ? `Pages ${p.page_debut}–${p.page_fin}` : `Page ${p.page_debut}`;
+      const date = p.date ? ` · ${p.date}${p.heure ? " à " + p.heure : ""}` : "";
+      const cote = p.cote ? ` · cote ${p.cote}` : "";
+      return `<button type="button" class="entree-index" onclick="ouvrirClasseur(${p.page_debut})">
+        <span class="type-piece">${p.type}</span>
+        <span class="meta-piece">${pages}${date}${cote}</span>
+      </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function badgeSource(page) {
+  if (!page) return "";
+  const source = sourcesParPage.get(page);
+  const cote = source && source.cote ? ` · ${source.cote}` : "";
+  const infobulle = libelleSource(page) || "Voir la page dans le dossier";
+  return `<button type="button" class="badge-source" title="${infobulle}" onclick="ouvrirClasseur(${page})">Page ${page}${cote}</button>`;
+}
+
 // --- État de l'appli : liste des dossiers (barre latérale) + dossier ouvert (zone principale) ---
 
 let dossiers = [];
@@ -698,7 +958,7 @@ function rendreBlocAnalyseIA(donnees) {
           ${donnees.chronologie_procedure.map((e) => `
             <li>
               <div class="fait-entete">
-                <span class="fait-page">${e.date ? `${e.date}${e.heure ? " à " + e.heure : ""} — ` : ""}Page ${e.page}</span>
+                <span class="fait-page">${e.date ? `${e.date}${e.heure ? " à " + e.heure : ""} — ` : ""}</span>${badgeSource(e.page)}
                 ${e.personne ? `<span class="fait-personne">${e.personne}</span>` : ""}
               </div>
               <div class="fait-description">${LIBELLES_NATURE_PROCEDURE[e.nature] || e.nature}</div>
@@ -716,7 +976,7 @@ function rendreBlocAnalyseIA(donnees) {
             <li class="signalement">
               <div class="titre-signalement">${s.titre}</div>
               <div class="description-signalement">${s.description}</div>
-              ${s.citation_reference ? `<div class="source-signalement">Page ${s.page_reference} — « ${s.citation_reference} »</div>` : ""}
+              ${s.citation_reference ? `<div class="source-signalement">${badgeSource(s.page_reference)} « ${s.citation_reference} »</div>` : ""}
             </li>`).join("")}</ul>`
         : `<p class="vide">Aucun signalement structurel détecté (pièce ou événement attendu absent, ou seuil de durée de garde à vue dépassé).</p>`}
     </div>`);
@@ -730,7 +990,7 @@ function rendreBlocAnalyseIA(donnees) {
               <div class="point-factuel">${e.type_entite} — ${e.valeur}</div>
               ${e.occurrences.map((o) => `
                 <div class="declaration-personne">
-                  <div class="nom-declarant">Page ${o.page}</div>
+                  <div class="nom-declarant">${badgeSource(o.page)}</div>
                   <div class="citation-declarant">« ${o.citation} »</div>
                 </div>`).join("")}
             </li>`).join("")}</ul>`
@@ -746,7 +1006,7 @@ function rendreBlocAnalyseIA(donnees) {
               <div class="point-factuel">${c.point_factuel}</div>
               ${c.declarations.map((d) => `
                 <div class="declaration-personne">
-                  <div class="nom-declarant">${d.personne || "NON TROUVÉ"} — page ${d.page}</div>
+                  <div class="nom-declarant">${d.personne || "NON TROUVÉ"} ${badgeSource(d.page)}</div>
                   <div class="citation-declarant">« ${d.citation} »</div>
                 </div>`).join("")}
             </li>`).join("")}</ul>`
@@ -764,7 +1024,7 @@ function rendreBlocChronologie(donnees) {
   const rendreFait = (f) => `
     <li>
       <div class="fait-entete">
-        <span class="fait-page">${f.date ? `${f.date}${f.heure ? " à " + f.heure : ""} — ` : ""}Page ${f.page}</span>
+        <span class="fait-page">${f.date ? `${f.date}${f.heure ? " à " + f.heure : ""} — ` : ""}</span>${badgeSource(f.page)}
         ${f.personne ? `<span class="fait-personne">${f.personne}</span>` : ""}
       </div>
       <div class="fait-description">${f.description || ""}</div>
@@ -803,6 +1063,7 @@ async function rendreDetailDossier(dossier) {
     let donnees = {
       resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [],
       duree_garde_a_vue: null, signalements: [], confrontations: [], recoupements: [],
+      sources: [], index_pieces: [],
     };
     let erreurDonnees = "";
     if (cacheDonnees.has(dossier.id)) {
@@ -816,6 +1077,14 @@ async function rendreDetailDossier(dossier) {
       }
     }
     if (dossierOuvertId !== dossier.id) return; // l'utilisateur a changé de dossier entre-temps
+
+    // Table de correspondance page -> document d'origine, utilisée par les
+    // badges de source et par le classeur. Les dossiers traités avant
+    // l'ajout de la traçabilité n'ont pas ces champs : la vue reste
+    // entièrement fonctionnelle, seuls les badges perdent le détail du
+    // fichier et de la cote.
+    sourcesParPage = new Map((donnees.sources || []).map((s) => [s.page, s]));
+    indexPieces = donnees.index_pieces || [];
 
     // Liste des PDF sources tels que transmis — jamais bloquante : un échec
     // ici masquerait sinon toute la vue derrière une erreur qui n'a rien à
@@ -930,6 +1199,7 @@ async function supprimerDossier(id, bouton) {
     dossiers = dossiers.filter((d) => d.id !== id);
     cacheDonnees.delete(id);
     cacheDocuments.delete(id);
+    reinitialiserClasseur();
     dossierOuvertId = null;
     sauvegarderDossierOuvert(null);
     rendreListeLaterale();
@@ -943,7 +1213,12 @@ async function supprimerDossier(id, bouton) {
 window.supprimerDossier = supprimerDossier;
 
 async function ouvrirDossier(id) {
-  if (id !== dossierOuvertId) ongletDossierActif = "infos";
+  if (id !== dossierOuvertId) {
+    ongletDossierActif = "infos";
+    // Le classeur affiche le PDF fusionné d'UNE affaire : le garder ouvert
+    // en changeant de dossier montrerait les pages d'une autre.
+    reinitialiserClasseur();
+  }
   dossierOuvertId = id;
   sauvegarderDossierOuvert(id);
   rendreListeLaterale();

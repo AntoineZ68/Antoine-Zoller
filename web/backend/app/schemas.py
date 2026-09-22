@@ -96,6 +96,38 @@ class EntiteCommune(BaseModel):
     occurrences: list[OccurrenceEntite]
 
 
+class SourcePage(BaseModel):
+    """Référence de traçabilité d'UNE page du dossier fusionné : de quel
+    fichier d'origine elle vient, à quelle page de ce fichier, sous quelle
+    cote, et dans quelle pièce elle tombe.
+
+    Exposée comme une table de correspondance page -> source plutôt que
+    recopiée dans chaque élément extrait : tous les éléments (faits,
+    évènements de procédure, signalements, déclarations, recoupements)
+    portent déjà leur numéro de page, et peuvent donc résoudre leur propre
+    référence. Ça évite d'élargir toutes les structures existantes — et ça
+    couvre du même coup celles qui seront ajoutées plus tard."""
+
+    page: int
+    fichier_source: str
+    page_fichier: int
+    cote: str | None = None
+    type_piece: str | None = None
+
+
+class PieceIndex(BaseModel):
+    """Une entrée de l'index du classeur : une pièce et son intervalle de
+    pages dans le dossier fusionné."""
+
+    type: str
+    page_debut: int
+    page_fin: int
+    date: str | None = None
+    heure: str | None = None
+    cote: str | None = None
+    fichier_source: str | None = None
+
+
 class DonneesDossier(BaseModel):
     resume: str | None = None
     personnes: list[Personne] = []
@@ -105,3 +137,5 @@ class DonneesDossier(BaseModel):
     signalements: list[Signalement] = []
     confrontations: list[PointConfrontation] = []
     recoupements: list[EntiteCommune] = []
+    sources: list[SourcePage] = []
+    index_pieces: list[PieceIndex] = []

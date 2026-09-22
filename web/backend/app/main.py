@@ -305,6 +305,41 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 }
                 for e in detecter_recoupements(db)
             ]
+
+            # Traçabilité : de quel document d'origine vient chaque page du
+            # dossier fusionné. Renvoyé une fois pour tout le dossier plutôt
+            # que recopié dans chaque élément extrait — tous portent déjà
+            # leur numéro de page et résolvent donc eux-mêmes leur source.
+            # La cote de la pièce prime sur celle détectée sur la page :
+            # c'est la même information, mais établie sur l'ensemble de la
+            # pièce plutôt que sur une page isolée.
+            sources = [
+                dict(r)
+                for r in db.execute(
+                    """SELECT pg.numero_global AS page, pg.fichier_source, pg.page_fichier,
+                              COALESCE(pi.cote, pg.cote_detectee) AS cote, pi.type AS type_piece
+                       FROM pages pg
+                       LEFT JOIN pieces pi
+                              ON pg.numero_global BETWEEN pi.page_debut AND pi.page_fin
+                       GROUP BY pg.numero_global
+                       ORDER BY pg.numero_global"""
+                )
+            ]
+
+            # Index du classeur : les pièces dans l'ordre du dossier
+            # fusionné — l'ordre d'un classeur physique, pas un tri par
+            # date, chaque entrée portant sa date pour se repérer.
+            index_pieces = [
+                dict(r)
+                for r in db.execute(
+                    """SELECT pi.type, pi.page_debut, pi.page_fin,
+                              pi.date_apparente AS date, pi.heure_apparente AS heure,
+                              pi.cote, pg.fichier_source
+                       FROM pieces pi
+                       LEFT JOIN pages pg ON pg.numero_global = pi.page_debut
+                       ORDER BY pi.page_debut"""
+                )
+            ]
         finally:
             db.close()
 
@@ -317,6 +352,8 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         "signalements": signalements,
         "confrontations": confrontations,
         "recoupements": recoupements,
+        "sources": sources,
+        "index_pieces": index_pieces,
     }
 
 
