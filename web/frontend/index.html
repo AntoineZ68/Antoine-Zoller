@@ -321,6 +321,7 @@
   .puce-etape.encours { border-color: var(--encours); color: var(--encours); box-shadow: 0 0 0 3px rgba(63,101,145,0.14); }
   .puce-etape.erreur { background: var(--erreur); border-color: var(--erreur); color: #fffdf9; }
   .liste-etapes li.a-venir { color: var(--texte-att-2); }
+  .detail-etape { display: block; font-size: 12.5px; color: var(--texte-att); margin-top: 2px; font-variant-numeric: tabular-nums; }
 
   .grille-livrables { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
   .grille-livrables button {
@@ -1235,8 +1236,15 @@ async function rendreDetailDossier(dossier) {
             const statutEtape = e ? e.statut : "en_attente";
             const classe = statutEtape === "termine" ? "fait" : statutEtape === "en_cours" ? "encours" : statutEtape === "erreur" ? "erreur" : "";
             const puce = statutEtape === "termine" ? "✓" : statutEtape === "erreur" ? "!" : "";
+            // Avancement de l'étape en cours (« Pages numérisées reconnues :
+            // 23 / 105 ») : sur un gros dossier scanné, la lecture dure des
+            // dizaines de minutes, et sans lui rien ne distingue un
+            // traitement lent d'un traitement bloqué.
+            const detail = statutEtape === "en_cours" && e && e.detail
+              ? `<span class="detail-etape">${e.detail}</span>` : "";
             return `<li class="${statutEtape === 'en_attente' ? 'a-venir' : ''}">
-              <span class="puce-etape ${classe}">${puce}</span> ${ETAPES_LABELS[nomEtape]}
+              <span class="puce-etape ${classe}">${puce}</span>
+              <span>${ETAPES_LABELS[nomEtape]}${detail}</span>
             </li>`;
           }).join("")}
         </ul>

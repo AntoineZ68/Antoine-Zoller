@@ -14,6 +14,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -27,7 +28,7 @@ from depouille.qualite_texte import pages_peu_lisibles
 from depouille.recoupements import detecter_recoupements
 
 from . import schemas
-from .pipeline import NOMS_LIVRABLES, traiter_dossier
+from .pipeline import INTERVALLE_BATTEMENT_S, NOMS_LIVRABLES, traiter_dossier
 from .supabase_client import client_service, client_utilisateur
 
 app = FastAPI(title="Depouille — API pilote")
@@ -154,10 +155,65 @@ async def creer_dossier(
     return dossier
 
 
+# Un traitement vivant rafraîchit `mis_a_jour_le` toutes les
+# INTERVALLE_BATTEMENT_S secondes (pipeline._Battement). Dix battements
+# manqués d'affilée : le processus qui le portait est mort. Un dossier « en
+# attente » n'a pas encore de battement — le délai couvre l'envoi des
+# fichiers, qui peut être long sur une connexion lente.
+DELAIS_ORPHELIN = {
+    "en_cours": timedelta(seconds=10 * INTERVALLE_BATTEMENT_S),
+    "en_attente": timedelta(minutes=30),
+}
+MESSAGE_ORPHELIN = (
+    "Traitement interrompu : le serveur d'analyse s'est arrêté en cours de route "
+    "(redémarrage, mise en veille ou mémoire insuffisante), sans pouvoir le signaler. "
+    "Aucun résultat partiel n'a été conservé. Supprimez ce dossier et renvoyez-le."
+)
+
+
+def _est_orphelin(dossier: dict, maintenant: datetime) -> bool:
+    delai = DELAIS_ORPHELIN.get(dossier.get("statut"))
+    if delai is None:
+        return False
+    try:
+        derniere_activite = datetime.fromisoformat(dossier["mis_a_jour_le"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if derniere_activite.tzinfo is None:
+        derniere_activite = derniere_activite.replace(tzinfo=timezone.utc)
+    return maintenant - derniere_activite > delai
+
+
+def _cloturer_orphelins(supabase: Client, dossiers: list[dict]) -> None:
+    """Passe en erreur, avec un message qui dit quoi faire, les dossiers dont
+    le traitement est mort sans pouvoir le signaler — faute de quoi ils
+    restaient « en cours » pour toujours. Fait à la lecture, parce que c'est
+    le seul moment où quelqu'un regarde, et parce qu'un processus qui meurt
+    ne peut par définition rien écrire en partant."""
+    maintenant = datetime.now(timezone.utc)
+    for dossier in dossiers:
+        if not _est_orphelin(dossier, maintenant):
+            continue
+        champs = {"statut": "erreur", "message_erreur": MESSAGE_ORPHELIN}
+        # Condition sur l'ancien statut : si le traitement vient de se
+        # terminer entre la lecture et l'écriture, on ne l'écrase pas.
+        supabase.table("dossiers").update(champs).eq("id", dossier["id"]).eq("statut", dossier["statut"]).execute()
+        # L'étape figée « en cours » aussi — sinon la liste des étapes
+        # continuerait d'afficher une lecture en cours sur un dossier en
+        # erreur. Écriture réservée au backend (pas de policy d'écriture
+        # utilisateur sur cette table) ; la propriété du dossier vient d'être
+        # établie par la lecture sous RLS ci-dessus.
+        client_service().table("traitement_etapes").update(
+            {"statut": "erreur", "message_erreur": "Interrompu."}
+        ).eq("dossier_id", dossier["id"]).eq("statut", "en_cours").execute()
+        dossier.update(champs)
+
+
 @app.get("/api/dossiers", response_model=list[schemas.DossierResume])
 def lister_dossiers(contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> list[dict]:
     supabase, _ = contexte
     resultat = supabase.table("dossiers").select("*").order("cree_le", desc=True).execute()
+    _cloturer_orphelins(supabase, resultat.data)
     return resultat.data
 
 
@@ -165,6 +221,7 @@ def lister_dossiers(contexte: tuple[Client, str] = Depends(_contexte_utilisateur
 def detail_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> dict:
     supabase, _ = contexte
     dossier = _dossier_ou_404(supabase, dossier_id)
+    _cloturer_orphelins(supabase, [dossier])
     etapes = (
         supabase.table("traitement_etapes")
         .select("*")

@@ -24,6 +24,10 @@ class EtapeTraitement(BaseModel):
     tokens_out: int
     cout_usd: float
     message_erreur: str | None = None
+    # Avancement lisible de l'étape en cours (ex. « Pages numérisées
+    # reconnues : 23 / 105 »). Absent tant que la migration 0004 n'est pas
+    # appliquée.
+    detail: str | None = None
 
 
 class DossierDetail(DossierResume):

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -96,6 +97,67 @@ def _maj_etape(supabase, dossier_id: str, etape: str, **champs) -> None:
     )
 
 
+# Le traitement tourne DANS le processus web. Si ce processus meurt en
+# cours de route — mémoire saturée, redémarrage lors d'un déploiement, mise
+# en veille par l'hébergeur —, le traitement disparaît avec lui sans qu'aucun
+# code n'ait l'occasion d'écrire « erreur » : le dossier restait affiché
+# « en cours » indéfiniment, indiscernable d'un traitement simplement lent.
+# Tant que le processus vit, ce battement rafraîchit `mis_a_jour_le` (via le
+# déclencheur de la table) ; son silence prolongé est ce qui permet à l'API
+# de conclure que le traitement est mort (voir main._cloturer_orphelins).
+INTERVALLE_BATTEMENT_S = 30
+
+
+class _Battement:
+    def __init__(self, dossier_id: str) -> None:
+        self.dossier_id = dossier_id
+        self.etape: str | None = None
+        self._arret = threading.Event()
+        self._fil = threading.Thread(target=self._boucle, name=f"battement-{dossier_id}", daemon=True)
+
+    def demarrer(self) -> None:
+        self._fil.start()
+
+    def arreter(self) -> None:
+        self._arret.set()
+        if self._fil.is_alive():
+            self._fil.join(timeout=5)
+
+    def _boucle(self) -> None:
+        # Client distinct de celui du traitement : les deux fils écrivent en
+        # parallèle.
+        supabase = client_service()
+        while not self._arret.wait(INTERVALLE_BATTEMENT_S):
+            try:
+                supabase.table("dossiers").update({"etape_courante": self.etape}).eq("id", self.dossier_id).execute()
+            except Exception as exc:  # noqa: BLE001 — un battement manqué n'est pas grave, le suivant rattrapera
+                print(f"[pipeline] battement manqué pour {self.dossier_id} : {exc}")
+
+
+def _rappel_progression_ocr(supabase, dossier_id: str) -> Callable[[int, int, str], None]:
+    """Écrit « Pages numérisées reconnues : 23 / 105 » sur l'étape de
+    lecture. Au mieux : une progression perdue ne doit jamais faire échouer
+    un traitement — et si la colonne `detail` n'existe pas encore (migration
+    0004 non appliquée), on le signale une fois puis on se tait."""
+    actif = True
+
+    def rappel(faites: int, total: int, fichier: str) -> None:
+        nonlocal actif
+        if not actif:
+            return
+        try:
+            supabase.table("traitement_etapes").upsert(
+                {"dossier_id": dossier_id, "etape": "ingest",
+                 "detail": f"Pages numérisées reconnues : {faites} / {total}"},
+                on_conflict="dossier_id,etape",
+            ).execute()
+        except Exception as exc:  # noqa: BLE001
+            actif = False
+            print(f"[pipeline] progression OCR non enregistrée (migration 0004 appliquée ?) : {exc}")
+
+    return rappel
+
+
 def _cout_etape(db, nom_etape: str) -> tuple[float, int, int]:
     """L'index et l'assemblage des livrables n'appellent pas le modèle : pas
     de ligne dans run_log pour eux, coût nul — ce n'est pas une erreur."""
@@ -170,7 +232,10 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
         db = ouvrir_db(affaire_dir / "depouille.db")
 
         etapes_pipeline = (
-            ("ingest", lambda: lancer_ingestion(db, chemins_pdf_locaux, affaire_dir, force=False, console=console)),
+            ("ingest", lambda: lancer_ingestion(
+                db, chemins_pdf_locaux, affaire_dir, force=False, console=console,
+                progression=_rappel_progression_ocr(supabase, dossier_id),
+            )),
             ("classify", lambda: lancer_classification(db, config, force=False, console=console)),
             ("index", lambda: construire_index(db, affaire_dir, console=console)),
             ("chrono", lambda: lancer_chrono(db, config, force=False, console=console)),
@@ -178,10 +243,13 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
             ("build", lambda: construire_livrables(db, affaire_dir, config, console=console)),
         )
 
+        battement = _Battement(dossier_id)
         try:
             _maj_dossier(supabase, dossier_id, statut="en_cours")
+            battement.demarrer()
 
             for nom_etape, fonction in etapes_pipeline:
+                battement.etape = nom_etape
                 _maj_dossier(supabase, dossier_id, etape_courante=nom_etape)
                 _maj_etape(
                     supabase, dossier_id, nom_etape,
@@ -222,4 +290,5 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
                 # sans laisser au moins une trace dans les logs.
                 print(f"[pipeline] échec du signalement d'erreur pour {dossier_id} : {exc_signalement}")
         finally:
+            battement.arreter()
             db.close()

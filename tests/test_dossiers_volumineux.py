@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from rich.console import Console
@@ -312,3 +313,67 @@ def test_cgroup_sans_plafond_retombe_sur_la_memoire_physique(tmp_path) -> None:
         fichier = tmp_path / f"memory_{valeur[:4]}.max"
         fichier.write_text(valeur + "\n")
         assert ingest._memoire_disponible_mo((str(fichier),)) == physique
+
+
+# --- OCR par tranches : un traitement long doit montrer qu'il avance ---
+
+
+def test_plage_de_pages_au_format_ocrmypdf() -> None:
+    from depouille.ingest import _plage_pages
+
+    assert _plage_pages([1, 2, 3, 7, 9, 10]) == "1-3,7,9-10"
+    assert _plage_pages([4]) == "4"
+
+
+def test_ocr_par_tranches_signale_son_avancement(monkeypatch, tmp_path) -> None:
+    """Sur un petit serveur, compter de l'ordre de la minute par page
+    numérisée : un dossier de 100 pages scannées restait une heure sur
+    « Lecture du document » sans rien qui le distingue d'une panne."""
+    import ocrmypdf
+
+    from depouille import ingest
+
+    appels_ocr: list[str] = []
+
+    def faux_ocr(entree, sortie, **options):
+        appels_ocr.append(options["pages"])
+        assert options["skip_text"], "les pages déjà reconnues ne doivent pas repasser à l'OCR"
+        Path(sortie).write_bytes(Path(entree).read_bytes())
+
+    monkeypatch.setattr(ocrmypdf, "ocr", faux_ocr)
+    source = tmp_path / "dossier.pdf"
+    source.write_bytes(b"%PDF-1.4 factice")
+    # 12 pages sans texte sur 14 (les pages 3 et 9 portent déjà du texte).
+    textes = ["" if n not in (3, 9) else "x" * 200 for n in range(1, 15)]
+
+    rappels = []
+    chemin = ingest._ocr_si_necessaire(
+        source, textes, tmp_path / "work", Console(quiet=True),
+        progression=lambda faites, total, nom: rappels.append((faites, total)),
+    )
+
+    assert appels_ocr == ["1-2,4-6", "7-8,10-12", "13-14"]
+    assert rappels == [(0, 12), (5, 12), (10, 12), (12, 12)]
+    assert chemin.name == "ocr_dossier.pdf", "le surlignage relit ce fichier sous ce nom"
+    assert sorted(p.name for p in (tmp_path / "work").iterdir()) == ["ocr_dossier.pdf"]
+
+
+def test_delai_tesseract_releve_pour_les_petits_serveurs(monkeypatch, tmp_path) -> None:
+    """Au-delà du délai, Tesseract abandonne la page et elle ressort SANS
+    TEXTE, sans erreur visible. Le défaut d'ocrmypdf (180 s) est calibré
+    pour un poste de bureau, pas pour une fraction de cœur de serveur."""
+    import ocrmypdf
+
+    from depouille import ingest
+
+    delais = []
+
+    def faux_ocr(entree, sortie, **options):
+        delais.append(options.get("tesseract_timeout"))
+        Path(sortie).write_bytes(Path(entree).read_bytes())
+
+    monkeypatch.setattr(ocrmypdf, "ocr", faux_ocr)
+    source = tmp_path / "d.pdf"
+    source.write_bytes(b"%PDF-1.4")
+    ingest._ocr_si_necessaire(source, [""], tmp_path / "work", Console(quiet=True))
+    assert delais and all(d is not None and d > 180 for d in delais)
