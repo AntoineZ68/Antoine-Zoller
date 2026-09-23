@@ -231,7 +231,7 @@
     border-left: 2px solid transparent; color: var(--texte); padding: 9px 11px;
     border-radius: var(--rayon-sm); font-family: inherit; font-size: 13px;
   }
-  .entree-index:hover { background: rgba(22,18,13,0.035); }
+  .entree-index:hover { background: rgba(22,18,13,0.035); border-color: transparent; color: var(--texte); }
   .entree-index.actif { background: var(--accent-voile); border-left-color: var(--accent); }
   .entree-index .type-piece { display: block; font-weight: 500; }
   .entree-index .meta-piece { display: block; font-size: 11.5px; color: var(--texte-att-2); margin-top: 3px; }
@@ -296,12 +296,22 @@
   .badge-termine { background: var(--accent-voile-fort); color: var(--succes); }
   .badge-erreur { background: rgba(166,65,47,0.12); color: var(--erreur); }
 
-  .infos-rapides { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
-  .infos-rapides span {
+  .infos-rapides { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+  .infos-rapides > span {
     font-size: 12.5px; color: var(--texte-att); background: var(--carte); border: 1px solid var(--bordure-douce);
     padding: 7px 14px; border-radius: var(--pilule);
   }
   .infos-rapides strong { color: var(--encre); font-weight: 600; }
+  /* Porte d'entrée du classeur en mode Index. Le bouton « Index » existait
+     déjà dans le classeur, mais le classeur ne s'ouvrait qu'en cliquant une
+     source : un avocat qui voulait feuilleter le dossier depuis le début
+     n'avait aucun point d'entrée visible. */
+  .bouton-index {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12.5px; padding: 7px 16px; border-color: var(--encre); color: var(--encre);
+    background: var(--carte);
+  }
+  .bouton-index:hover { background: var(--encre); color: #faf8f4; }
 
   .liste-etapes { list-style: none; margin: 0; padding: 0; }
   .liste-etapes li { display: flex; align-items: center; gap: 12px; padding: 9px 0; font-size: 14px; }
@@ -819,6 +829,14 @@ async function ouvrirClasseur(page) {
 }
 window.ouvrirClasseur = ouvrirClasseur;
 
+function ouvrirIndexClasseur() {
+  document.getElementById("classeur").hidden = false;
+  basculerModeClasseur("index");
+}
+window.ouvrirIndexClasseur = ouvrirIndexClasseur;
+
+const ICONE_INDEX = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H18v15H5.5A1.5 1.5 0 0 0 4 19.5z"/><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H18"/><path d="M8 7.5h6M8 11h6"/></svg>`;
+
 function rendreIndexClasseur() {
   const element = document.getElementById("classeur-index");
   if (!indexPieces.length) {
@@ -1102,6 +1120,9 @@ async function rendreDetailDossier(dossier) {
     <div class="infos-rapides">
       <span>Envoyé le <strong>${cree}</strong></span>
       ${dossier.nb_pages ? `<span><strong>${dossier.nb_pages}</strong> page(s)</span>` : ""}
+      ${dossier.statut === "termine"
+        ? `<button type="button" class="bouton-index" onclick="ouvrirIndexClasseur()">${ICONE_INDEX}<span>Index du dossier</span></button>`
+        : ""}
     </div>`;
 
   let corps;
