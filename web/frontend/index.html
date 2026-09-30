@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Juristia</title>
+<title>Lytis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Newsreader:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  /* Charte reprise du site vitrine Juristia : fond ivoire chaud, encre
+  /* Charte reprise du site vitrine et de la démo Lytis : fond ivoire chaud, encre
      presque noire, vert-gris sourd pour le texte courant. Deux accents
      seulement, et chacun a un rôle : l'ENCRE est l'action (bouton plein,
      titre), le VERT est le signal (source, rôle, repère). Le doré de la
@@ -400,6 +400,28 @@
     font-size: 13px; font-weight: 500; color: var(--texte-att); background: transparent; white-space: nowrap;
   }
   .onglet:hover { color: var(--texte); border-color: transparent; }
+  .barre-question {
+    display: flex; align-items: center; gap: 10px; background: var(--carte);
+    border: 1px solid var(--bordure-douce); border-radius: var(--rayon); padding: 8px 8px 8px 16px;
+    margin-bottom: 14px; box-shadow: var(--ombre-douce); color: var(--texte-att);
+  }
+  .barre-question:focus-within { border-color: var(--encre); }
+  .barre-question input {
+    flex: 1; min-width: 0; border: none !important; background: transparent !important;
+    padding: 8px 0 !important; box-shadow: none !important; font-size: 14px;
+  }
+  .barre-question button { padding: 7px 16px; font-size: 13px; flex-shrink: 0; }
+  #zone-reponse-question:empty { display: none; }
+  .reponse-question {
+    background: var(--carte); border: 1px solid var(--bordure-douce); border-left: 3px solid var(--accent);
+    border-radius: var(--rayon); padding: 16px 20px; margin-bottom: 18px;
+  }
+  .reponse-question.reponse-vide { border-left-color: var(--bordure); }
+  .question-posee { font-size: 12px; color: var(--texte-att-2); margin-bottom: 6px; }
+  .texte-reponse { margin: 0 0 10px; font-size: 14.5px; color: var(--encre); line-height: 1.6; }
+  .sources-reponse { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .sources-reponse li { display: flex; gap: 8px; align-items: baseline; }
+  .lien-detail { display: block; margin: 4px 0 12px; }
   .onglet.actif { background: var(--carte); color: var(--encre); box-shadow: var(--ombre-douce); }
   .onglet svg { flex-shrink: 0; }
   .panneau-onglet[hidden] { display: none !important; }
@@ -436,10 +458,10 @@
 <div id="ecran-auth">
   <div class="auth-conteneur">
     <div class="auth-marque">
-      <div class="marque-logo">Juristia.</div>
+      <div class="marque-logo">Lytis.</div>
       <div class="surtitre">Défense pénale · Intelligence artificielle</div>
       <h1>Le dossier pénal,<br /><em>lu</em> en une heure.</h1>
-      <p class="auth-accroche">Juristia dépouille l'intégralité de la procédure et vous restitue un classeur interactif : chronologie des faits, personnes, contradictions. Chaque élément reste relié à sa cote et à sa page.</p>
+      <p class="auth-accroche">Lytis dépouille la procédure et vous restitue un classeur interactif : chronologie des faits, personnes, déclarations. Chaque élément reste relié à la page du dossier dont il est tiré.</p>
       <ul class="auth-points">
         <li>Chaque fait est rattaché à une citation exacte du dossier</li>
         <li>Chronologie et résumé générés automatiquement</li>
@@ -467,8 +489,8 @@
 <div id="appli">
   <div id="barre-laterale">
     <div class="marque-barre">
-      <div class="marque-logo">Juristia.</div>
-      <h1>Juristia</h1>
+      <div class="marque-logo">Lytis.</div>
+      <h1>Lytis</h1>
     </div>
     <button type="button" id="bouton-nouveau" class="bouton-primaire">+ Nouveau dossier</button>
     <div class="titre-section">Dossiers</div>
@@ -561,12 +583,15 @@ const LIVRABLES = [
 
 const ICONE_DOCUMENT = `<svg class="icone-doc" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>`;
 
+// Mêmes onglets que la démo présentée aux avocats : ce qu'ils y ont vu
+// doit se retrouver au même endroit dans l'outil réel.
 const ONGLETS_DOSSIER = [
-  ["infos", "Informations générales", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`],
-  ["chrono", "Chronologie", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`],
-  ["analyse", "Analyse IA", `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.9 4.9L19 8.8l-4.9 1.9L12 15.6l-1.9-4.9L5 8.8l4.9-1.9L12 2z"></path><path d="M19 15l.9 2.2L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.8L19 15z"></path></svg>`],
+  ["dossier", "Dossier"],
+  ["chrono", "Chronologie"],
+  ["procedure", "Procédure"],
+  ["fond", "Fond"],
 ];
-let ongletDossierActif = "infos";
+let ongletDossierActif = "dossier";
 
 function basculerOnglet(nom) {
   ongletDossierActif = nom;
@@ -853,7 +878,7 @@ function rendreIndexClasseur() {
       const date = p.date ? ` · ${p.date}${p.heure ? " à " + p.heure : ""}` : "";
       const cote = p.cote ? ` · cote ${p.cote}` : "";
       return `<button type="button" class="entree-index" onclick="ouvrirClasseur(${p.page_debut})">
-        <span class="type-piece">${p.type}</span>
+        <span class="type-piece">${p.type}${p.personne ? ` — ${p.personne}` : ""}</span>
         <span class="meta-piece">${pages}${date}${cote}</span>
       </button>`;
     }).join("")}
@@ -999,7 +1024,7 @@ function rendreBlocInformations(donnees) {
     </div>`;
 }
 
-function rendreBlocAnalyseIA(donnees) {
+function rendreBlocProcedure(donnees) {
   const sections = [];
 
   if (donnees.duree_garde_a_vue) {
@@ -1037,7 +1062,8 @@ function rendreBlocAnalyseIA(donnees) {
 
   sections.push(`
     <div class="carte">
-      <h2>Points d'attention structurels</h2>
+      <h2>Points de contrôle procéduraux</h2>
+      <p class="note-resume" style="margin:-8px 0 14px;">Éléments datés du dossier rapprochés automatiquement. Leur appréciation relève de l'avocat.</p>
       ${donnees.signalements.length
         ? `<ul class="liste-signalements">${donnees.signalements.map((s) => `
             <li class="signalement">
@@ -1045,8 +1071,14 @@ function rendreBlocAnalyseIA(donnees) {
               <div class="description-signalement">${s.description}</div>
               ${s.citation_reference ? `<div class="source-signalement">${badgeSource(s.page_reference)} « ${s.citation_reference} »</div>` : ""}
             </li>`).join("")}</ul>`
-        : `<p class="vide">Aucun signalement structurel détecté (pièce ou événement attendu absent, ou seuil de durée de garde à vue dépassé).</p>`}
+        : `<p class="vide">Aucun point de contrôle relevé (pièce ou événement attendu absent, ou seuil de durée de garde à vue dépassé).</p>`}
     </div>`);
+
+  return sections.join("");
+}
+
+function rendreBlocFond(donnees) {
+  const sections = [];
 
   sections.push(`
     <div class="carte">
@@ -1082,6 +1114,70 @@ function rendreBlocAnalyseIA(donnees) {
 
   return sections.join("");
 }
+
+// --- Interroger le dossier ---
+// La dernière réponse de chaque dossier est gardée pour survivre à un
+// nouveau rendu de la vue (changement de dossier puis retour).
+const reponsesQuestions = new Map();
+
+function echapperHtml(texte) {
+  return String(texte).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function rendreReponseQuestion(etat) {
+  if (!etat) return "";
+  if (etat.chargement) {
+    return `<div class="reponse-question"><div class="chargement" style="padding:6px 0;justify-content:flex-start;"><span class="spinner"></span> Lecture des pièces…</div></div>`;
+  }
+  if (etat.erreur) {
+    return `<div class="reponse-question"><p class="erreur" style="margin:0;">${echapperHtml(etat.erreur)}</p></div>`;
+  }
+  const r = etat.resultat;
+  const sources = r.citations.map((c) => `
+    <li>${badgeSource(c.page)} <span class="citation-declarant">« ${echapperHtml(c.citation)} »</span></li>`).join("");
+  return `
+    <div class="reponse-question ${r.statut === "introuvable" ? "reponse-vide" : ""}">
+      <div class="question-posee">${echapperHtml(etat.question)}</div>
+      <p class="texte-reponse">${echapperHtml(r.reponse)}</p>
+      ${sources ? `<ul class="sources-reponse">${sources}</ul>` : ""}
+      ${r.statut === "introuvable" ? "" : `<p class="note-resume">Réponse rédigée par l'IA à partir des seuls passages cités, chacun vérifié dans la pièce — à relire sur l'original.</p>`}
+    </div>`;
+}
+
+function rendreBarreQuestion(dossierId) {
+  return `
+    <form class="barre-question" onsubmit="event.preventDefault(); poserQuestion('${dossierId}');">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+      <input type="text" id="champ-question" maxlength="500" placeholder="Interroger le dossier…" autocomplete="off" />
+      <button type="submit">Envoyer</button>
+    </form>
+    <div id="zone-reponse-question">${rendreReponseQuestion(reponsesQuestions.get(dossierId))}</div>`;
+}
+
+async function poserQuestion(dossierId) {
+  const champ = document.getElementById("champ-question");
+  const question = champ.value.trim();
+  if (!question) return;
+  const afficher = () => {
+    const zone = document.getElementById("zone-reponse-question");
+    if (zone && dossierOuvertId === dossierId) zone.innerHTML = rendreReponseQuestion(reponsesQuestions.get(dossierId));
+  };
+  reponsesQuestions.set(dossierId, { question, chargement: true });
+  afficher();
+  try {
+    const resultat = await appelApi(`/api/dossiers/${dossierId}/questions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    reponsesQuestions.set(dossierId, { question, resultat });
+    champ.value = "";
+  } catch (erreur) {
+    reponsesQuestions.set(dossierId, { question, erreur: erreur.message });
+  }
+  afficher();
+}
+window.poserQuestion = poserQuestion;
 
 function rendreBlocChronologie(donnees) {
   if (!donnees.chronologie_faits.length) {
@@ -1181,11 +1277,18 @@ async function rendreDetailDossier(dossier) {
           <button type="button" onclick="ouvrirDossier('${dossier.id}')" style="margin-top:12px;">Réessayer</button>
         </div>`;
     } else {
-      const panneauInfos = `
+      // Le « résumé détaillé, chacun sourcé » de la démo existe déjà : ce
+      // sont les faits vérifiés de la chronologie. Le lien y mène plutôt
+      // que de générer un second texte, moins contrôlable.
+      const nbFaits = donnees.chronologie_faits.length;
+      const lienDetail = nbFaits
+        ? `<button type="button" class="lien lien-detail" onclick="basculerOnglet('chrono')">Lire le résumé détaillé — ${nbFaits} fait(s), chacun sourcé</button>`
+        : "";
+      const panneauDossier = `
         <div class="carte bloc-resume">
           <h2>Résumé de l'affaire</h2>
           ${donnees.resume
-            ? `<p class="texte-resume">${donnees.resume}</p><p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés ci-dessous — à recouper, jamais à citer tel quel.</p>`
+            ? `<p class="texte-resume">${donnees.resume}</p>${lienDetail}<p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés — à recouper, jamais à citer tel quel.</p>`
             : `<p class="vide">Aucun résumé disponible pour ce dossier (généré uniquement en mode connecté, avec au moins un fait vérifié).</p>`}
         </div>
         ${rendreBlocInformations(donnees)}
@@ -1208,21 +1311,23 @@ async function rendreDetailDossier(dossier) {
             : `<p class="vide">Aucun document source retrouvé pour ce dossier.</p>`}
         </div>`;
 
-      const panneauChrono = rendreBlocChronologie(donnees);
-
-      const panneauAnalyse = rendreBlocAnalyseIA(donnees);
+      const panneaux = {
+        dossier: panneauDossier,
+        chrono: rendreBlocChronologie(donnees),
+        procedure: rendreBlocProcedure(donnees),
+        fond: rendreBlocFond(donnees),
+      };
 
       corps = `
+        ${rendreBarreQuestion(dossier.id)}
         <div class="barre-onglets">
-          ${ONGLETS_DOSSIER.map(([id, libelle, icone]) => `
-            <button type="button" class="onglet ${ongletDossierActif === id ? 'actif' : ''}" data-onglet="${id}" onclick="basculerOnglet('${id}')">
-              ${icone}<span>${libelle}</span>
-            </button>
+          ${ONGLETS_DOSSIER.map(([id, libelle]) => `
+            <button type="button" class="onglet ${ongletDossierActif === id ? 'actif' : ''}" data-onglet="${id}" onclick="basculerOnglet('${id}')">${libelle}</button>
           `).join("")}
         </div>
-        <div class="panneau-onglet" data-panneau="infos" ${ongletDossierActif === "infos" ? "" : "hidden"}>${panneauInfos}</div>
-        <div class="panneau-onglet" data-panneau="chrono" ${ongletDossierActif === "chrono" ? "" : "hidden"}>${panneauChrono}</div>
-        <div class="panneau-onglet" data-panneau="analyse" ${ongletDossierActif === "analyse" ? "" : "hidden"}>${panneauAnalyse}</div>
+        ${ONGLETS_DOSSIER.map(([id]) =>
+          `<div class="panneau-onglet" data-panneau="${id}" ${ongletDossierActif === id ? "" : "hidden"}>${panneaux[id]}</div>`
+        ).join("")}
       `;
     }
   } else {
@@ -1291,7 +1396,7 @@ window.supprimerDossier = supprimerDossier;
 
 async function ouvrirDossier(id) {
   if (id !== dossierOuvertId) {
-    ongletDossierActif = "infos";
+    ongletDossierActif = "dossier";
     // Le classeur affiche le PDF fusionné d'UNE affaire : le garder ouvert
     // en changeant de dossier montrerait les pages d'une autre.
     reinitialiserClasseur();

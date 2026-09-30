@@ -14,6 +14,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,10 +26,11 @@ from supabase import Client
 from depouille.chrono import calculer_durees
 from depouille.conformite import detecter_signalements
 from depouille.qualite_texte import pages_peu_lisibles
+from depouille.questions import repondre_question
 from depouille.recoupements import detecter_recoupements
 
 from . import schemas
-from .pipeline import INTERVALLE_BATTEMENT_S, NOMS_LIVRABLES, traiter_dossier
+from .pipeline import INTERVALLE_BATTEMENT_S, NOMS_LIVRABLES, _config_llm, traiter_dossier
 from .supabase_client import client_service, client_utilisateur
 
 app = FastAPI(title="Depouille — API pilote")
@@ -244,6 +246,46 @@ def _cle_tri_date(date_jj_mm_aaaa: str | None) -> tuple[int, int, int, int]:
     return (0, int(annee), int(mois), int(jour))
 
 
+@contextmanager
+def _db_resultats(dossier_id: str):
+    """Ouvre, le temps d'une requête, le fichier SQLite d'un dossier traité.
+    L'appelant doit avoir établi la propriété du dossier (lecture sous RLS)."""
+    try:
+        contenu_db = client_service().storage.from_("dossiers-resultats").download(f"{dossier_id}/depouille.db")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Résultats introuvables pour ce dossier.") from exc
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        tmp.write(contenu_db)
+        tmp.flush()
+        db = sqlite3.connect(tmp.name)
+        db.row_factory = sqlite3.Row
+        try:
+            yield db
+        finally:
+            db.close()
+
+
+@app.post("/api/dossiers/{dossier_id}/questions", response_model=schemas.ReponseQuestion)
+def interroger_dossier(
+    dossier_id: str,
+    requete: schemas.Question,
+    contexte: tuple[Client, str] = Depends(_contexte_utilisateur),
+) -> dict:
+    """Répond à une question en langage courant à partir des seules pièces du
+    dossier — chaque citation vérifiée au caractère près, aucune réponse sans
+    source, aucune qualification juridique (voir depouille.questions)."""
+    supabase, _ = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)
+    if dossier["statut"] != "termine":
+        raise HTTPException(status_code=409, detail="Le traitement de ce dossier n'est pas encore terminé.")
+    with _db_resultats(dossier_id) as db:
+        try:
+            return repondre_question(db, _config_llm(offline=False), requete.question)
+        except Exception as exc:  # noqa: BLE001 — panne du modèle : message clair, pas une 500 opaque
+            print(f"[questions] échec pour {dossier_id} : {exc}")
+            raise HTTPException(status_code=502, detail="Le service d'analyse n'a pas pu répondre, réessaie.") from exc
+
+
 @app.get("/api/dossiers/{dossier_id}/donnees", response_model=schemas.DonneesDossier)
 def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_contexte_utilisateur)) -> dict:
     """Données structurées (personnes, chronologies) pour l'affichage type
@@ -397,9 +439,10 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 for r in db.execute(
                     """SELECT pi.type, pi.page_debut, pi.page_fin,
                               pi.date_apparente AS date, pi.heure_apparente AS heure,
-                              pi.cote, pg.fichier_source
+                              pi.cote, pg.fichier_source, pe.nom AS personne
                        FROM pieces pi
                        LEFT JOIN pages pg ON pg.numero_global = pi.page_debut
+                       LEFT JOIN personnes pe ON pe.id = pi.personne_principale_id
                        ORDER BY pi.page_debut"""
                 )
             ]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DossierResume(BaseModel):
@@ -134,6 +134,10 @@ class PieceIndex(BaseModel):
     heure: str | None = None
     cote: str | None = None
     fichier_source: str | None = None
+    # Personne que la pièce concerne (auditionné, plaignant...) : titre
+    # d'index « Procès-verbal de plainte — SERMET Odile », qui se lit
+    # comme la table d'un classeur papier.
+    personne: str | None = None
 
 
 class DonneesDossier(BaseModel):
@@ -147,3 +151,22 @@ class DonneesDossier(BaseModel):
     recoupements: list[EntiteCommune] = []
     sources: list[SourcePage] = []
     index_pieces: list[PieceIndex] = []
+
+
+class Question(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+
+
+class CitationReponse(BaseModel):
+    page: int
+    citation: str
+
+
+class ReponseQuestion(BaseModel):
+    """`statut` : "sourcee" (réponse + citations vérifiées), "passages"
+    (qualification juridique retirée, seules les citations restent) ou
+    "introuvable" (aucune citation vérifiable : pas de réponse affichée)."""
+
+    statut: str
+    reponse: str
+    citations: list[CitationReponse] = []
