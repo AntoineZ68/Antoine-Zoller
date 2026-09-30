@@ -43,7 +43,26 @@ _NOMS_MOIS = "|".join(MOIS_FR.keys())
 FRAGMENT_DATE = rf"(\d{{1,2}}/\d{{1,2}}/\d{{4}}|\d{{1,2}}(?:er)?\s+(?:{_NOMS_MOIS})\s+\d{{4}})"
 FRAGMENT_HEURE = r"(\d{1,2}\s*[hH]\s*\d{2})"
 
-RE_COTE = re.compile(r"\bcote\s+([A-Za-z][\s-]?\d{2,6})\b", re.IGNORECASE)
+# La cote s'écrit de bien des façons selon le greffe, le service ou le
+# logiciel : « Cote D12 », « COTE : D. 1 », « cote n° D 45/2 », « Cote
+# D-012 ». Une règle qui exigeait « cote » + lettre + au moins deux chiffres,
+# sans ponctuation, ne reconnaissait aucune cote du dossier d'essai fourni
+# par l'utilisateur (« COTE : D. 1 »). On accepte donc toute ponctuation
+# entre le mot et sa valeur, un seul chiffre, et une sous-cote après « / ».
+# `\bcote\b` écarte « cotée », « coté », et la lettre reste optionnelle
+# quand le mot « cote » est écrit en toutes lettres (« cote 45 »).
+RE_COTE = re.compile(
+    r"\bcote\b\s*(?:n[°ºo]\.?\s*)?[:.]?\s*([A-Za-z]?)\s*[.\-]?\s*(\d{1,6})(?:\s*/\s*(\d{1,4}))?(?![\d/])",
+    re.IGNORECASE,
+)
+# Tampon du greffe SANS le mot « cote » : « D 12 », « D.45/3 », apposé en
+# marge. Accepté seulement s'il occupe une ligne entière, et seulement parmi
+# les premières ou dernières lignes de la page — là où il est tamponné. Au
+# milieu d'une page, une ligne isolée « B 02 » est bien plus souvent un
+# débris de texte pivoté ou de tableau (observé sur une facture saisie)
+# qu'une cote.
+RE_TAMPON_COTE = re.compile(r"^([A-D])\s?[.\-]?\s?(\d{1,5})(?:\s?/\s?(\d{1,4}))?$")
+LIGNES_DE_MARGE = 3
 RE_NUM_PROCEDURE = re.compile(r"N[°ºo]\s*PARQUET\s*([\d/]+)", re.IGNORECASE)
 RE_DATE = re.compile(FRAGMENT_DATE, re.IGNORECASE)
 RE_DATE_ACTE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\b", re.IGNORECASE)
@@ -78,11 +97,29 @@ def normaliser_heure(texte_heure: str) -> str | None:
     return f"{int(m.group(1)):02d}h{m.group(2)}"
 
 
+def _cote_normalisee(lettre: str, numero: str, sous_cote: str | None) -> str:
+    """« D. 1 » -> « D1 », « d 45 / 2 » -> « D45/2 ». Les chiffres sont
+    gardés tels qu'écrits (« D012 » reste « D012 ») : c'est la référence que
+    l'avocat retrouvera tamponnée sur le papier."""
+    return f"{lettre.upper()}{numero}" + (f"/{sous_cote}" if sous_cote else "")
+
+
 def detecter_cote(texte: str) -> str | None:
     m = RE_COTE.search(texte)
-    if not m:
-        return None
-    return re.sub(r"[\s-]", "", m.group(1)).upper()
+    if m:
+        return _cote_normalisee(m.group(1), m.group(2), m.group(3))
+    lignes = [ligne.strip() for ligne in texte.splitlines() if ligne.strip()]
+    for ligne in lignes[:LIGNES_DE_MARGE] + lignes[-LIGNES_DE_MARGE:]:
+        m = RE_TAMPON_COTE.match(ligne)
+        if m:
+            return _cote_normalisee(m.group(1), m.group(2), m.group(3))
+    return None
+
+
+def cote_de_base(cote: str | None) -> str | None:
+    """Cote d'une pièce à partir de celle d'une de ses pages : « D45/3 »
+    désigne la 3e page de la pièce D45."""
+    return cote.split("/")[0] if cote else None
 
 
 def detecter_numero_procedure(texte: str) -> str | None:

@@ -24,7 +24,7 @@ from rich.table import Table
 
 from .config import Config
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider, tranches_de_texte
-from .regex_patterns import detecter_date_heure_acte, texte_sans_entete
+from .regex_patterns import cote_de_base, detecter_date_heure_acte, texte_sans_entete
 
 CATEGORIES = [
     "PV d'audition",
@@ -674,7 +674,10 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
 
         date_apparente, heure_apparente = detecter_date_heure_acte(texte_complet)
         service = _detecter_service(texte_complet)
-        cote = groupe["pages"][0]["cote_detectee"]
+        # Première cote trouvée sur l'une des pages de la pièce, ramenée à sa
+        # base (« D45/3 » -> « D45 ») : le tampon manque souvent sur la page
+        # de garde, ou y est illisible, alors qu'il figure sur les suivantes.
+        cote = cote_de_base(next((pg["cote_detectee"] for pg in groupe["pages"] if pg["cote_detectee"]), None))
         personnes_citees = _detecter_personnes_citees(texte_complet)
 
         for nom, role in _detecter_personnes_avec_role(texte_complet):
