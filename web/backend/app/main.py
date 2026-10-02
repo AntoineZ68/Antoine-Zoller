@@ -377,6 +377,17 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                     )
             except sqlite3.OperationalError:
                 resume_detaille = []
+            # Emplacement des citations sur leurs pages — table absente des
+            # dossiers traités avant son introduction : le clic ouvre alors
+            # la page, sans encadrer le passage.
+            try:
+                positions = [
+                    {"page": r["page"], "citation": r["citation"], "largeur_page": r["largeur_page"],
+                     "hauteur_page": r["hauteur_page"], "zones": json.loads(r["zones_json"])}
+                    for r in db.execute("SELECT * FROM positions_citations")
+                ]
+            except sqlite3.OperationalError:
+                positions = []
             # Le client désigné par l'avocat en tête de liste.
             personnes = [
                 dict(r, est_client=bool(r["est_client"]))
@@ -519,6 +530,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
     return {
         "resume": resume,
         "resume_detaille": resume_detaille,
+        "positions": positions,
         "personnes": personnes,
         "chronologie_faits": faits,
         "chronologie_procedure": procedure,

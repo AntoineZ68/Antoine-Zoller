@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS run_log (
 -- partir des faits déjà extraits et vérifiés — jamais en relisant les PDF
 -- bruts. Absent en --offline (nécessite un appel au modèle) ou si la
 -- génération échoue ; jamais une valeur devinée pour combler l'absence.
+-- Emplacement de chaque citation surlignée sur sa page du PDF surligné,
+-- en points PDF (origine en haut à gauche) : permet d'encadrer LE passage
+-- dont parle un élément quand l'avocat clique dessus.
+CREATE TABLE IF NOT EXISTS positions_citations (
+    page INTEGER NOT NULL,
+    citation TEXT NOT NULL,
+    largeur_page REAL NOT NULL,
+    hauteur_page REAL NOT NULL,
+    zones_json TEXT NOT NULL,
+    PRIMARY KEY (page, citation)
+);
+
 -- Résumé détaillé : phrases rangées par section, chacune avec ses sources
 -- (page + citation exacte, reprises d'éléments déjà vérifiés).
 CREATE TABLE IF NOT EXISTS resume_detaille (

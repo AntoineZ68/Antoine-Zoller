@@ -426,6 +426,18 @@
   .sources-reponse { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .sources-reponse li { display: flex; gap: 8px; align-items: baseline; }
   .lien-detail { display: block; margin: 4px 0 12px; }
+  /* Texte qui ouvre sa pièce au clic, passage encadré. */
+  .element-source { cursor: pointer; border-radius: 3px; transition: background 0.12s ease; }
+  .element-source:hover, .element-source:focus-visible {
+    background: var(--accent-voile); text-decoration: underline; text-decoration-color: var(--accent);
+    text-underline-offset: 3px; outline: none;
+  }
+  .page-classeur { position: relative; }
+  .cadre-citation {
+    position: absolute; border: 2px solid var(--accent); border-radius: 3px; pointer-events: none;
+    box-shadow: 0 0 0 3px var(--accent-voile-fort); animation: apparition-cadre 0.6s ease;
+  }
+  @keyframes apparition-cadre { from { box-shadow: 0 0 0 10px var(--accent-voile); } }
   .resume-detaille { margin: 6px 0 16px; padding-top: 4px; border-top: 1px solid var(--bordure-douce); }
   .titre-section-resume { font-family: var(--serif, 'Playfair Display', Georgia, serif); font-size: 15.5px; font-weight: 600; color: var(--encre); margin: 16px 0 8px; }
   .phrases-resume { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -746,6 +758,38 @@ const URL_PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174
 
 let sourcesParPage = new Map();
 let indexPieces = [];
+// Emplacement de chaque citation sur sa page du PDF surligné (dossiers
+// traités depuis l'enregistrement des positions). Clé : « page|citation ».
+let positionsParCle = new Map();
+// Passage à encadrer sur la page affichée du classeur, s'il y en a un.
+let citationClasseur = null;
+// Les citations ne passent pas dans les attributs onclick (guillemets,
+// apostrophes) : chaque élément cliquable référence son entrée ici.
+const registreCitations = [];
+
+function cleCitation(page, citation) {
+  return `${page}|${citation}`;
+}
+
+function refCitation(page, citation) {
+  registreCitations.push({ page, citation });
+  return registreCitations.length - 1;
+}
+
+function ouvrirCitation(index) {
+  const ref = registreCitations[index];
+  if (ref) ouvrirClasseur(ref.page, ref.citation);
+}
+window.ouvrirCitation = ouvrirCitation;
+
+// Attributs d'un élément de texte qui ouvre sa pièce au clic, passage
+// encadré, la citation exacte restant lisible au survol.
+function attributsCliquables(page, citation) {
+  if (!page) return "";
+  return `role="button" tabindex="0" title="« ${echapperHtml(citation || "")} »"
+    onclick="ouvrirCitation(${refCitation(page, citation)})"
+    onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }"`;
+}
 let classeurDossierId = null;
 let classeurDoc = null;
 let classeurPage = 1;
@@ -836,7 +880,34 @@ async function afficherPageClasseur(numero) {
   canvas.width = viewport.width;
   canvas.height = viewport.height;
   await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-  if (jeton === rendusClasseur) conteneur.replaceChildren(canvas);
+  if (jeton !== rendusClasseur) return;
+  // Le canvas est posé dans un cadre relatif : les zones du passage sont
+  // placées en pourcentage de la page, donc justes quelle que soit la
+  // taille d'affichage.
+  const cadrePage = document.createElement("div");
+  cadrePage.className = "page-classeur";
+  cadrePage.appendChild(canvas);
+  conteneur.replaceChildren(cadrePage);
+  encadrerCitation(cadrePage);
+}
+
+function encadrerCitation(cadrePage) {
+  if (!citationClasseur || citationClasseur.page !== classeurPage) return;
+  const pos = positionsParCle.get(cleCitation(citationClasseur.page, citationClasseur.citation));
+  if (!pos) return; // dossier ancien, ou passage introuvable dans la mise en page : la page suffit
+  const marge = 2;
+  let premiere = null;
+  for (const [x0, y0, x1, y1] of pos.zones) {
+    const zone = document.createElement("div");
+    zone.className = "cadre-citation";
+    zone.style.left = `${((x0 - marge) / pos.largeur_page) * 100}%`;
+    zone.style.top = `${((y0 - marge) / pos.hauteur_page) * 100}%`;
+    zone.style.width = `${((x1 - x0 + 2 * marge) / pos.largeur_page) * 100}%`;
+    zone.style.height = `${((y1 - y0 + 2 * marge) / pos.hauteur_page) * 100}%`;
+    cadrePage.appendChild(zone);
+    premiere = premiere || zone;
+  }
+  if (premiere) premiere.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function allerPageClasseur(delta) {
@@ -844,7 +915,8 @@ function allerPageClasseur(delta) {
 }
 window.allerPageClasseur = allerPageClasseur;
 
-async function ouvrirClasseur(page) {
+async function ouvrirClasseur(page, citation = null) {
+  citationClasseur = citation ? { page, citation } : null;
   document.getElementById("classeur").hidden = false;
   basculerModeClasseur("piece");
   const conteneur = document.getElementById("classeur-piece");
@@ -895,7 +967,7 @@ function rendreIndexClasseur() {
   </div>`;
 }
 
-function badgeSource(page) {
+function badgeSource(page, citation = null) {
   if (!page) return "";
   const source = sourcesParPage.get(page);
   const cote = source && source.cote ? ` · ${source.cote}` : "";
@@ -905,7 +977,7 @@ function badgeSource(page) {
   // vérification porte sur le texte reconnu, pas sur l'original. Le badge
   // le dit là où l'élément se lit.
   const classe = source && source.illisible ? "badge-source source-illisible" : "badge-source";
-  return `<button type="button" class="${classe}" title="${infobulle}" onclick="ouvrirClasseur(${page})">Page ${page}${cote}</button>`;
+  return `<button type="button" class="${classe}" title="${infobulle}" onclick="${citation ? `ouvrirCitation(${refCitation(page, citation)})` : `ouvrirClasseur(${page})`}">Page ${page}${cote}</button>`;
 }
 
 // --- État de l'appli : liste des dossiers (barre latérale) + dossier ouvert (zone principale) ---
@@ -1097,11 +1169,10 @@ function rendreBlocProcedure(donnees) {
           ${donnees.chronologie_procedure.map((e) => `
             <li>
               <div class="fait-entete">
-                <span class="fait-page">${e.date ? `${e.date}${e.heure ? " à " + e.heure : ""} — ` : ""}</span>${badgeSource(e.page)}
+                <span class="fait-page">${e.date ? `${e.date}${e.heure ? " à " + e.heure : ""} — ` : ""}</span>${badgeSource(e.page, e.citation)}
                 ${e.personne ? `<span class="fait-personne">${e.personne}</span>` : ""}
               </div>
-              <div class="fait-description">${LIBELLES_NATURE_PROCEDURE[e.nature] || e.nature}</div>
-              <blockquote class="fait-citation">« ${e.citation} »</blockquote>
+              <div class="fait-description element-source" ${attributsCliquables(e.page, e.citation)}>${LIBELLES_NATURE_PROCEDURE[e.nature] || e.nature}</div>
             </li>`).join("")}
         </ul>
       </div>`);
@@ -1116,7 +1187,7 @@ function rendreBlocProcedure(donnees) {
             <li class="signalement">
               <div class="titre-signalement">${s.titre}</div>
               <div class="description-signalement">${s.description}</div>
-              ${s.citation_reference ? `<div class="source-signalement">${badgeSource(s.page_reference)} « ${s.citation_reference} »</div>` : ""}
+              ${s.citation_reference ? `<div class="source-signalement">${badgeSource(s.page_reference, s.citation_reference)} « ${s.citation_reference} »</div>` : ""}
             </li>`).join("")}</ul>`
         : `<p class="vide">Aucun point de contrôle relevé (pièce ou événement attendu absent, ou seuil de durée de garde à vue dépassé).</p>`}
     </div>`);
@@ -1136,7 +1207,7 @@ function rendreBlocFond(donnees) {
               <div class="point-factuel">${e.type_entite} — ${e.valeur}</div>
               ${e.occurrences.map((o) => `
                 <div class="declaration-personne">
-                  <div class="nom-declarant">${badgeSource(o.page)}</div>
+                  <div class="nom-declarant">${badgeSource(o.page, o.citation)}</div>
                   <div class="citation-declarant">« ${o.citation} »</div>
                 </div>`).join("")}
             </li>`).join("")}</ul>`
@@ -1152,7 +1223,7 @@ function rendreBlocFond(donnees) {
               <div class="point-factuel">${c.point_factuel}</div>
               ${c.declarations.map((d) => `
                 <div class="declaration-personne">
-                  <div class="nom-declarant">${d.personne || "NON TROUVÉ"} ${badgeSource(d.page)}</div>
+                  <div class="nom-declarant">${d.personne || "NON TROUVÉ"} ${badgeSource(d.page, d.citation)}</div>
                   <div class="citation-declarant">« ${d.citation} »</div>
                 </div>`).join("")}
             </li>`).join("")}</ul>`
@@ -1168,11 +1239,12 @@ function rendreResumeDetaille(sections) {
     <h3 class="titre-section-resume">${echapperHtml(section.titre)}</h3>
     <ul class="phrases-resume">
       ${section.phrases.map((phrase) => {
-        // Un badge par page citée, l'infobulle donnant la citation exacte.
-        const pages = [...new Map(phrase.sources.map((s) => [s.page, s])).values()];
-        const badges = pages.map((s) => badgeSource(s.page).replace(
+        // La phrase ouvre sa première source, passage encadré ; chaque
+        // badge ouvre la sienne. Les citations restent lisibles au survol.
+        const badges = phrase.sources.map((s) => badgeSource(s.page, s.citation).replace(
           /title="[^"]*"/, `title="« ${echapperHtml(s.citation)} »"`)).join(" ");
-        return `<li><span>${echapperHtml(phrase.texte)}</span> ${badges}</li>`;
+        const premiere = phrase.sources[0] || {};
+        return `<li><span class="element-source" ${attributsCliquables(premiere.page, premiere.citation)}>${echapperHtml(phrase.texte)}</span> ${badges}</li>`;
       }).join("")}
     </ul>`).join("");
 }
@@ -1204,7 +1276,7 @@ function rendreReponseQuestion(etat) {
   }
   const r = etat.resultat;
   const sources = r.citations.map((c) => `
-    <li>${badgeSource(c.page)} <span class="citation-declarant">« ${echapperHtml(c.citation)} »</span></li>`).join("");
+    <li>${badgeSource(c.page, c.citation)} <span class="citation-declarant">« ${echapperHtml(c.citation)} »</span></li>`).join("");
   return `
     <div class="reponse-question ${r.statut === "introuvable" ? "reponse-vide" : ""}">
       <div class="question-posee">${echapperHtml(etat.question)}</div>
@@ -1257,11 +1329,12 @@ function rendreBlocChronologie(donnees) {
   const rendreFait = (f) => `
     <li>
       <div class="fait-entete">
-        <span class="fait-page">${f.date ? `${f.date}${f.heure ? " à " + f.heure : ""} — ` : ""}</span>${badgeSource(f.page)}
+        <span class="fait-page">${f.date ? `${f.date}${f.heure ? " à " + f.heure : ""} — ` : ""}</span>${badgeSource(f.page, f.citation)}
         ${f.personne ? `<span class="fait-personne">${f.personne}</span>` : ""}
       </div>
-      <div class="fait-description">${f.description || ""}</div>
-      <blockquote class="fait-citation">« ${f.citation} »</blockquote>
+      ${f.description
+        ? `<div class="fait-description element-source" ${attributsCliquables(f.page, f.citation)}>${f.description}</div>`
+        : `<blockquote class="fait-citation element-source" ${attributsCliquables(f.page, f.citation)}>« ${f.citation} »</blockquote>`}
     </li>`;
   const apercu = faits.slice(0, NB_FAITS_APERCU).map(rendreFait).join("");
   const reste = faits.slice(NB_FAITS_APERCU).map(rendreFait).join("");
@@ -1321,6 +1394,8 @@ async function rendreDetailDossier(dossier) {
     // fichier et de la cote.
     sourcesParPage = new Map((donnees.sources || []).map((s) => [s.page, s]));
     indexPieces = donnees.index_pieces || [];
+    positionsParCle = new Map((donnees.positions || []).map((p) => [cleCitation(p.page, p.citation), p]));
+    registreCitations.length = 0;
 
     // Liste des PDF sources tels que transmis — jamais bloquante : un échec
     // ici masquerait sinon toute la vue derrière une erreur qui n'a rien à

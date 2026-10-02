@@ -156,8 +156,21 @@ class SectionResume(BaseModel):
     phrases: list[PhraseResume] = []
 
 
+class PositionCitation(BaseModel):
+    """Zones d'une citation sur sa page du PDF surligné, en points PDF
+    (origine en haut à gauche). Le front les rapporte à la taille de la page
+    pour encadrer le passage exact au clic."""
+
+    page: int
+    citation: str
+    largeur_page: float
+    hauteur_page: float
+    zones: list[list[float]]
+
+
 class DonneesDossier(BaseModel):
     resume: str | None = None
+    positions: list[PositionCitation] = []
     resume_detaille: list[SectionResume] = []
     personnes: list[Personne] = []
     chronologie_faits: list[EvenementFait] = []

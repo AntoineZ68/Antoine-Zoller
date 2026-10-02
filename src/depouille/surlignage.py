@@ -11,6 +11,7 @@ exactement comme elle n'apparaît dans aucun autre livrable.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -66,8 +67,14 @@ def _chemin_source_effectif(affaire_dir: Path, fichier: str) -> Path:
 
 
 def construire_pdf_surligne(db: sqlite3.Connection, affaire_dir: Path, chemin_sortie: Path) -> dict[str, int]:
+    """Construit le PDF surligné et enregistre, pour chaque citation
+    retrouvée, ses zones sur la page (positions_citations) : l'interface
+    s'en sert pour encadrer le passage exact quand l'avocat clique sur
+    l'élément qui en parle. Les zones sont celles-là mêmes qui servent à
+    surligner — ce qui est encadré est ce qui est surligné."""
     pages = db.execute("SELECT * FROM pages ORDER BY numero_global").fetchall()
     citations_par_page = _citations_par_page(db)
+    db.execute("DELETE FROM positions_citations")
 
     doc_sortie = pymupdf.open()
     docs_source: dict[str, "pymupdf.Document"] = {}
@@ -92,12 +99,22 @@ def construire_pdf_surligne(db: sqlite3.Connection, affaire_dir: Path, chemin_so
                     annot.set_colors(stroke=couleur)
                     annot.update()
                     nb_surlignes += 1
+                    db.execute(
+                        "INSERT OR REPLACE INTO positions_citations "
+                        "(page, citation, largeur_page, hauteur_page, zones_json) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            page_row["numero_global"], citation,
+                            page_sortie.rect.width, page_sortie.rect.height,
+                            json.dumps([[round(z.x0, 1), round(z.y0, 1), round(z.x1, 1), round(z.y1, 1)] for z in zones]),
+                        ),
+                    )
                 else:
                     nb_introuvables += 1
     finally:
         for doc_source in docs_source.values():
             doc_source.close()
 
+    db.commit()
     chemin_sortie.parent.mkdir(parents=True, exist_ok=True)
     doc_sortie.save(str(chemin_sortie))
     doc_sortie.close()
