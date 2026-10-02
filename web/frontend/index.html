@@ -888,26 +888,107 @@ async function afficherPageClasseur(numero) {
   cadrePage.className = "page-classeur";
   cadrePage.appendChild(canvas);
   conteneur.replaceChildren(cadrePage);
-  encadrerCitation(cadrePage);
+  if (!encadrerCitation(cadrePage)) await encadrerCitationDansLeTexte(page, viewport, cadrePage, jeton);
 }
 
-function encadrerCitation(cadrePage) {
-  if (!citationClasseur || citationClasseur.page !== classeurPage) return;
-  const pos = positionsParCle.get(cleCitation(citationClasseur.page, citationClasseur.citation));
-  if (!pos) return; // dossier ancien, ou passage introuvable dans la mise en page : la page suffit
-  const marge = 2;
+// Pose un cadre par zone, en pourcentage de la page, et amène la première
+// à l'écran.
+function poserCadres(cadrePage, zonesEnPourcentage) {
   let premiere = null;
-  for (const [x0, y0, x1, y1] of pos.zones) {
+  for (const [gauche, haut, largeur, hauteur] of zonesEnPourcentage) {
     const zone = document.createElement("div");
     zone.className = "cadre-citation";
-    zone.style.left = `${((x0 - marge) / pos.largeur_page) * 100}%`;
-    zone.style.top = `${((y0 - marge) / pos.hauteur_page) * 100}%`;
-    zone.style.width = `${((x1 - x0 + 2 * marge) / pos.largeur_page) * 100}%`;
-    zone.style.height = `${((y1 - y0 + 2 * marge) / pos.hauteur_page) * 100}%`;
+    zone.style.left = `${gauche}%`;
+    zone.style.top = `${haut}%`;
+    zone.style.width = `${largeur}%`;
+    zone.style.height = `${hauteur}%`;
     cadrePage.appendChild(zone);
     premiere = premiere || zone;
   }
   if (premiere) premiere.scrollIntoView({ block: "center", behavior: "smooth" });
+  return Boolean(premiere);
+}
+
+// Emplacement enregistré pendant l'analyse : ce sont exactement les zones
+// surlignées dans le PDF. Renvoie faux s'il n'y en a pas.
+function encadrerCitation(cadrePage) {
+  if (!citationClasseur || citationClasseur.page !== classeurPage) return true;
+  const pos = positionsParCle.get(cleCitation(citationClasseur.page, citationClasseur.citation));
+  if (!pos) return false;
+  const marge = 2;
+  return poserCadres(cadrePage, pos.zones.map(([x0, y0, x1, y1]) => [
+    ((x0 - marge) / pos.largeur_page) * 100,
+    ((y0 - marge) / pos.hauteur_page) * 100,
+    ((x1 - x0 + 2 * marge) / pos.largeur_page) * 100,
+    ((y1 - y0 + 2 * marge) / pos.hauteur_page) * 100,
+  ]));
+}
+
+// À défaut d'emplacement enregistré (dossier traité avant leur
+// enregistrement, serveur pas encore à jour, ou citation d'une réponse
+// d'« Interroger le dossier »), on retrouve le passage dans le texte de la
+// page affichée. La comparaison ignore espaces et casse : la mise en page
+// PDF coupe les mots et les lignes autrement que le texte extrait. Si le
+// passage reste introuvable, la page s'affiche sans cadre.
+async function encadrerCitationDansLeTexte(page, viewport, cadrePage, jeton) {
+  if (!citationClasseur || citationClasseur.page !== classeurPage) return;
+  let contenu;
+  try {
+    contenu = await page.getTextContent();
+  } catch (erreur) {
+    return;
+  }
+  if (jeton !== rendusClasseur) return;
+  const compacter = (texte) => texte.replace(/\s+/g, "").toLowerCase();
+  let texte = "";
+  const elementDuCaractere = [];
+  contenu.items.forEach((item, indice) => {
+    const compact = compacter(item.str || "");
+    texte += compact;
+    for (let k = 0; k < compact.length; k++) elementDuCaractere.push(indice);
+  });
+  const cible = compacter(citationClasseur.citation);
+  let debut = texte.indexOf(cible);
+  let longueur = cible.length;
+  if (debut < 0 && cible.length > 40) {
+    // Le début du passage suffit à le situer.
+    longueur = 40;
+    debut = texte.indexOf(cible.slice(0, longueur));
+  }
+  if (debut < 0 || !longueur) return;
+  const indices = [...new Set(elementDuCaractere.slice(debut, debut + longueur))];
+  const zones = indices.map((indice) => {
+    const item = contenu.items[indice];
+    const t = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const hauteurTexte = Math.hypot(t[2], t[3]);
+    const largeurTexte = item.width * viewport.scale;
+    const marge = 2 * viewport.scale;
+    return [
+      ((t[4] - marge) / viewport.width) * 100,
+      ((t[5] - hauteurTexte - marge) / viewport.height) * 100,
+      ((largeurTexte + 2 * marge) / viewport.width) * 100,
+      ((hauteurTexte * 1.25 + 2 * marge) / viewport.height) * 100,
+    ];
+  }).filter(([, , largeur, hauteur]) => largeur > 0 && hauteur > 0);
+  poserCadres(cadrePage, fusionnerParLigne(zones));
+}
+
+// Le texte d'une page PDF arrive souvent mot par mot : un cadre par mot
+// rendrait le passage illisible. Les zones d'une même ligne (même hauteur
+// à une demi-ligne près) sont réunies en un seul cadre.
+function fusionnerParLigne(zones) {
+  const lignes = [];
+  for (const [gauche, haut, largeur, hauteur] of [...zones].sort((a, b) => a[1] - b[1] || a[0] - b[0])) {
+    const ligne = lignes.find((l) => Math.abs(l.haut - haut) < hauteur / 2);
+    if (ligne) {
+      ligne.droite = Math.max(ligne.droite, gauche + largeur);
+      ligne.gauche = Math.min(ligne.gauche, gauche);
+      ligne.bas = Math.max(ligne.bas, haut + hauteur);
+    } else {
+      lignes.push({ gauche, haut, droite: gauche + largeur, bas: haut + hauteur });
+    }
+  }
+  return lignes.map((l) => [l.gauche, l.haut, l.droite - l.gauche, l.bas - l.haut]);
 }
 
 function allerPageClasseur(delta) {
