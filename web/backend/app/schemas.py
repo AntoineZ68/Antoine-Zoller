@@ -145,8 +145,20 @@ class PieceIndex(BaseModel):
     titre: str | None = None
 
 
+class PhraseResume(BaseModel):
+    texte: str
+    # Citations des éléments vérifiés sur lesquels la phrase s'appuie.
+    sources: list["CitationReponse"] = []
+
+
+class SectionResume(BaseModel):
+    titre: str
+    phrases: list[PhraseResume] = []
+
+
 class DonneesDossier(BaseModel):
     resume: str | None = None
+    resume_detaille: list[SectionResume] = []
     personnes: list[Personne] = []
     chronologie_faits: list[EvenementFait] = []
     chronologie_procedure: list[EvenementProcedure] = []
@@ -185,3 +197,8 @@ class DesignationClient(BaseModel):
 class ReponseClient(BaseModel):
     client: str | None
     resume_regenere: bool
+
+
+PhraseResume.model_rebuild()
+SectionResume.model_rebuild()
+DonneesDossier.model_rebuild()

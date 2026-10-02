@@ -13,14 +13,12 @@ défaut d'être précis."""
 
 from __future__ import annotations
 
-import re
 import sqlite3
-import unicodedata
 
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import contient_qualification
+from .garde_fous import contient_qualification, elements_absents
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 
 PIECES_PAR_APPEL = 8
@@ -42,40 +40,11 @@ PROMPT_TITRES = (
     'Réponds uniquement en JSON : {"titres": [{"id": N, "titre": "..."}]}.'
 )
 
-RE_NOMBRE = re.compile(r"\d+")
-# Abréviations de procédure qui n'identifient rien ni personne : un
-# intitulé « PV de pose de la balise » reste exact même si la pièce écrit
-# « PROCÈS-VERBAL » en toutes lettres.
-ABREVIATIONS_GENERIQUES = frozenset({"pv", "gav", "cpp", "opj", "apj", "jld", "ji", "tj", "cp", "rg"})
-RE_MOT = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]*")
-
-
-def _normaliser(texte: str) -> str:
-    forme = unicodedata.normalize("NFKD", texte)
-    return "".join(c for c in forme if not unicodedata.combining(c)).lower()
-
-
 def intitule_verifie(titre: str, texte_piece: str) -> bool:
     """Vrai si chaque élément identifiant de l'intitulé figure dans la pièce."""
     if not titre or len(titre) > LONGUEUR_MAX_TITRE or contient_qualification(titre):
         return False
-    texte = _normaliser(texte_piece)
-    mots_texte = set(re.findall(r"[a-z0-9]+", texte))
-    for nombre in RE_NOMBRE.findall(titre):
-        if nombre not in mots_texte and nombre not in texte:
-            return False
-    for position, mot in enumerate(RE_MOT.findall(titre)):
-        lettres = re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ]", "", mot)
-        if len(lettres) < 2:
-            continue
-        en_capitales = lettres.isupper()
-        majuscule_initiale = lettres[0].isupper() and position > 0
-        if not (en_capitales or majuscule_initiale):
-            continue
-        for partie in re.split(r"['’-]", _normaliser(mot)):
-            if len(partie) >= 2 and partie not in mots_texte and partie not in ABREVIATIONS_GENERIQUES:
-                return False
-    return True
+    return not elements_absents(titre, texte_piece)
 
 
 def titrer_pieces(db: sqlite3.Connection, config: Config, console: Console, compteur: dict[str, int]) -> int:

@@ -426,6 +426,11 @@
   .sources-reponse { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .sources-reponse li { display: flex; gap: 8px; align-items: baseline; }
   .lien-detail { display: block; margin: 4px 0 12px; }
+  .resume-detaille { margin: 6px 0 16px; padding-top: 4px; border-top: 1px solid var(--bordure-douce); }
+  .titre-section-resume { font-family: var(--serif, 'Playfair Display', Georgia, serif); font-size: 15.5px; font-weight: 600; color: var(--encre); margin: 16px 0 8px; }
+  .phrases-resume { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .phrases-resume li { font-size: 14px; line-height: 1.6; color: var(--texte); }
+  .phrases-resume .badge-source { margin-left: 2px; vertical-align: 1px; }
   .onglet.actif { background: var(--carte); color: var(--encre); box-shadow: var(--ombre-douce); }
   .onglet svg { flex-shrink: 0; }
   .panneau-onglet[hidden] { display: none !important; }
@@ -1157,6 +1162,29 @@ function rendreBlocFond(donnees) {
   return sections.join("");
 }
 
+// --- Résumé détaillé ---
+function rendreResumeDetaille(sections) {
+  return sections.map((section) => `
+    <h3 class="titre-section-resume">${echapperHtml(section.titre)}</h3>
+    <ul class="phrases-resume">
+      ${section.phrases.map((phrase) => {
+        // Un badge par page citée, l'infobulle donnant la citation exacte.
+        const pages = [...new Map(phrase.sources.map((s) => [s.page, s])).values()];
+        const badges = pages.map((s) => badgeSource(s.page).replace(
+          /title="[^"]*"/, `title="« ${echapperHtml(s.citation)} »"`)).join(" ");
+        return `<li><span>${echapperHtml(phrase.texte)}</span> ${badges}</li>`;
+      }).join("")}
+    </ul>`).join("");
+}
+
+function basculerResumeDetaille(bouton) {
+  const bloc = bouton.nextElementSibling;
+  bloc.hidden = !bloc.hidden;
+  bouton.dataset.libelle = bouton.dataset.libelle || bouton.textContent;
+  bouton.textContent = bloc.hidden ? bouton.dataset.libelle : "Masquer le résumé détaillé";
+}
+window.basculerResumeDetaille = basculerResumeDetaille;
+
 // --- Interroger le dossier ---
 // La dernière réponse de chaque dossier est gardée pour survivre à un
 // nouveau rendu de la vue (changement de dossier puis retour).
@@ -1319,13 +1347,19 @@ async function rendreDetailDossier(dossier) {
           <button type="button" onclick="ouvrirDossier('${dossier.id}')" style="margin-top:12px;">Réessayer</button>
         </div>`;
     } else {
-      // Le « résumé détaillé, chacun sourcé » de la démo existe déjà : ce
-      // sont les faits vérifiés de la chronologie. Le lien y mène plutôt
-      // que de générer un second texte, moins contrôlable.
+      // Résumé détaillé : chaque phrase porte les badges des pièces dont
+      // elle est tirée. À défaut (dossier traité avant son introduction,
+      // ou génération impossible), le lien mène à la chronologie, qui est
+      // elle aussi un résumé point par point, sourcé.
+      const detaille = donnees.resume_detaille || [];
+      const nbPoints = detaille.reduce((n, section) => n + section.phrases.length, 0);
       const nbFaits = donnees.chronologie_faits.length;
-      const lienDetail = nbFaits
-        ? `<button type="button" class="lien lien-detail" onclick="basculerOnglet('chrono')">Lire le résumé détaillé — ${nbFaits} fait(s), chacun sourcé</button>`
-        : "";
+      const lienDetail = nbPoints
+        ? `<button type="button" class="lien lien-detail" onclick="basculerResumeDetaille(this)">Lire le résumé détaillé — ${nbPoints} point(s), chacun sourcé</button>
+           <div class="resume-detaille" hidden>${rendreResumeDetaille(detaille)}</div>`
+        : nbFaits
+          ? `<button type="button" class="lien lien-detail" onclick="basculerOnglet('chrono')">Lire le résumé détaillé — ${nbFaits} fait(s), chacun sourcé</button>`
+          : "";
       const panneauDossier = `
         <div class="carte bloc-resume">
           <h2>Résumé de l'affaire</h2>

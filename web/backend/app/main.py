@@ -10,6 +10,7 @@ aucune vérification d'appartenance côté application.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -364,6 +365,18 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             except sqlite3.OperationalError:
                 # Dossier traité avant l'introduction de cette table.
                 resume = None
+            # Résumé détaillé, section par section — table absente des
+            # dossiers traités avant son introduction.
+            resume_detaille = []
+            try:
+                for ligne in db.execute("SELECT * FROM resume_detaille ORDER BY section_ordre, phrase_ordre"):
+                    if not resume_detaille or resume_detaille[-1]["titre"] != ligne["section_titre"]:
+                        resume_detaille.append({"titre": ligne["section_titre"], "phrases": []})
+                    resume_detaille[-1]["phrases"].append(
+                        {"texte": ligne["texte"], "sources": json.loads(ligne["sources_json"])}
+                    )
+            except sqlite3.OperationalError:
+                resume_detaille = []
             # Le client désigné par l'avocat en tête de liste.
             personnes = [
                 dict(r, est_client=bool(r["est_client"]))
@@ -505,6 +518,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
 
     return {
         "resume": resume,
+        "resume_detaille": resume_detaille,
         "personnes": personnes,
         "chronologie_faits": faits,
         "chronologie_procedure": procedure,

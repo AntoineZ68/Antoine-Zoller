@@ -123,6 +123,17 @@ CREATE TABLE IF NOT EXISTS run_log (
 -- partir des faits déjà extraits et vérifiés — jamais en relisant les PDF
 -- bruts. Absent en --offline (nécessite un appel au modèle) ou si la
 -- génération échoue ; jamais une valeur devinée pour combler l'absence.
+-- Résumé détaillé : phrases rangées par section, chacune avec ses sources
+-- (page + citation exacte, reprises d'éléments déjà vérifiés).
+CREATE TABLE IF NOT EXISTS resume_detaille (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_ordre INTEGER NOT NULL,
+    section_titre TEXT NOT NULL,
+    phrase_ordre INTEGER NOT NULL,
+    texte TEXT NOT NULL,
+    sources_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS resume_affaire (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     texte TEXT NOT NULL,
