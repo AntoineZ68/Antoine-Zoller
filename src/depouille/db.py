@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS pieces (
     confiance REAL NOT NULL DEFAULT 0.0,
     statut_revision TEXT NOT NULL DEFAULT 'a_faire',
     personne_principale_id INTEGER REFERENCES personnes(id),
-    methode_personne_principale TEXT
+    methode_personne_principale TEXT,
+    titre TEXT
 );
 
 CREATE TABLE IF NOT EXISTS personnes (
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS personnes (
     nom TEXT NOT NULL,
     role TEXT NOT NULL,
     alias_json TEXT NOT NULL DEFAULT '[]',
+    est_client INTEGER NOT NULL DEFAULT 0,
     UNIQUE(nom, role)
 );
 
@@ -129,10 +131,34 @@ CREATE TABLE IF NOT EXISTS resume_affaire (
 """
 
 
+# Colonnes ajoutées après la création des premières affaires. `CREATE TABLE
+# IF NOT EXISTS` ne touche pas une table qui existe déjà : sans ces
+# migrations, la base d'un dossier traité avant l'ajout d'une colonne ferait
+# échouer toute requête qui la cite — et l'avocat perdrait l'accès à un
+# dossier pourtant complet.
+MIGRATIONS = (
+    # Personne que l'avocat défend, désignée par lui — n'importe quel rôle
+    # (un avocat de partie civile défend la victime).
+    ("personnes", "est_client", "INTEGER NOT NULL DEFAULT 0"),
+    # Intitulé précis de la pièce pour l'index (« Réquisition ORBIS (ligne
+    # 14 52) et réponse »), plus parlant que son seul type.
+    ("pieces", "titre", "TEXT"),
+)
+
+
+def appliquer_migrations(conn: sqlite3.Connection) -> None:
+    for table, colonne, definition in MIGRATIONS:
+        colonnes = {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
+        if colonnes and colonne not in colonnes:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {colonne} {definition}")
+    conn.commit()
+
+
 def ouvrir_db(chemin: Path) -> sqlite3.Connection:
     chemin.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(chemin)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    appliquer_migrations(conn)
     conn.commit()
     return conn

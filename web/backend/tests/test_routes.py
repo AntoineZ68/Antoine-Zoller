@@ -31,6 +31,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/api/dossiers/{dossier_id}/documents/{nom_fichier}"),
     ("GET", "/api/dossiers/{dossier_id}/livrables/{nom_fichier}"),
     ("POST", "/api/dossiers/{dossier_id}/questions"),
+    ("POST", "/api/dossiers/{dossier_id}/client"),
 }
 
 

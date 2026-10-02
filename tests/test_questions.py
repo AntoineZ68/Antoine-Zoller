@@ -125,3 +125,17 @@ def test_gros_dossier_pages_les_plus_pertinentes() -> None:
 
 def test_question_vide(db) -> None:
     assert questions.repondre_question(db, Config(offline=False), "   ")["statut"] == "introuvable"
+
+
+def test_mon_client_designe_par_l_avocat(monkeypatch, db) -> None:
+    db.execute("INSERT INTO personnes (nom, role, est_client) VALUES ('Lucas MARTINON', 'mis_en_cause', 1)")
+    db.commit()
+    vu = _modele(monkeypatch, {"reponse": None, "citations": []})
+    questions.repondre_question(db, Config(offline=False), "Mon client a-t-il vu un avocat ?")
+    assert "L'avocat défend Lucas MARTINON" in vu["prompt"]
+
+
+def test_sans_client_designe_mon_client_n_est_pas_devine(monkeypatch, db) -> None:
+    vu = _modele(monkeypatch, {"reponse": None, "citations": []})
+    questions.repondre_question(db, Config(offline=False), "Mon client a-t-il vu un avocat ?")
+    assert "n'a pas désigné son client" in vu["prompt"]

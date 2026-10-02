@@ -88,3 +88,30 @@ def test_resume_qui_qualifie_ecarte(monkeypatch, db) -> None:
 def test_pas_de_resume_hors_ligne(db) -> None:
     resume.generer_resume(db, Config(offline=True), Console(quiet=True))
     assert _resume_en_base(db) is None
+
+
+def test_client_designe_par_l_avocat_meme_avec_coauteurs(monkeypatch, db) -> None:
+    """Quand l'avocat a désigné son client, « votre client » s'applique à
+    lui — même parmi plusieurs mis en cause — et ce sont SES déclarations
+    qui nourrissent le résumé."""
+    db.execute("INSERT INTO personnes (id, nom, role) VALUES (3, 'Yannick FONTANEL', 'mis_en_cause')")
+    db.execute(
+        "INSERT INTO declarations (personne_id, piece_id, page, citation, point_factuel, statut_verif) "
+        "VALUES (3, 1, 1, 'c', 'Refuse de donner aucun nom', 'verifie')"
+    )
+    db.execute("UPDATE personnes SET est_client = 1 WHERE nom = 'Lucas MARTINON'")
+    db.commit()
+    vu = _modele(monkeypatch, "Résumé.")
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert "« votre client, Lucas MARTINON »" in vu["prompt"]
+    assert "Reconnaît avoir attendu" in vu["prompt"]
+    assert "Refuse de donner" not in vu["prompt"], "pas les déclarations du coauteur"
+
+
+def test_partie_civile_la_victime_peut_etre_le_client(monkeypatch, db) -> None:
+    db.execute("UPDATE personnes SET est_client = 1 WHERE nom = 'Odile SERMET'")
+    db.commit()
+    vu = _modele(monkeypatch, "Résumé.")
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert "« votre client, Odile SERMET »" in vu["prompt"]
+    assert "La victime a quitté" in vu["prompt"]

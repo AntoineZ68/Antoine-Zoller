@@ -12,7 +12,7 @@ from openpyxl.styles import Font
 from openpyxl.worksheet.worksheet import Worksheet
 from rich.console import Console
 
-COLONNES = ["Type", "Page début", "Page fin", "Cote", "Date apparente", "Service rédacteur", "Confiance", "Statut"]
+COLONNES = ["Intitulé", "Type", "Page début", "Page fin", "Cote", "Date apparente", "Service rédacteur", "Confiance", "Statut"]
 
 
 def _cle_tri_date(date_apparente: str | None, heure_apparente: str | None) -> tuple[int, datetime]:
@@ -36,6 +36,7 @@ def _ecrire_feuille(ws: Worksheet, pieces: list[sqlite3.Row]) -> None:
     for p in pieces:
         ws.append(
             [
+                p["titre"] or p["type"],
                 p["type"],
                 p["page_debut"],
                 p["page_fin"],

@@ -25,6 +25,7 @@ from rich.table import Table
 from .config import Config
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider, tranches_de_texte
 from .regex_patterns import cote_de_base, detecter_date_heure_acte, texte_sans_entete
+from .titres import titrer_pieces
 
 CATEGORIES = [
     "PV d'audition",
@@ -709,6 +710,10 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
         )
 
     db.commit()
+
+    # Après l'identification des personnes : un intitulé d'audition porte
+    # le nom de la personne entendue.
+    titrer_pieces(db, config, console, compteur)
 
     fin = datetime.now(timezone.utc)
     cout = config.cout(config.modele_classification, compteur["tokens_in"], compteur["tokens_out"])

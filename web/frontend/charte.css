@@ -1,0 +1,118 @@
+/* Repris tel quel de la démo Lytis (lytis.legal/demo/charte.css), pour que l'outil
+   réel et la démo montrée aux avocats aient la même apparence. Surcouche : chargée
+   après les styles de index.html, elle ne redéfinit que couleurs et polices.
+   Polices hébergées sur place (fonts/), sous licence libre SIL OFL : aucune
+   requête vers un service tiers à l'ouverture de l'outil. Les règles propres à la
+   démo (bandeau, visite guidée) ne ciblent rien ici et sont sans effet. */
+
+/* Charte Lytis — alignée sur le site vitrine (lytis.legal) : bordeaux, crème,
+   Gloock pour les titres et les citations, Instrument Sans pour l'interface,
+   Montserrat pour le seul logo LYTIS. Chargée après app.css et demo.css, elle ne fait que
+   redéfinir couleurs et polices. */
+
+/* Les tirets – et — de Gloock sont des traits très fins : ils sont exclus
+   (unicode-range) et pris dans la police suivante (Georgia).
+   Typographie : Gloock pour les titres et citations, Instrument Sans pour le texte.
+   Les familles d'origine de l'application (Playfair Display, Newsreader, Inter)
+   sont redirigées vers ces fichiers : déclarées ici en dernier, elles l'emportent. */
+@font-face { font-family: 'Playfair Display'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: italic; font-weight: 400; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: italic; font-weight: 500; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: normal; font-weight: 600; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: italic; font-weight: 600; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: normal; font-weight: 700; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Playfair Display'; font-style: italic; font-weight: 700; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: italic; font-weight: 400; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: italic; font-weight: 500; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: normal; font-weight: 600; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: italic; font-weight: 600; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: normal; font-weight: 700; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Newsreader'; font-style: italic; font-weight: 700; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/instrument-sans-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/instrument-sans-latin-500-normal.woff2) format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url(fonts/instrument-sans-latin-600-normal.woff2) format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url(fonts/instrument-sans-latin-700-normal.woff2) format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: italic; font-weight: 400; font-display: swap; src: url(fonts/instrument-sans-latin-400-italic.woff2) format('woff2'); }
+@font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/montserrat-latin-500-normal.woff2) format('woff2'); }
+
+:root {
+  --vin-950: #22060B; --vin-900: #2A070D; --vin-800: #3A0914; --vin-700: #5E0F24; --vin-600: #7A1830;
+  --creme: #F4E8DA;
+  --fond: #FBF7F1;
+  --fond-barre: #F5EDE3;
+  --carte: #FFFDFA;
+  --carte-creuse: #F7F0E8;
+  --bordure: #E6D9CC;
+  --bordure-douce: #EFE5DA;
+  --encre: #2A0A12;
+  --texte: #2E1F24;
+  --texte-att: #6F5C62;
+  --texte-att-2: #6F5C62;
+  --accent: #7A1830;
+  --accent-clair: #5E0F24;
+  --accent-fonce: #3A0914;
+  --accent-voile: rgba(122, 24, 48, 0.08);
+  --accent-voile-fort: rgba(122, 24, 48, 0.14);
+  --ombre: 0 1px 2px rgba(34, 6, 11, 0.05), 0 16px 40px rgba(34, 6, 11, 0.09);
+  --ombre-douce: 0 1px 2px rgba(34, 6, 11, 0.04), 0 4px 14px rgba(34, 6, 11, 0.06);
+  --serif: 'Gloock', 'Playfair Display', Georgia, serif;
+}
+html { font-synthesis: none; }
+@font-face { font-family: 'Gloock'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/gloock-latin-400-normal.woff2) format('woff2'); unicode-range: U+0000-2012, U+2015-FFFF; }
+
+/* Marque : le mot LYTIS en capitales espacées, comme sur le site */
+.marque-logo { font-family: 'Montserrat', 'Inter', sans-serif; font-weight: 500; letter-spacing: 0.32em; color: var(--vin-800); line-height: 1; }
+.marque-barre .marque-logo { font-size: 16px; }
+
+/* Titres : Playfair Display, plus affirmé */
+h1, h2, .police-serif { font-family: var(--serif); }
+.entete-detail h2 { font-weight: 600; letter-spacing: -0.015em; }
+.carte h2, .questions-titre, .avis-titre, .mentions-entete h2 { font-weight: 600; }
+.surtitre, .titre-section { font-family: 'Inter', sans-serif; letter-spacing: 0.14em; }
+
+/* Citations et résumé : Playfair italique, comme les citations du site */
+.texte-resume, .fait-citation { font-family: var(--serif); }
+.texte-resume { font-size: 18px; line-height: 1.6; }
+.fait-citation { font-size: 13px; line-height: 1.55; }
+
+/* Actions : bordeaux plein au lieu du noir */
+button.bouton-primaire { background: var(--vin-700); border-color: var(--vin-700); color: var(--creme); }
+button.bouton-primaire:hover { background: var(--vin-600); border-color: var(--vin-600); color: #fff; }
+button:hover { background: var(--accent-voile); }
+.bouton-index { border-color: var(--vin-700); color: var(--vin-700); }
+.bouton-index:hover, .bouton-envoyer:hover { background: var(--vin-700); border-color: var(--vin-700); color: var(--creme); }
+.bouton-envoyer { border-color: var(--vin-700); color: var(--vin-700); }
+
+/* Bandeau de démonstration : dégradé bordeaux du site */
+#bandeau-demo { background: linear-gradient(100deg, var(--vin-700), var(--vin-900)); color: rgba(244, 232, 218, 0.9); }
+.bandeau-point { background: var(--creme); }
+.bandeau-lien { color: rgba(244, 232, 218, 0.85); }
+
+/* Visite guidée et bulles de question */
+#parcours-bulle { background: linear-gradient(150deg, var(--vin-700), var(--vin-950)); color: var(--creme); box-shadow: 0 24px 60px -20px rgba(34, 6, 11, 0.55); }
+.parcours-etape, .parcours-actions button.lien { color: rgba(244, 232, 218, 0.65); }
+.parcours-texte { color: rgba(244, 232, 218, 0.85); }
+.parcours-actions .bouton-primaire { background: var(--creme); border-color: var(--creme); color: var(--vin-800); }
+.parcours-actions .bouton-primaire:hover { background: #fff; border-color: #fff; color: var(--vin-800); }
+.mentions-voile { background: rgba(34, 6, 11, 0.5); }
+
+/* Question posée : bulle bordeaux */
+.bulle-question { background: var(--vin-700); color: var(--creme); }
+
+/* Chronogramme : placement et fin de mesure en bordeaux */
+.bloc-chronogramme { --c-placement: #5E0F24; --c-fin: #5E0F24; }
+
+:focus-visible { outline-color: var(--vin-600); }
+input[type=text]:focus, input[type=email]:focus, input[type=password]:focus { border-color: var(--vin-700); box-shadow: 0 0 0 3px var(--accent-voile); }
+
+/* Chiffres alignés dans les textes en Playfair (dates, heures) */
+h1, h2, h3, .police-serif, .texte-resume, .fait-citation, .parcours-titre { font-variant-numeric: lining-nums; }
+
+/* Visite guidée : l'élément montré est cerclé de bordeaux */
+.parcours-cible { outline-color: var(--vin-600); }
+
+/* Gloock aussi pour les chiffres clés et les titres d'onglets de la visite */
+.stat-gav .valeur-stat, .parcours-titre, .questions-titre, .avis-titre { font-family: var(--serif); }

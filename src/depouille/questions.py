@@ -124,9 +124,18 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
         return introuvable
 
     texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in selection)
+    # « Mon client » n'a de sens que si l'avocat a désigné la personne qu'il
+    # défend ; sinon le modèle n'a pas à le deviner.
+    client = db.execute("SELECT nom FROM personnes WHERE est_client = 1 LIMIT 1").fetchone()
+    contexte_client = (
+        f"L'avocat défend {client['nom']} : « mon client » désigne cette personne.\n\n"
+        if client else
+        "L'avocat n'a pas désigné son client : si la question parle de « mon client », "
+        "réponds {\"reponse\": null, \"citations\": []}.\n\n"
+    )
     reponse_modele = obtenir_provider(config).appeler(
         systeme=PROMPT_SYSTEME,
-        prompt=f"Question de l'avocat : {question}\n\nPages du dossier :\n{texte}",
+        prompt=f"{contexte_client}Question de l'avocat : {question}\n\nPages du dossier :\n{texte}",
         modele=config.modele_analyse,
     )
     try:

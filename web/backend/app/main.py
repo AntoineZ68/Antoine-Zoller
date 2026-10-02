@@ -21,16 +21,20 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from rich.console import Console
 from supabase import Client
 
 from depouille.chrono import calculer_durees
+from depouille.client import PersonneInconnue, designer_client
+from depouille.db import appliquer_migrations, ouvrir_db
 from depouille.conformite import detecter_signalements
 from depouille.qualite_texte import pages_peu_lisibles
 from depouille.questions import repondre_question
 from depouille.recoupements import detecter_recoupements
+from depouille.resume import generer_resume
 
 from . import schemas
-from .pipeline import INTERVALLE_BATTEMENT_S, NOMS_LIVRABLES, _config_llm, traiter_dossier
+from .pipeline import INTERVALLE_BATTEMENT_S, NOMS_LIVRABLES, _config_llm, _options_upload, traiter_dossier
 from .supabase_client import client_service, client_utilisateur
 
 app = FastAPI(title="Depouille — API pilote")
@@ -259,10 +263,55 @@ def _db_resultats(dossier_id: str):
         tmp.flush()
         db = sqlite3.connect(tmp.name)
         db.row_factory = sqlite3.Row
+        appliquer_migrations(db)
         try:
             yield db
         finally:
             db.close()
+
+
+@app.post("/api/dossiers/{dossier_id}/client", response_model=schemas.ReponseClient)
+def designer_client_dossier(
+    dossier_id: str,
+    requete: schemas.DesignationClient,
+    contexte: tuple[Client, str] = Depends(_contexte_utilisateur),
+) -> dict:
+    """L'avocat désigne la personne qu'il défend (ou retire la désignation
+    avec `nom: null`). Le résumé, qui s'adresse à « votre client », est
+    régénéré ; si la régénération échoue, il est supprimé plutôt que de
+    laisser un texte qui désignerait la mauvaise personne.
+
+    La désignation vit dans le fichier SQLite du dossier, avec le reste du
+    contenu, jamais dans Postgres."""
+    supabase, _ = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)
+    if dossier["statut"] != "termine":
+        raise HTTPException(status_code=409, detail="Le traitement de ce dossier n'est pas encore terminé.")
+    bucket = client_service().storage.from_("dossiers-resultats")
+    chemin_storage = f"{dossier_id}/depouille.db"
+    try:
+        contenu_db = bucket.download(chemin_storage)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Résultats introuvables pour ce dossier.") from exc
+
+    with tempfile.TemporaryDirectory(prefix="depouille_client_") as tmp:
+        chemin = Path(tmp) / "depouille.db"
+        chemin.write_bytes(contenu_db)
+        db = ouvrir_db(chemin)
+        try:
+            designer_client(db, requete.nom)
+            try:
+                generer_resume(db, _config_llm(offline=False), Console(quiet=True))
+            except Exception as exc:  # noqa: BLE001 — sans résumé plutôt qu'en erreur
+                print(f"[client] régénération du résumé impossible pour {dossier_id} : {exc}")
+            resume_regenere = db.execute("SELECT COUNT(*) FROM resume_affaire").fetchone()[0] > 0
+        except PersonneInconnue as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        finally:
+            db.close()
+        bucket.upload(chemin_storage, str(chemin), _options_upload(chemin))
+
+    return {"client": requete.nom, "resume_regenere": resume_regenere}
 
 
 @app.post("/api/dossiers/{dossier_id}/questions", response_model=schemas.ReponseQuestion)
@@ -307,6 +356,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         tmp.flush()
         db = sqlite3.connect(tmp.name)
         db.row_factory = sqlite3.Row
+        appliquer_migrations(db)
         try:
             try:
                 ligne_resume = db.execute("SELECT texte FROM resume_affaire WHERE id = 1").fetchone()
@@ -314,7 +364,11 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             except sqlite3.OperationalError:
                 # Dossier traité avant l'introduction de cette table.
                 resume = None
-            personnes = [dict(r) for r in db.execute("SELECT nom, role FROM personnes ORDER BY role, nom")]
+            # Le client désigné par l'avocat en tête de liste.
+            personnes = [
+                dict(r, est_client=bool(r["est_client"]))
+                for r in db.execute("SELECT nom, role, est_client FROM personnes ORDER BY est_client DESC, role, nom")
+            ]
             faits = [
                 dict(r)
                 for r in db.execute(
@@ -439,7 +493,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 for r in db.execute(
                     """SELECT pi.type, pi.page_debut, pi.page_fin,
                               pi.date_apparente AS date, pi.heure_apparente AS heure,
-                              pi.cote, pg.fichier_source, pe.nom AS personne
+                              pi.cote, pg.fichier_source, pe.nom AS personne, pi.titre
                        FROM pieces pi
                        LEFT JOIN pages pg ON pg.numero_global = pi.page_debut
                        LEFT JOIN personnes pe ON pe.id = pi.personne_principale_id

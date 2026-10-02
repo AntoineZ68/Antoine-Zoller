@@ -4,9 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Lytis</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Newsreader:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/instrument-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="fonts/gloock-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   /* Charte reprise du site vitrine et de la démo Lytis : fond ivoire chaud, encre
@@ -347,7 +346,12 @@
   .note-resume { font-size: 11.5px; color: var(--texte-att-2); margin: 0; }
 
   .liste-personnes { list-style: none; margin: 0; padding: 0; font-size: 14px; display: flex; flex-direction: column; gap: 9px; }
-  .liste-personnes li { display: flex; align-items: center; gap: 10px; }
+  .liste-personnes li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .liste-personnes .lien-client { margin-left: auto; font-size: 12px; opacity: 0; transition: opacity 0.15s ease; }
+  .liste-personnes li:hover .lien-client, .liste-personnes .lien-client:focus-visible,
+  .liste-personnes li.personne-client .lien-client { opacity: 1; }
+  @media (hover: none) { .liste-personnes .lien-client { opacity: 1; } }
+  .liste-personnes li.personne-client .role-personne { background: var(--accent); color: var(--carte); }
   .role-personne {
     color: var(--accent); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
     background: var(--accent-voile-fort); padding: 3px 9px; border-radius: var(--pilule); white-space: nowrap;
@@ -452,13 +456,14 @@
   .nom-declarant { font-size: 12.5px; font-weight: 500; color: var(--texte); }
   .citation-declarant { font-size: 13px; color: var(--texte-att); font-style: italic; margin-top: 3px; }
 </style>
+<link rel="stylesheet" href="charte.css" />
 </head>
 <body>
 
 <div id="ecran-auth">
   <div class="auth-conteneur">
     <div class="auth-marque">
-      <div class="marque-logo">Lytis.</div>
+      <div class="marque-logo">LYTIS</div>
       <div class="surtitre">Défense pénale · Intelligence artificielle</div>
       <h1>Le dossier pénal,<br /><em>lu</em> en une heure.</h1>
       <p class="auth-accroche">Lytis dépouille la procédure et vous restitue un classeur interactif : chronologie des faits, personnes, déclarations. Chaque élément reste relié à sa page et, quand elle y figure, à sa cote.</p>
@@ -489,7 +494,7 @@
 <div id="appli">
   <div id="barre-laterale">
     <div class="marque-barre">
-      <div class="marque-logo">Lytis.</div>
+      <div class="marque-logo">LYTIS</div>
       <h1>Lytis</h1>
     </div>
     <button type="button" id="bouton-nouveau" class="bouton-primaire">+ Nouveau dossier</button>
@@ -878,7 +883,7 @@ function rendreIndexClasseur() {
       const date = p.date ? ` · ${p.date}${p.heure ? " à " + p.heure : ""}` : "";
       const cote = p.cote ? ` · cote ${p.cote}` : "";
       return `<button type="button" class="entree-index" onclick="ouvrirClasseur(${p.page_debut})">
-        <span class="type-piece">${p.type}${p.personne ? ` — ${p.personne}` : ""}</span>
+        <span class="type-piece">${p.titre || `${p.type}${p.personne ? ` — ${p.personne}` : ""}`}</span>
         <span class="meta-piece">${pages}${date}${cote}</span>
       </button>`;
     }).join("")}
@@ -990,7 +995,7 @@ function rendreListeLaterale() {
 }
 
 const LIBELLES_ROLE = {
-  mis_en_cause: "Client (mis en cause)", victime: "Victime", témoin: "Témoin",
+  mis_en_cause: "Mis en cause", victime: "Victime", témoin: "Témoin",
   expert: "Expert", enqueteur: "Enquêteur",
 };
 const NB_FAITS_APERCU = 4;
@@ -1011,18 +1016,55 @@ const LIBELLES_NATURE_PROCEDURE = {
   fin_audition: "Fin d'audition",
 };
 
-function rendreBlocInformations(donnees) {
+// Rôles qu'un avocat peut défendre : le mis en cause, mais aussi la
+// victime (partie civile) ou un témoin assisté.
+const ROLES_DESIGNABLES = new Set(["mis_en_cause", "victime", "témoin"]);
+
+function rendreBlocInformations(donnees, dossierId) {
   if (!donnees.personnes.length) {
     return `<div class="carte"><h2>Informations</h2><p class="vide">Aucune personne identifiée dans ce dossier.</p></div>`;
   }
+  const aUnClient = donnees.personnes.some((p) => p.est_client);
+  const nomJs = (nom) => nom.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return `
     <div class="carte">
       <h2>Informations</h2>
+      ${aUnClient ? "" : `<p class="note-resume" style="margin:-6px 0 14px;">Indiquez qui vous défendez : le résumé et « Interroger le dossier » s'adresseront alors à « votre client ».</p>`}
       <ul class="liste-personnes">
-        ${donnees.personnes.map((p) => `<li><span class="role-personne">${LIBELLES_ROLE[p.role] || p.role}</span> ${p.nom}</li>`).join("")}
+        ${donnees.personnes.map((p) => {
+          const role = LIBELLES_ROLE[p.role] || p.role;
+          const etiquette = p.est_client ? `Client (${role.toLowerCase()})` : role;
+          const action = p.est_client
+            ? `<button type="button" class="lien lien-client" onclick="designerClient('${dossierId}', null, this)">Retirer</button>`
+            : ROLES_DESIGNABLES.has(p.role)
+              ? `<button type="button" class="lien lien-client" onclick="designerClient('${dossierId}', '${nomJs(p.nom)}', this)">C'est mon client</button>`
+              : "";
+          return `<li class="${p.est_client ? "personne-client" : ""}"><span class="role-personne">${etiquette}</span> ${p.nom} ${action}</li>`;
+        }).join("")}
       </ul>
     </div>`;
 }
+
+async function designerClient(dossierId, nom, bouton) {
+  bouton.disabled = true;
+  bouton.textContent = nom ? "Enregistrement…" : "…";
+  try {
+    const r = await appelApi(`/api/dossiers/${dossierId}/client`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nom }),
+    });
+    if (nom && !r.resume_regenere) {
+      alert("Client enregistré. Le résumé n'a pas pu être régénéré pour l'instant : il est retiré plutôt que de désigner la mauvaise personne.");
+    }
+  } catch (erreur) {
+    alert(erreur.message);
+  }
+  cacheDonnees.delete(dossierId);
+  reponsesQuestions.delete(dossierId);
+  if (dossierOuvertId === dossierId) ouvrirDossier(dossierId);
+}
+window.designerClient = designerClient;
 
 function rendreBlocProcedure(donnees) {
   const sections = [];
@@ -1291,7 +1333,7 @@ async function rendreDetailDossier(dossier) {
             ? `<p class="texte-resume">${donnees.resume}</p>${lienDetail}<p class="note-resume">Généré par l'IA à partir des faits déjà vérifiés — à recouper, jamais à citer tel quel.</p>`
             : `<p class="vide">Aucun résumé disponible pour ce dossier (généré uniquement en mode connecté, avec au moins un fait vérifié).</p>`}
         </div>
-        ${rendreBlocInformations(donnees)}
+        ${rendreBlocInformations(donnees, dossier.id)}
         <div class="carte">
           <h2>Documents générés</h2>
           <div class="grille-livrables">

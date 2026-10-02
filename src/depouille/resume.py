@@ -31,8 +31,9 @@ PROMPT_RESUME = (
     "mots au maximum, sans titre, sans liste, sans guillemets ni préambule. "
     "Dans l'ordre : la nature des faits et leur période ; les personnes en cause et leur "
     "rôle tel qu'il apparaît dans le dossier ; le stade de la procédure ; puis, s'il y a "
-    "des déclarations de la personne mise en cause, ce qu'elle reconnaît et ce qu'elle "
-    "conteste, en reprenant ses propres déclarations sans les interpréter. "
+    "des déclarations de la personne défendue (à défaut, de la personne mise en cause), "
+    "ce qu'elle reconnaît et ce qu'elle conteste, en reprenant ses propres déclarations "
+    "sans les interpréter. "
     "Base-toi UNIQUEMENT sur les personnes, faits et déclarations fournis — n'ajoute, ne "
     "déduis et n'invente rien. Si une qualification pénale figure dans les faits fournis, "
     "tu peux la mentionner en l'attribuant à son auteur (« sous la qualification de … "
@@ -42,10 +43,14 @@ PROMPT_RESUME = (
 )
 
 
-def _bloc_mis_en_cause(personnes: list[sqlite3.Row]) -> str:
-    """« Votre client » seulement s'il n'y a qu'UN mis en cause : avec
-    plusieurs coauteurs, l'outil ne peut pas savoir lequel l'avocat défend,
-    et le deviner ferait dire au résumé l'inverse de la réalité."""
+def _bloc_client(personnes: list[sqlite3.Row]) -> str:
+    """« Votre client » pour la personne que l'avocat a lui-même désignée.
+    À défaut, seulement s'il n'y a qu'UN mis en cause : avec plusieurs
+    coauteurs, l'outil ne peut pas savoir lequel l'avocat défend, et le
+    deviner ferait dire au résumé l'inverse de la réalité."""
+    client = next((p["nom"] for p in personnes if p["est_client"]), None)
+    if client:
+        return f"L'avocat défend {client} : désigne cette personne comme « votre client, {client} »."
     mis_en_cause = [p["nom"] for p in personnes if p["role"] == "mis_en_cause"]
     if len(mis_en_cause) == 1:
         return (
@@ -65,15 +70,18 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
         console.print("  [build] --offline actif : pas de résumé (nécessite un appel au modèle).")
         return
 
-    personnes = db.execute("SELECT nom, role FROM personnes ORDER BY role, nom").fetchall()
+    personnes = db.execute("SELECT nom, role, est_client FROM personnes ORDER BY role, nom").fetchall()
     faits = db.execute(
         "SELECT description FROM evenements_faits WHERE statut_verif = 'verifie' ORDER BY page LIMIT 100"
     ).fetchall()
+    # Déclarations du client désigné s'il y en a un, sinon de toutes les
+    # personnes mises en cause.
+    filtre = "pe.est_client = 1" if any(p["est_client"] for p in personnes) else "pe.role = 'mis_en_cause'"
     declarations = db.execute(
-        """SELECT pe.nom, d.point_factuel FROM declarations d
-           JOIN personnes pe ON pe.id = d.personne_id
-           WHERE d.statut_verif = 'verifie' AND pe.role = 'mis_en_cause'
-           ORDER BY d.page LIMIT 40"""
+        f"""SELECT pe.nom, d.point_factuel FROM declarations d
+            JOIN personnes pe ON pe.id = d.personne_id
+            WHERE d.statut_verif = 'verifie' AND {filtre}
+            ORDER BY d.page LIMIT 40"""
     ).fetchall()
 
     if not faits:
@@ -84,7 +92,7 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
     bloc_faits = "\n".join(f"- {f['description']}" for f in faits)
     bloc_declarations = (
         "\n".join(f"- {d['nom']} : {d['point_factuel']}" for d in declarations)
-        or "Aucune déclaration vérifiée de personne mise en cause."
+        or "Aucune déclaration vérifiée."
     )
 
     debut = datetime.now(timezone.utc)
@@ -93,10 +101,10 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
         reponse = provider.appeler(
             systeme=PROMPT_RESUME,
             prompt=(
-                f"{_bloc_mis_en_cause(personnes)}\n\n"
+                f"{_bloc_client(personnes)}\n\n"
                 f"Personnes identifiées :\n{bloc_personnes}\n\n"
                 f"Faits établis :\n{bloc_faits}\n\n"
-                f"Déclarations vérifiées des personnes mises en cause :\n{bloc_declarations}"
+                f"Déclarations vérifiées de la personne défendue (ou des mises en cause) :\n{bloc_declarations}"
             ),
             modele=config.modele_analyse,
         )

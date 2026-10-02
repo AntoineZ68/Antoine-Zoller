@@ -43,6 +43,8 @@ class CouleursSurlignage(BaseModel):
 class Personne(BaseModel):
     nom: str
     role: str
+    # Désignée par l'avocat comme la personne qu'il défend.
+    est_client: bool = False
 
 
 class EvenementFait(BaseModel):
@@ -138,6 +140,9 @@ class PieceIndex(BaseModel):
     # d'index « Procès-verbal de plainte — SERMET Odile », qui se lit
     # comme la table d'un classeur papier.
     personne: str | None = None
+    # Intitulé précis (« Réquisition ORBIS (ligne 14 52) et réponse »),
+    # vérifié contre le texte de la pièce. Absent : le front affiche le type.
+    titre: str | None = None
 
 
 class DonneesDossier(BaseModel):
@@ -170,3 +175,13 @@ class ReponseQuestion(BaseModel):
     statut: str
     reponse: str
     citations: list[CitationReponse] = []
+
+
+class DesignationClient(BaseModel):
+    # None retire la désignation.
+    nom: str | None = Field(default=None, max_length=200)
+
+
+class ReponseClient(BaseModel):
+    client: str | None
+    resume_regenere: bool
