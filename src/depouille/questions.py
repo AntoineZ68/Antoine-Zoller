@@ -23,6 +23,7 @@ import sqlite3
 import unicodedata
 
 from .config import Config
+from .garde_fous import RE_QUALIFICATION
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .verification import verifier_citation
 
@@ -40,12 +41,6 @@ MOTS_VIDES = frozenset(
     notre nos t il-y dossier piece pieces page pages""".split()
 )
 
-# Termes de qualification juridique. Leur présence dans la réponse du modèle
-# fait retirer son texte (voir le docstring du module).
-RE_QUALIFICATION = re.compile(
-    r"nullit|irr[ée]gul|invocable|qualit[ée] (?:pour|à) agir|\bgrief\b|vice de proc|ill[ée]gal|annulable|entach",
-    re.IGNORECASE,
-)
 
 MESSAGE_INTROUVABLE = (
     "Le dossier ne permet pas de répondre à cette question avec un passage vérifiable."
