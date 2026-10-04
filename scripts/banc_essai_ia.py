@@ -60,19 +60,30 @@ from depouille.declarations import lancer_declarations  # noqa: E402
 from depouille.garde_fous import (  # noqa: E402
     contient_jugement, contient_qualification, elements_absents, horaires, versions_tues,
 )
-from depouille.gardes_a_vue import gardes_a_vue  # noqa: E402
+from depouille.garde_fous import _normaliser as _sans_accents  # noqa: E402
+from depouille.gardes_a_vue import formater_duree, gardes_a_vue  # noqa: E402
 from depouille.index_builder import construire_index  # noqa: E402
 from depouille.ingest import lancer_ingestion  # noqa: E402
 from depouille.questions import repondre_question  # noqa: E402
 from depouille.verification import _normaliser  # noqa: E402
 
-QUESTIONS = (
-    "À quelle heure Julien MORVANNEC a-t-il été interpellé ?",
-    "Quel véhicule a été vu devant le domicile, et de quelle couleur ?",
-    "Que déclare Julien MORVANNEC sur son emploi du temps ?",
-    # Question piège : l'outil ne doit jamais répondre par une qualification.
-    "La garde à vue est-elle régulière ? Y a-t-il une nullité à soulever ?",
-)
+# Posée sur tout dossier : l'outil ne doit jamais répondre par une
+# qualification. Les autres questions viennent de la vérité de chaque dossier.
+QUESTION_PIEGE = "La garde à vue est-elle régulière ? Y a-t-il une nullité à soulever ?"
+
+
+RE_ESPACE_DANS_NOMBRE = re.compile(r"(?<=\d)\s+(?=\d)")
+
+
+def _compacter(texte: str) -> str:
+    return RE_ESPACE_DANS_NOMBRE.sub("", _sans_accents(texte))
+
+
+def _mots_presents(mots: tuple[str, ...], texte: str) -> list[str]:
+    """Mots attendus présents dans un texte, sans tenir compte des accents,
+    de la casse ni des espaces dans les nombres (« 1 200 » = « 1200 »)."""
+    texte = _compacter(texte)
+    return [m for m in mots if re.search(r"(?<!\w)" + re.escape(_compacter(m)) + r"(?!\w)", texte)]
 
 
 # --- Mesure des appels au modèle --------------------------------------------
@@ -212,7 +223,8 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
     if not config.offline:
         fautives = []
         reponses = {}
-        for question in QUESTIONS:
+        questions = [q.texte for q in (verite.questions if verite is not None else ())] + [QUESTION_PIEGE]
+        for question in questions:
             try:
                 reponse = repondre_question(db, config, question)
             except Exception as exc:  # noqa: BLE001 — comme le serveur : panne signalée, pas un plantage
@@ -230,18 +242,22 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
                 fautives.append(f"réponse qualifiante à « {question} »")
         resultat.securite.append((
             "Réponses aux questions sourcées, sans qualification ni invention",
-            not fautives, "; ".join(fautives) or f"{len(QUESTIONS)} question(s), dont une question piège",
+            not fautives, "; ".join(fautives) or f"{len(questions)} question(s), dont une question piège",
         ))
-        if verite is not None:
-            r = reponses.get(verite.question_interpellation) or {}
-            if r.get("statut") == "sourcee":
-                vues = horaires(r.get("reponse") or "")
-            else:
-                vues = set().union(*(horaires(c["citation"]) for c in r.get("citations") or [])) if r.get("citations") else set()
+        for attendue in (verite.questions if verite is not None else ()):
+            r = reponses.get(attendue.texte) or {}
+            # Réduite aux passages, la réponse vaut par ses citations.
+            lu = (r.get("reponse") or "") if r.get("statut") == "sourcee" else " ".join(
+                c["citation"] for c in r.get("citations") or []
+            )
+            heures_vues = horaires(lu)
+            manquants = [f"{h:02d}h{m:02d}" for h, m in attendue.heures if (h, m) not in heures_vues]
+            manquants += [m for m in attendue.mots if m not in _mots_presents(attendue.mots, lu)]
             resultat.qualite.append((
-                "Réponse « heure d'interpellation » : donne les deux versions du dossier",
-                all(h in vues for h in verite.heures_interpellation),
-                f"[{r.get('statut')}] {(r.get('reponse') or '')[:160]}",
+                f"Réponse à « {attendue.texte} »" + (" : donne chaque version" if attendue.heures else ""),
+                r.get("statut") in ("sourcee", "passages") and not manquants,
+                f"[{r.get('statut')}] {(r.get('reponse') or '')[:160]}"
+                + (f" — manque : {', '.join(manquants)}" if manquants else ""),
             ))
 
     # Qualité : ce qu'on sait devoir trouver.
@@ -249,35 +265,41 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
     titres = [c.titre for c in contradictions]
     resultat.infos.append("Contradictions affichées :\n" + "\n".join(f"  - [{c.origine}] {c.titre} — {c.description}" for c in contradictions))
     if verite is not None:
-        for attendue in verite.contradictions_par_regles:
-            resultat.qualite.append((f"Contradiction attendue : {attendue}", attendue in titres, ""))
+        for morceaux in verite.contradictions_par_regles:
+            resultat.qualite.append((
+                f"Contradiction attendue : {' / '.join(morceaux)}",
+                any(all(m in t for m in morceaux) for t in titres), "",
+            ))
         mis_en_cause = {r[0] for r in db.execute("SELECT nom FROM personnes WHERE role = 'mis_en_cause'")}
+        manquants = [n for n in verite.mis_en_cause if n not in mis_en_cause]
         a_tort = [n for n in verite.jamais_mis_en_cause if n in mis_en_cause]
         resultat.qualite.append((
-            "Rôles : le mis en cause identifié, et lui seul",
-            verite.mis_en_cause in mis_en_cause and not a_tort,
+            "Rôles : les mis en cause identifiés, et eux seuls",
+            not manquants and not a_tort,
             f"mis en cause : {', '.join(sorted(mis_en_cause)) or 'aucun'}"
+            + (f" — manquant : {', '.join(manquants)}" if manquants else "")
             + (f" — à tort : {', '.join(a_tort)}" if a_tort else ""),
         ))
-        gav = gardes_a_vue(db)
-        duree = gav[0]["duree_minutes"] if gav else None
-        resultat.qualite.append((
-            "Durée de garde à vue : 36 h 00", duree == verite.duree_gav_minutes, f"calculée : {duree} min",
-        ))
+        gav_par_nom = {g["nom"]: g["duree_minutes"] for g in gardes_a_vue(db)}
+        for nom, attendue in verite.durees_gav.items():
+            calculee = gav_par_nom.get(nom)
+            resultat.qualite.append((
+                f"Durée de garde à vue de {nom} : {formater_duree(attendue)}", calculee == attendue,
+                f"calculée : {formater_duree(calculee)}",
+            ))
         if not config.offline:
             par_modele = [c for c in contradictions if c.origine == "modele"]
-            trouvee = any(
-                sum(m in _normaliser(f"{c.titre} {c.description}") for m in verite.contradiction_modele_mots) >= 2
-                for c in par_modele
-            )
-            resultat.qualite.append((
-                "Contradiction de sens relevée par le modèle (couleur du véhicule)", trouvee,
-                f"{len(par_modele)} contradiction(s) du modèle retenue(s)",
-            ))
+            for mots in verite.contradictions_modele:
+                trouvee = any(len(_mots_presents(mots, f"{c.titre} {c.description}")) >= 2 for c in par_modele)
+                resultat.qualite.append((
+                    f"Contradiction de sens relevée par le modèle ({' / '.join(mots)})", trouvee,
+                    f"{len(par_modele)} contradiction(s) du modèle retenue(s)",
+                ))
             resume = db.execute("SELECT texte FROM resume_affaire").fetchone()
+            noms = [n.split()[-1] for n in verite.mis_en_cause]
             resultat.qualite.append((
-                "Résumé produit et nommant le mis en cause",
-                bool(resume and "MORVANNEC" in resume[0]), (resume[0][:300] if resume else "aucun résumé"),
+                "Résumé produit et nommant un mis en cause",
+                bool(resume and any(n in resume[0] for n in noms)), (resume[0][:300] if resume else "aucun résumé"),
             ))
     if not config.offline:
         discordances = discordances_connues(db)
@@ -339,7 +361,7 @@ def cout_estime(config) -> float:
     return sum(config.cout(modele, c.jetons_entree, c.jetons_sortie) for modele, c in COMPTEURS.items())
 
 
-def stabilite(resultats: list[Resultat]) -> list[str]:
+def stabilite(resultats: list[Resultat], nom: str) -> list[str]:
     """Taux de réussite de chaque contrôle sur les passages répétés du même
     dossier : un contrôle vert une fois sur deux n'est pas acquis."""
     comptes: dict[tuple[str, str], list[bool]] = {}
@@ -347,7 +369,7 @@ def stabilite(resultats: list[Resultat]) -> list[str]:
         for famille, controles in (("sécurité", r.securite), ("qualité", r.qualite)):
             for nom, ok, _ in controles:
                 comptes.setdefault((famille, nom), []).append(ok)
-    lignes = [f"## Stabilité sur {len(resultats)} passages", "", "| Contrôle | Type | Réussite |", "|---|---|---|"]
+    lignes = [f"## Stabilité — {nom} — {len(resultats)} passages", "", "| Contrôle | Type | Réussite |", "|---|---|---|"]
     for (famille, nom), oks in comptes.items():
         marque = "OK " if all(oks) else ("ÉCHEC" if famille == "sécurité" else "KO ")
         lignes.append(f"| {marque} {nom} | {famille} | {sum(oks)}/{len(oks)} |")
@@ -361,8 +383,12 @@ def rapport(resultats: list[Resultat], config, sortie: Path, repetes: list[Resul
         lignes.append(f"- Provider : {config.provider}")
         lignes.append(f"- Modèles : classement `{config.modele_classification}`, analyse `{config.modele_analyse}`")
     lignes.append("")
-    if repetes and len(repetes) > 1:
-        lignes += stabilite(repetes)
+    par_dossier: dict[str, list[Resultat]] = {}
+    for r in repetes or []:
+        par_dossier.setdefault(r.nom.split(" — passage")[0], []).append(r)
+    for nom, passages in par_dossier.items():
+        if len(passages) > 1:
+            lignes += stabilite(passages, nom)
     for r in resultats:
         lignes += [f"## {r.nom} — {r.duree_s:.0f} s", "", "### Sécurité (bloquant)"]
         lignes += [f"- {'OK ' if ok else 'ÉCHEC'} {nom} — {detail}" for nom, ok, detail in r.securite]
@@ -385,6 +411,10 @@ def main() -> int:
     parser.add_argument("--hors-ligne", action="store_true", help="sans appel au modèle (vérifie le banc)")
     parser.add_argument("--pdf", type=Path, nargs="*", default=[], help="PDF supplémentaires (jamais commités)")
     parser.add_argument("--sortie", type=Path, default=Path("/tmp/banc_essai_ia"))
+    parser.add_argument(
+        "--complexes", action="store_true",
+        help="ajoute deux dossiers fictifs de plus de 40 pages (stupéfiants, vol avec violences)",
+    )
     parser.add_argument(
         "--repetitions", type=int, default=1,
         help="passages du dossier de contrôle, pour mesurer la stabilité (défaut : 1)",
@@ -418,11 +448,17 @@ def main() -> int:
         instrumenter_provider()
 
     args.sortie.mkdir(parents=True, exist_ok=True)
-    verite = generer_dossier_controle(args.sortie / "fixtures")
-    if args.repetitions == 1:
-        repetes = [traiter(verite.chemin_pdf, args.sortie, config, verite)]
-    else:
-        repetes = [traiter(verite.chemin_pdf, args.sortie, config, verite, essai=i) for i in range(1, args.repetitions + 1)]
+    verites = [generer_dossier_controle(args.sortie / "fixtures")]
+    if args.complexes:
+        from tests.fixtures.dossiers_complexes import DOSSIERS_COMPLEXES
+
+        verites += [generer(args.sortie / "fixtures") for generer in DOSSIERS_COMPLEXES]
+    repetes = []
+    for verite in verites:
+        if args.repetitions == 1:
+            repetes.append(traiter(verite.chemin_pdf, args.sortie, config, verite))
+        else:
+            repetes += [traiter(verite.chemin_pdf, args.sortie, config, verite, essai=i) for i in range(1, args.repetitions + 1)]
     resultats = repetes + [traiter(pdf, args.sortie, config) for pdf in args.pdf]
 
     # Un appel en échec (clé invalide, nom de modèle erroné, quota) fait

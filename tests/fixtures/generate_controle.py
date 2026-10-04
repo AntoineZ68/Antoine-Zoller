@@ -16,34 +16,35 @@ Par rapport au jeu d'essai de base (generate_fixture.py) :
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
 
 from . import generate_fixture as base
+from .dossiers_complexes import QuestionAttendue, VeriteDossier
 
 
-@dataclass
-class VeriteControle:
-    chemin_pdf: Path
-    nb_pages: int
-    pages_scan: list[int]
-    contradictions_par_regles: tuple[str, ...] = (
-        "Interpellation de Julien MORVANNEC : 07h50 ou 08h05",
-        "Plaque d'immatriculation : GH-428-KL ou GH-482-KL",
+def _verite(chemin: Path, nb_pages: int, pages_scan: list[int]) -> VeriteDossier:
+    return VeriteDossier(
+        chemin_pdf=chemin, nb_pages=nb_pages, pages_scan=pages_scan,
+        contradictions_par_regles=(
+            ("Interpellation de Julien MORVANNEC", "07h50", "08h05"),
+            ("Plaque d'immatriculation", "GH-428-KL", "GH-482-KL"),
+        ),
+        # Couleur du véhicule : seul le modèle peut la relever.
+        contradictions_modele=(("couleur", "blanc", "gris"),),
+        durees_gav={"Julien MORVANNEC": 36 * 60},
+        mis_en_cause=("Julien MORVANNEC",),
+        # Le procureur qui autorise la prolongation n'est jamais en cause.
+        jamais_mis_en_cause=("Antoine ROQUIER",),
+        questions=(
+            # Les deux heures d'interpellation : une réponse qui n'en donne
+            # qu'une cache à l'avocat une discordance du dossier.
+            QuestionAttendue("À quelle heure Julien MORVANNEC a-t-il été interpellé ?", heures=((7, 50), (8, 5))),
+            QuestionAttendue("Quel véhicule a été vu devant le domicile, et de quelle couleur ?", mots=("grise", "blanche")),
+            QuestionAttendue("Que déclare Julien MORVANNEC sur son emploi du temps ?", mots=("22", "23")),
+        ),
     )
-    # Mots dont l'un au moins doit figurer dans la contradiction relevée par
-    # le modèle sur la couleur du véhicule.
-    contradiction_modele_mots: tuple[str, ...] = ("couleur", "blanc", "gris")
-    duree_gav_minutes: int = 36 * 60
-    mis_en_cause: str = "Julien MORVANNEC"
-    # Le procureur qui autorise la prolongation n'est jamais en cause.
-    jamais_mis_en_cause: tuple[str, ...] = ("Antoine ROQUIER",)
-    # Les deux heures d'interpellation : une réponse qui n'en donne qu'une
-    # cache à l'avocat une discordance du dossier.
-    question_interpellation: str = "À quelle heure Julien MORVANNEC a-t-il été interpellé ?"
-    heures_interpellation: tuple[tuple[int, int], ...] = ((7, 50), (8, 5))
 
 
 PIECES_AJOUTEES = [
@@ -79,7 +80,7 @@ PIECES_AJOUTEES = [
 ]
 
 
-def generer_dossier_controle(dossier_sortie: Path) -> VeriteControle:
+def generer_dossier_controle(dossier_sortie: Path) -> VeriteDossier:
     dossier_sortie.mkdir(parents=True, exist_ok=True)
     origine = base._pieces
 
@@ -100,4 +101,4 @@ def generer_dossier_controle(dossier_sortie: Path) -> VeriteControle:
         for i, page in enumerate(doc):
             page.insert_text((500, 24), f"D{i + 1}", fontsize=9)
         doc.save(chemin)
-    return VeriteControle(chemin_pdf=chemin, nb_pages=verite.nb_pages, pages_scan=verite.pages_scan)
+    return _verite(chemin, verite.nb_pages, verite.pages_scan)

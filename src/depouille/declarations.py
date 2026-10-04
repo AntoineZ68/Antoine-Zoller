@@ -28,13 +28,18 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .classify import TYPES_AUDITION
+from .chrono import _personne_par_nom
+from .classify import TYPE_CONFRONTATION, TYPES_AUDITION
 from .config import Config
 from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, lots_de_pages, obtenir_provider
 from .verification import _normaliser, verifier_table
 
 RE_QUESTION = re.compile(r"^(?:Question|Q)[.:\s]+(.+)$")
 RE_REPONSE = re.compile(r"^(?:Réponse|R)[.:\s]+(.+)$")
+# Confrontation : « Question à Yanis BOUCHARD : … », « Réponse de Karim
+# TALBI : … ». Le locuteur est nommé à chaque réponse.
+RE_QUESTION_A = re.compile(r"^Question\s+à\s+([^:]{3,60}?)\s*:\s*(.+)$")
+RE_REPONSE_DE = re.compile(r"^Réponse\s+de\s+([^:]{3,60}?)\s*:\s*(.+)$")
 
 # Rapprochement déterministe minimal entre questions différemment formulées
 # mais portant sur le même point factuel. Volontairement restreint : la
@@ -65,17 +70,19 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
     question_courante: str | None = None
     reponse_courante: list[str] | None = None
     page_reponse: int | None = None
+    locuteur: str | None = None
 
     def _flush() -> None:
         if question_courante is not None and reponse_courante:
             citation = " ".join(reponse_courante).strip()
-            resultats.append(
-                {
-                    "page": page_reponse,
-                    "citation": citation,
-                    "point_factuel": _detecter_point_factuel(question_courante, citation),
-                }
-            )
+            point = {
+                "page": page_reponse,
+                "citation": citation,
+                "point_factuel": _detecter_point_factuel(question_courante, citation),
+            }
+            if locuteur:
+                point["locuteur"] = locuteur
+            resultats.append(point)
 
     for page in pages:
         for ligne in page["texte"].splitlines():
@@ -83,18 +90,21 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
             if not ligne:
                 continue
 
-            m_q = RE_QUESTION.match(ligne)
+            m_qa = RE_QUESTION_A.match(ligne)
+            m_q = m_qa or RE_QUESTION.match(ligne)
             if m_q:
                 _flush()
-                question_courante = m_q.group(1).strip()
+                question_courante = (m_qa.group(2) if m_qa else m_q.group(1)).strip()
                 reponse_courante = None
                 page_reponse = None
                 continue
 
-            m_r = RE_REPONSE.match(ligne)
+            m_rd = RE_REPONSE_DE.match(ligne)
+            m_r = m_rd or RE_REPONSE.match(ligne)
             if m_r and question_courante:
                 _flush()
-                reponse_courante = [m_r.group(1).strip()]
+                locuteur = m_rd.group(1).strip() if m_rd else None
+                reponse_courante = [(m_rd.group(2) if m_rd else m_r.group(1)).strip()]
                 page_reponse = page["numero_global"]
                 continue
 
@@ -169,8 +179,9 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
         console.print("  [decl] des déclarations existent déjà, ignoré (utilise --force pour retraiter).")
         return
 
+    types = (*TYPES_AUDITION, TYPE_CONFRONTATION)
     pieces = db.execute(
-        "SELECT * FROM pieces WHERE type IN (?, ?) ORDER BY page_debut", TYPES_AUDITION
+        f"SELECT * FROM pieces WHERE type IN ({', '.join('?' * len(types))}) ORDER BY page_debut", types
     ).fetchall()
     if not pieces:
         console.print("  [decl] aucune pièce d'audition en base — lance d'abord `depouille classify`.")
@@ -188,6 +199,25 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
             (piece["page_debut"], piece["page_fin"]),
         ).fetchall()
+        if piece["type"] == TYPE_CONFRONTATION:
+            # Plusieurs locuteurs : chaque réponse est rattachée à la
+            # personne qui la donne (« Réponse de Karim TALBI : … »), si elle
+            # est déjà identifiée au dossier — jamais devinée ni créée.
+            retenus = []
+            for point in _extraire_qr_deterministe(pages):
+                locuteur_id = _personne_par_nom(db, point.get("locuteur", ""))
+                if locuteur_id is not None:
+                    retenus.append((locuteur_id, point))
+            for locuteur_id, point in retenus:
+                a_enregistrer.append((piece, locuteur_id, [point]))
+            nb_deterministe += len(retenus)
+            if not retenus:
+                console.print(
+                    f"  [decl] confrontation pièce {piece['id']} (pages {piece['page_debut']}-{piece['page_fin']}) : "
+                    "aucune réponse rattachée à une personne identifiée."
+                )
+            continue
+
         # Calculé une seule fois pendant la classification
         # (identifier_personne_principale) et réutilisé ici.
         personne_id = piece["personne_principale_id"]

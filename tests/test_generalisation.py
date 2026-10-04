@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from rich.console import Console
 
 from depouille import classify
@@ -659,3 +661,34 @@ def test_enqueteur_ecarte_mais_pas_un_agent_immobilier() -> None:
     assert _premiere_mention_hors_titres(
         "Julien MORVANNEC, agent immobilier, demeurant 14 rue des Tanneurs."
     ) == ("Julien", "MORVANNEC")
+
+
+@pytest.mark.parametrize("entete, attendu", [
+    ("PROCÈS-VERBAL D'AUDITION DE JÉRÔME VASSEUR (TÉMOIN)", ("Jérôme VASSEUR", "témoin")),
+    ("AUDITION DE JEAN-MARC DUPONT-MOREAU (VICTIME)", ("Jean-Marc DUPONT-MOREAU", "victime")),
+    ("PROCÈS-VERBAL D'AUDITION DE JULIEN MORVANNEC (MIS EN CAUSE)", ("Julien MORVANNEC", "mis_en_cause")),
+])
+def test_role_tague_avec_accents_et_noms_composes(entete, attendu) -> None:
+    """Observé sur un dossier d'essai de 40 pages : le témoin « JÉRÔME
+    VASSEUR » n'était pas identifié, la majuscule accentuée cassait le motif."""
+    from depouille.classify import _detecter_personnes_avec_role
+
+    assert _detecter_personnes_avec_role(entete) == [attendu]
+
+
+@pytest.mark.parametrize("entete, attendu", [
+    ("PROCÈS-VERBAL DE CONFRONTATION", "PV de confrontation"),
+    ("PROCÈS-VERBAL DE PLACEMENT SOUS SCELLÉS", "PV de placement sous scellés"),
+    ("PROCÈS-VERBAL D’EXPLOITATION DES TÉLÉPHONES SAISIS", "PV d'exploitation"),
+    ("PROCÈS-VERBAL D'ENQUÊTE DE VOISINAGE", "PV d'enquête de voisinage"),
+    ("PROCÈS-VERBAL DE RECHERCHES", "PV de recherches"),
+    ("ORDONNANCE D'AUTORISATION D'INTERCEPTION — RÉQUISITION", "Ordonnance du juge des libertés et de la détention"),
+    ("BRIGADE DE RECHERCHES DE PORT-BRÉVAL\nPROCÈS-VERBAL D'AUDITION", "PV d'audition"),
+    ("SERVICE D'IDENTIFICATION JUDICIAIRE\nPROCÈS-VERBAL DE CONSTATATIONS", "PV de constatations"),
+])
+def test_pieces_courantes_classees(entete, attendu) -> None:
+    """Dix pièces « Non identifié » sur deux dossiers d'essai de 40 pages ;
+    le service enquêteur cité en en-tête ne l'emporte jamais sur l'intitulé."""
+    from depouille.classify import _classifier_type_deterministe
+
+    assert _classifier_type_deterministe(entete)[0] == attendu

@@ -54,3 +54,40 @@ def test_pas_de_divergence_entre_personnes_differentes(dossier_traite: DossierTr
         da = db.execute("SELECT personne_id FROM declarations WHERE id = ?", (row["declaration_id_a"],)).fetchone()
         db_ = db.execute("SELECT personne_id FROM declarations WHERE id = ?", (row["declaration_id_b"],)).fetchone()
         assert da["personne_id"] == db_["personne_id"] == row["personne_id"]
+
+
+def test_confrontation_chaque_reponse_rattachee_a_son_locuteur(tmp_path) -> None:
+    """Une confrontation fait répondre deux personnes tour à tour : chaque
+    réponse va à celle qui la donne (observé : pièce « Non identifié »,
+    déclarations perdues, sur un dossier d'essai de 46 pages)."""
+    from rich.console import Console
+
+    from depouille.config import Config
+    from depouille.db import ouvrir_db
+    from depouille.declarations import lancer_declarations
+
+    texte = (
+        "PROCÈS-VERBAL DE CONFRONTATION\n"
+        "Question à Yanis BOUCHARD : Maintenez-vous que Karim TALBI organisait les chargements ?\n"
+        "Réponse de Yanis BOUCHARD : Oui. C'est lui qui avait la clé.\n"
+        "Question à Karim TALBI : Qu'avez-vous à répondre ?\n"
+        "Réponse de Karim TALBI : Il ment pour se protéger.\n"
+        "Question à Paul INCONNU : Et vous ?\n"
+        "Réponse de Paul INCONNU : Rien à dire.\n"
+    )
+    db = ouvrir_db(tmp_path / "t.db")
+    db.execute("INSERT INTO pages (numero_global, fichier_source, page_fichier, texte, empreinte_sha256) VALUES (1, 'd.pdf', 1, ?, 'x')", (texte,))
+    db.execute("INSERT INTO pieces (id, type, page_debut, page_fin) VALUES (1, 'PV de confrontation', 1, 1)")
+    db.execute("INSERT INTO personnes (id, nom, role) VALUES (1, 'Karim TALBI', 'mis_en_cause'), (2, 'Yanis BOUCHARD', 'mis_en_cause')")
+    db.commit()
+
+    lancer_declarations(db, Config(offline=True), force=False, console=Console(quiet=True))
+
+    lignes = db.execute(
+        "SELECT pe.nom, d.citation, d.statut_verif FROM declarations d JOIN personnes pe ON pe.id = d.personne_id ORDER BY d.id"
+    ).fetchall()
+    assert [(r[0], r[1]) for r in lignes] == [
+        ("Yanis BOUCHARD", "Oui. C'est lui qui avait la clé."),
+        ("Karim TALBI", "Il ment pour se protéger."),
+    ], "une personne non identifiée au dossier n'est jamais créée"
+    assert all(r[2] == "verifie" for r in lignes)

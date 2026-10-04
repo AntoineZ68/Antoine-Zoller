@@ -42,6 +42,16 @@ CATEGORIES = [
     "PV de saisie",
     "PV de constatations",
     "PV de synthèse",
+    "PV de confrontation",
+    "PV de renseignement",
+    "PV de placement sous scellés",
+    "PV d'exploitation",
+    "PV d'enquête de voisinage",
+    "PV de découverte",
+    "PV de restitution",
+    "PV d'identification",
+    "PV de recherches",
+    "Ordonnance du juge des libertés et de la détention",
     "Réquisition",
     "Réquisitoire introductif",
     "PV d'interrogatoire de première comparution",
@@ -87,6 +97,9 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["SOIT-TRANSMIS"], "Soit-transmis"),
     (["ENQUÊTE DE PERSONNALITÉ"], "Enquête de personnalité"),
     (["CASIER JUDICIAIRE"], "Casier judiciaire"),
+    # Avant RÉQUISITION : « ORDONNANCE D'AUTORISATION D'INTERCEPTION —
+    # RÉQUISITION » est une décision du juge, pas une réquisition.
+    (["AUTORISATION", "INTERCEPTION"], "Ordonnance du juge des libertés et de la détention"),
     (["RÉQUISITOIRE"], "Réquisitoire introductif"),
     (["RÉQUISITION"], "Réquisition"),
     (["INTERROGATOIRE", "COMPARUTION"], "PV d'interrogatoire de première comparution"),
@@ -94,6 +107,9 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["EXPERTISE"], "Rapport d'expertise"),
     (["ANALYSE TÉLÉPHONIQUE"], "Analyse téléphonique"),
     (["TRANSCRIPTION"], "Retranscription"),
+    # Deux personnes répondent tour à tour : ni « audition » ni pièce
+    # inconnue (observé : classée « Non identifié », déclarations perdues).
+    (["CONFRONTATION"], "PV de confrontation"),
     (["AUDITION LIBRE"], "PV d'audition libre"),
     (["AUDITION"], "PV d'audition"),
     # Pièces documentaires saisies comme preuve plutôt que rédigées par un
@@ -105,6 +121,19 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     (["RELEVÉ BANCAIRE"], "Relevé bancaire"),
     (["FACTURE"], "Facture"),
     (["INVOICE"], "Facture"),
+    # Pièces courantes sans mot-clé plus spécifique (observé : dix pièces
+    # « Non identifié » sur deux dossiers d'essai de 40 pages). En dernier,
+    # et ancrées sur « VERBAL DE » : « BRIGADE DE RECHERCHES » ou « SERVICE
+    # D'IDENTIFICATION » dans l'en-tête d'une audition ne doivent jamais
+    # l'emporter sur son intitulé.
+    (["SOUS SCELLÉS"], "PV de placement sous scellés"),
+    (["ENQUÊTE DE VOISINAGE"], "PV d'enquête de voisinage"),
+    (["VERBAL DE RENSEIGNEMENT"], "PV de renseignement"),
+    (["VERBAL D'EXPLOITATION"], "PV d'exploitation"),
+    (["VERBAL DE DÉCOUVERTE"], "PV de découverte"),
+    (["VERBAL DE RESTITUTION"], "PV de restitution"),
+    (["VERBAL D'IDENTIFICATION"], "PV d'identification"),
+    (["VERBAL DE RECHERCHE"], "PV de recherches"),
 ]
 
 RE_TITRE = re.compile(r"^[A-ZÀ-Ÿ0-9°'’«»()/\-–—\s.,]{8,}$")
@@ -115,8 +144,15 @@ RE_SERVICE = re.compile(
     re.IGNORECASE,
 )
 RE_PERSONNE = re.compile(r"\b([A-ZÀ-Ÿ][a-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\b")
+# Majuscules accentuées et noms composés compris : « JÉRÔME VASSEUR
+# (TÉMOIN) » n'était pas reconnu, et le témoin manquait au dossier
+# (observé sur un dossier d'essai de 40 pages) ; « JEAN-MARC », « DUPONT-
+# MOREAU » non plus.
+_MAJ = "A-ZÀ-ÖØ-Þ"
+_LETTRE = "A-Za-zÀ-ÖØ-öø-ÿ"
 RE_ROLE_TAG = re.compile(
-    r"\b([A-ZÀ-Ÿ][A-Za-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,})\s*\((MIS EN CAUSE|VICTIME|TÉMOIN)\)"
+    rf"(?<![{_LETTRE}])([{_MAJ}][{_LETTRE}]+(?:-[{_MAJ}][{_LETTRE}]+)?)\s+"
+    rf"([{_MAJ}]{{2,}}(?:[-'][{_MAJ}]{{2,}})*)\s*\((MIS EN CAUSE|VICTIME|TÉMOIN)\)"
 )
 ROLE_PAR_TAG = {
     "MIS EN CAUSE": "mis_en_cause",
@@ -126,6 +162,7 @@ ROLE_PAR_TAG = {
 ROLES_VALIDES = ("mis_en_cause", "victime", "témoin", "expert", "enqueteur")
 
 TYPES_AUDITION = ("PV d'audition", "PV d'audition libre")
+TYPE_CONFRONTATION = "PV de confrontation"
 
 # Types où le premier nom "Prénom NOM" mentionné dans la pièce désigne sans
 # ambiguïté la personne concernée (le texte la nomme tôt et explicitement,
@@ -264,7 +301,7 @@ def _sans_accents(texte: str) -> str:
 
 
 def _classifier_type_deterministe(texte_entete: str) -> tuple[str, float]:
-    majuscules = _sans_accents(texte_entete.upper())
+    majuscules = _sans_accents(texte_entete.upper()).replace("’", "'")
     for motifs, type_ in REGLES_MOTS_CLES:
         if all(_sans_accents(motif) in majuscules for motif in motifs):
             return type_, 1.0
@@ -315,7 +352,8 @@ def _detecter_personnes_citees(texte: str) -> list[str]:
 def _detecter_personnes_avec_role(texte: str) -> list[tuple[str, str]]:
     resultats = []
     for prenom, nom, tag in RE_ROLE_TAG.findall(texte):
-        resultats.append((f"{prenom.capitalize()} {nom.upper()}", ROLE_PAR_TAG[tag]))
+        prenom = "-".join(partie.capitalize() for partie in prenom.split("-"))
+        resultats.append((f"{prenom} {nom.upper()}", ROLE_PAR_TAG[tag]))
     return resultats
 
 
