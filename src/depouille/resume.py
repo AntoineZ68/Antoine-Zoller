@@ -1,61 +1,73 @@
 """Étape build (complément) — résumé de l'affaire en un court paragraphe.
 
-Le seul module du pipeline qui synthétise plutôt qu'extrait : contrairement
-au reste de l'outil, sa sortie n'est pas une citation vérifiable page par
-page. Le garde-fou est ailleurs — il ne relit jamais les PDF bruts, unique-
-ment les personnes, les faits et les déclarations déjà extraits ET vérifiés
-par les étapes précédentes, pour qu'une hallucination du modèle ne puisse
-pas introduire un élément qui n'existe nulle part ailleurs dans le dossier.
-Jamais de qualification juridique de notre part : un filtre déterministe
-(garde_fous) écarte tout résumé qui en contiendrait malgré la consigne.
+Le seul texte que l'avocat lit avant tout le reste : il doit être juste
+phrase par phrase. Même construction que le résumé détaillé : le modèle ne
+reçoit QUE des éléments déjà extraits ET vérifiés au caractère près
+(faits, actes de procédure, déclarations de la personne défendue), chacun
+numéroté et accompagné de sa citation ; il rédige 3 ou 4 phrases et indique
+pour chacune les éléments qu'elle reprend. Chaque phrase n'est retenue que
+si elle ne contient aucun nom, heure, durée, nombre, infraction ou acte de
+procédure absent de SES éléments, ni qualification, ni jugement.
 
-Un paragraphe plutôt qu'une phrase : une phrase de trente mots disait qui et
-quoi, mais pas ce que l'avocat cherche en premier en ouvrant un dossier —
-ce que son client reconnaît et ce qu'il conteste.
+Pourquoi phrase par phrase : un paragraphe libre, contrôlé contre
+l'ensemble des éléments, laissait passer un mélange de deux pièces exactes
+chacune — observé sur Mistral Large : « Paul LEROUX déclare avoir vu une
+Clio blanche immatriculée GH-482-KL », alors que le témoin ne donne aucune
+plaque (elle vient du PV d'interpellation). Et il faisait 150 à 300 mots
+pour 110 demandés ; un nombre de phrases borné tient la longueur.
+
+Ce que l'avocat cherche en premier en ouvrant un dossier : ce qui a
+déclenché l'enquête, la situation de son client, ce que celui-ci reconnaît
+et ce qu'il conteste.
 """
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import problemes_redaction
-from .llm import ErreurModeOffline, obtenir_provider
-from .resume_detaille import _elements
+from .contradictions import discordances_connues
+from .garde_fous import avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues
+from .llm import ErreurModeOffline, extraire_json, obtenir_provider
+from .resume_detaille import _elements, sans_references
 
 MAX_FAITS, MAX_ACTES, MAX_DECLARATIONS = 100, 40, 40
+MAX_PHRASES = 4
+# 110 demandés ; au-delà de 160, un second essai. Entre les deux, quatre
+# phrases restent lisibles, et un appel de plus pour raccourcir coûte sans
+# rien apporter (mesuré sur Mistral Large : 105 à 150 mots).
+MOTS_MAX = 160
 
 PROMPT_RESUME = (
-    "Tu rédiges le résumé factuel d'un dossier de procédure pénale française, pour un "
-    "avocat qui l'ouvre pour la première fois. Un seul paragraphe de 3 à 5 phrases, 110 "
-    "mots au maximum, sans titre, sans liste, sans guillemets ni préambule. "
-    "Dans l'ordre : ce qui s'est passé et quand ; les personnes en cause et leur rôle tel "
-    "qu'il apparaît dans le dossier ; le stade de la procédure ; puis, s'il y a des "
-    "déclarations de la personne défendue (à défaut, de la personne mise en cause), ce "
-    "qu'elle reconnaît et ce qu'elle conteste. "
-    "Chaque élément fourni se termine par sa citation exacte entre « » : c'est elle qui "
-    "fait foi. Reprends heures, durées, dates et chiffres tels qu'ils y sont écrits, sans "
-    "les arrondir ni les convertir, mais reformule : ne recopie aucune citation entre "
-    "guillemets dans le paragraphe. Si des éléments divergent (une heure, une couleur) "
-    "ou si une personne a varié d'une audition à l'autre, donne chaque version, sans "
-    "trancher. "
-    "Décris les faits avec les mots des éléments fournis : n'écris jamais « violences », "
-    "« vol », « plainte », « réquisitoire » ou tout autre nom d'infraction ou d'acte de "
-    "procédure qui n'y figure pas. Une qualification pénale ne peut être mentionnée que "
-    "si un élément la cite, en l'attribuant à la pièce qui la retient. "
-    "Écris les dates comme dans les éléments (14/03/2031) ; n'écris de période que si ses "
-    "deux bornes diffèrent. "
+    "Tu rédiges le résumé d'un dossier de procédure pénale française pour un avocat qui "
+    "l'ouvre pour la première fois : 3 ou 4 phrases courtes, 110 mots au total au plus. "
+    "Tu disposes UNIQUEMENT d'éléments déjà extraits du dossier, chacun précédé de son "
+    "numéro entre crochets (F = fait, P = acte de procédure, D = déclaration de la "
+    "personne défendue) et terminé par sa citation exacte entre « », qui fait foi. "
+    "Dans l'ordre : ce qui a déclenché l'enquête et quand ; la situation procédurale de "
+    "la personne défendue (interpellation, garde à vue, stade actuel) ; ce qu'elle "
+    "déclare, reconnaît ou conteste — si elle a varié d'une audition à l'autre, donne "
+    "chaque version, sans trancher. Ne détaille ni les constatations ni les témoignages : "
+    "ils figurent dans la chronologie et l'onglet des contradictions. "
+    "Chaque phrase s'appuie sur un ou plusieurs éléments et indique leurs numéros dans "
+    "« sources » ; elle ne contient rien — nom, date, heure, durée, chiffre, lieu, "
+    "véhicule — qui ne figure dans les éléments qu'elle cite. Ne prête jamais à une "
+    "pièce ou à une personne un détail qui vient d'une autre. "
+    "Reprends heures, durées et dates telles qu'elles sont écrites, sans les arrondir ni "
+    "les convertir ; reformule, sans recopier de citation entre guillemets ni écrire de "
+    "numéro d'élément dans le texte. "
+    "N'écris jamais « violences », « vol », « plainte », « réquisitoire » ou tout autre nom "
+    "d'infraction ou d'acte de procédure qui ne figure pas dans les éléments cités. "
     "Écris chaque nom exactement comme dans la liste des personnes (NOM en capitales) et "
-    "respecte le rôle indiqué pour chacune. N'écris jamais d'élément entre crochets "
-    "(« [adresse] ») : omets plutôt ce que tu ne connais pas. "
-    "Base-toi UNIQUEMENT sur les personnes et éléments fournis — n'ajoute, ne déduis et "
-    "n'invente rien. "
-    "Jamais d'appréciation sur la culpabilité, la sincérité, la solidité des charges, la "
-    "régularité des actes ou la stratégie de défense ; jamais les mots « nullité » ou "
-    "« irrégularité »."
+    "respecte le rôle indiqué pour chacune ; jamais d'élément entre crochets. "
+    "Aucune qualification juridique, aucune appréciation sur la culpabilité, la "
+    "sincérité, la solidité des charges, la régularité des actes ou la stratégie de "
+    "défense ; jamais les mots « nullité » ou « irrégularité ». "
+    'Réponds uniquement en JSON : {"phrases": [{"texte": "...", "sources": ["F3", "D7"]}]}.'
 )
 
 
@@ -81,9 +93,6 @@ def _bloc_client(personnes: list[sqlite3.Row]) -> str:
     return "Aucune personne mise en cause n'est identifiée : n'écris pas « votre client »."
 
 
-MOTS_MAX = 140  # 110 demandés, avec une marge
-
-
 def defauts_de_forme(texte: str) -> list[str]:
     defauts = []
     mots = len(texte.split())
@@ -94,9 +103,7 @@ def defauts_de_forme(texte: str) -> list[str]:
     return defauts
 
 
-def _elements_du_resume(
-    db: sqlite3.Connection, personnes: list[sqlite3.Row]
-) -> tuple[list[str], list[str], list[str]]:
+def _elements_du_resume(db: sqlite3.Connection, personnes: list[sqlite3.Row]) -> dict[str, dict]:
     """Faits et actes vérifiés, et déclarations vérifiées du client désigné
     (à défaut, des mises en cause) — chacun avec sa date et sa citation.
 
@@ -111,11 +118,43 @@ def _elements_du_resume(
                 WHERE d.statut_verif = 'verifie' AND {filtre}"""
         )
     }
-    elements = _elements(db)
-    faits = [e["ligne"] for cle, e in elements.items() if cle[0] == "F"][:MAX_FAITS]
-    actes = [e["ligne"] for cle, e in elements.items() if cle[0] == "P"][:MAX_ACTES]
-    declarations = [e["ligne"] for cle, e in elements.items() if cle in declarations_retenues][:MAX_DECLARATIONS]
-    return faits, actes, declarations
+    tous = _elements(db)
+    faits = [c for c in tous if c[0] == "F"][:MAX_FAITS]
+    actes = [c for c in tous if c[0] == "P"][:MAX_ACTES]
+    declarations = [c for c in tous if c in declarations_retenues][:MAX_DECLARATIONS]
+    return {c: tous[c] for c in faits + actes + declarations}
+
+
+def _examiner(
+    reponse_texte: str, elements: dict[str, dict], bloc_client: str,
+    discordances: list[tuple[str, list[str]]] = (), noms: list[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Renvoie (phrases retenues, motifs de rejet des autres)."""
+    try:
+        phrases = extraire_json(reponse_texte).get("phrases", [])
+    except (ValueError, AttributeError):
+        return [], ["réponse sans JSON lisible"]
+    retenues, motifs = [], []
+    for phrase in phrases if isinstance(phrases, list) else []:
+        if not isinstance(phrase, dict):
+            continue
+        texte = sans_references(re.sub(r"\s+", " ", str(phrase.get("texte") or "")).strip(), elements)
+        sources = [s for s in dict.fromkeys(str(x) for x in phrase.get("sources") or []) if s in elements]
+        if not texte:
+            continue
+        if not sources:
+            motifs.append(f"« {texte} » : aucune source")
+            continue
+        # « votre client, NOM » est une consigne : le nom est une référence.
+        reference = avec_noms_completes(
+            "\n".join([bloc_client] + [f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources]), noms,
+        )
+        problemes = problemes_redaction(texte, reference) + versions_tues(texte, discordances)
+        if problemes:
+            motifs.append(f"« {texte} » : {' ; '.join(problemes)} (sources citées : {', '.join(sources)})")
+        else:
+            retenues.append(texte)
+    return retenues[:MAX_PHRASES], motifs
 
 
 def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> None:
@@ -124,40 +163,38 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
         return
 
     personnes = db.execute("SELECT nom, role, est_client FROM personnes ORDER BY role, nom").fetchall()
-    faits, actes, declarations = _elements_du_resume(db, personnes)
-    if not faits:
+    elements = _elements_du_resume(db, personnes)
+    if not any(c[0] == "F" for c in elements):
         console.print("  [build] aucun fait vérifié en base — pas de résumé généré.")
         return
 
+    bloc_client = _bloc_client(personnes)
+    discordances = discordances_connues(db)
+    noms = noms_identifies(db)
     bloc_personnes = "\n".join(f"- {p['nom']} ({p['role']})" for p in personnes) or "Aucune personne identifiée."
     prompt = (
-        f"{_bloc_client(personnes)}\n\n"
-        f"Personnes identifiées :\n{bloc_personnes}\n\n"
-        "Faits établis :\n" + "\n".join(f"- {f}" for f in faits) + "\n\n"
-        "Actes de procédure :\n" + ("\n".join(f"- {a}" for a in actes) or "Aucun acte vérifié.") + "\n\n"
-        "Déclarations vérifiées de la personne défendue (ou des mises en cause) :\n"
-        + ("\n".join(f"- {d}" for d in declarations) or "Aucune déclaration vérifiée.")
+        f"{bloc_client}\n\nPersonnes identifiées :\n{bloc_personnes}\n\nÉléments :\n"
+        + "\n".join(f"[{cle}] (p. {e['page']}) {e['ligne']}" for cle, e in elements.items())
+        + bloc_discordances(discordances)
     )
 
     debut = datetime.now(timezone.utc)
     provider = obtenir_provider(config)
     tokens_in = tokens_out = 0
-    texte, problemes = "", []
-    # Deux essais au plus : un résumé écarté l'est pour une raison précise
-    # (une heure absente des sources, un mot d'infraction inventé), que le
-    # modèle corrige presque toujours quand on la lui donne. Au-delà, mieux
-    # vaut aucun résumé : l'avocat garde la chronologie et les autres onglets.
-    #
-    # La forme (longueur, citations recopiées) déclenche aussi le second
-    # essai, mais n'écarte jamais un résumé fidèle : mieux vaut un résumé un
-    # peu long que pas de résumé. Observé sur Mistral Large : 200 mots
-    # entrecoupés de citations, pour 110 demandés.
-    defauts: list[str] = []
+    meilleures: list[str] = []
+    motifs: list[str] = []
+    # Deux essais au plus. Un rejet l'est pour une raison précise (une heure
+    # absente des sources citées, un détail prêté à la mauvaise pièce), que
+    # le modèle corrige presque toujours quand on la lui donne. La forme
+    # (longueur, citations recopiées) déclenche aussi le second essai, mais
+    # n'écarte jamais des phrases fidèles. On garde le meilleur des deux.
     for essai in range(2):
         consigne = prompt if essai == 0 else (
-            f"{prompt}\n\nTa proposition précédente a été écartée :\n« {texte} »\n"
-            f"Motif : {' ; '.join(problemes + defauts)}. Réécris le paragraphe en corrigeant "
-            "ces points, sans rien ajouter qui ne figure dans les éléments fournis."
+            f"{prompt}\n\nTa proposition précédente a été en partie écartée :\n"
+            + "\n".join(f"- {m}" for m in motifs)
+            + "\nRédige de nouveau le résumé complet en corrigeant ces points, sans rien "
+            "ajouter qui ne figure dans les éléments cités par chaque phrase. Réponds "
+            'uniquement en JSON : {"phrases": [{"texte": "...", "sources": ["F3"]}]}.'
         )
         try:
             reponse = provider.appeler(systeme=PROMPT_RESUME, prompt=consigne, modele=config.modele_analyse)
@@ -165,19 +202,21 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
             raise
         except Exception as exc:  # noqa: BLE001
             console.print(f"  [build] échec de la génération du résumé ({exc}).")
-            return
+            break
         tokens_in += reponse.tokens_in
         tokens_out += reponse.tokens_out
-        texte = reponse.texte.strip().strip('"').strip()
-        if not texte:
-            return
-        problemes = problemes_redaction(texte, prompt)
-        defauts = defauts_de_forme(texte)
-        if not problemes and (not defauts or essai == 1):
+        retenues, rejets = _examiner(reponse.texte, elements, bloc_client, discordances, noms)
+        motifs = rejets + defauts_de_forme(" ".join(retenues))
+        if len(retenues) >= len(meilleures):
+            meilleures = retenues
+        if not motifs:
             break
-        console.print(f"  [build] résumé écarté (essai {essai + 1}/2) : {' ; '.join(problemes + defauts)}.")
-    if problemes:
+        console.print(f"  [build] résumé (essai {essai + 1}/2) : {len(retenues)} phrase(s) retenue(s), écarté : {' | '.join(motifs)}.")
+
+    if not meilleures:
+        console.print("  [build] aucun résumé retenu.")
         return
+    texte = " ".join(meilleures)
 
     maintenant = datetime.now(timezone.utc).isoformat()
     db.execute(

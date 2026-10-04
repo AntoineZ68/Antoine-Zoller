@@ -1,9 +1,11 @@
-"""Résumé de l'affaire : un court paragraphe tiré des seuls faits et
-déclarations déjà vérifiés, qui dit ce que le client reconnaît et ce qu'il
-conteste — sans jamais deviner qui est le client ni qualifier."""
+"""Résumé de l'affaire : trois ou quatre phrases tirées des seuls faits,
+actes et déclarations déjà vérifiés, chacune contrôlée contre ses propres
+sources — sans jamais deviner qui est le client, inventer, mélanger deux
+pièces ni qualifier."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -22,29 +24,40 @@ def db(tmp_path) -> sqlite3.Connection:
     db.execute("INSERT INTO pieces (id, type, page_debut, page_fin) VALUES (1, 'PV d''audition', 1, 1)")
     db.execute("INSERT INTO personnes (id, nom, role) VALUES (1, 'Lucas MARTINON', 'mis_en_cause'), (2, 'Odile SERMET', 'victime')")
     db.execute(
-        "INSERT INTO evenements_faits (piece_id, page, citation, description, statut_verif) "
-        "VALUES (1, 1, 'c', 'Cambriolage d''un pavillon à Biviers le 12/02/2026', 'verifie'), "
-        "(1, 1, 'c', 'Fait non vérifié qui ne doit jamais apparaître', 'rejete')"
+        "INSERT INTO evenements_faits (id, piece_id, page, citation, description, statut_verif) "
+        "VALUES (1, 1, 1, 'Un pavillon a été cambriolé à Biviers.', 'Cambriolage d''un pavillon à Biviers le 12/02/2026', 'verifie'), "
+        "(2, 1, 1, 'c', 'Fait non vérifié qui ne doit jamais apparaître', 'rejete'), "
+        "(3, 1, 1, 'Une Skoda grise est relevée par la LAPI.', 'Véhicule Skoda grise relevé', 'verifie')"
     )
     db.execute(
-        "INSERT INTO declarations (personne_id, piece_id, page, citation, point_factuel, statut_verif) "
-        "VALUES (1, 1, 1, 'c', 'Reconnaît avoir attendu dans la voiture le 12/02', 'verifie'), "
-        "(2, 1, 1, 'c', 'La victime a quitté son domicile à 13h30', 'verifie')"
+        "INSERT INTO declarations (id, personne_id, piece_id, page, citation, point_factuel, statut_verif) "
+        "VALUES (1, 1, 1, 1, 'J''ai attendu dans la voiture.', 'Reconnaît avoir attendu dans la voiture le 12/02', 'verifie'), "
+        "(2, 2, 1, 1, 'c', 'La victime a quitté son domicile à 13h30', 'verifie')"
     )
     db.commit()
     return db
 
 
-def _modele(monkeypatch, texte: str) -> dict:
-    vu = {}
+def _json(*phrases: tuple[str, list[str]]) -> str:
+    return json.dumps({"phrases": [{"texte": t, "sources": s} for t, s in phrases]}, ensure_ascii=False)
+
+
+BON = _json(
+    ("Un cambriolage est commis à Biviers le 12/02/2026.", ["F1"]),
+    ("Votre client, Lucas MARTINON, reconnaît avoir attendu dans la voiture.", ["D1"]),
+)
+
+
+def _modele(monkeypatch, *reponses: str) -> list[dict]:
+    appels: list[dict] = []
 
     class Faux:
         def appeler(self, systeme, prompt, modele):
-            vu["systeme"], vu["prompt"] = systeme, prompt
-            return ReponseLLM(texte=texte, tokens_in=10, tokens_out=10)
+            appels.append({"systeme": systeme, "prompt": prompt})
+            return ReponseLLM(texte=reponses[min(len(appels), len(reponses)) - 1], tokens_in=10, tokens_out=10)
 
     monkeypatch.setattr(resume, "obtenir_provider", lambda config: Faux())
-    return vu
+    return appels
 
 
 def _resume_en_base(db) -> str | None:
@@ -52,36 +65,46 @@ def _resume_en_base(db) -> str | None:
     return ligne["texte"] if ligne else None
 
 
-def test_paragraphe_nourri_des_seuls_elements_verifies(monkeypatch, db) -> None:
-    vu = _modele(monkeypatch, "Un cambriolage est commis à Biviers. Votre client, Lucas MARTINON, reconnaît avoir attendu dans la voiture.")
+def _generer(db) -> None:
     resume.generer_resume(db, Config(offline=False), Console(quiet=True))
 
-    assert "Reconnaît avoir attendu dans la voiture" in vu["prompt"], "les déclarations du mis en cause nourrissent le résumé"
-    assert "La victime a quitté" not in vu["prompt"], "seules celles du mis en cause"
-    assert "jamais apparaître" not in vu["prompt"], "jamais un fait non vérifié"
-    assert "3 à 5 phrases" in vu["systeme"]
-    assert _resume_en_base(db).startswith("Un cambriolage")
+
+def test_nourri_des_seuls_elements_verifies_avec_leur_citation(monkeypatch, db) -> None:
+    appels = _modele(monkeypatch, BON)
+    _generer(db)
+
+    prompt = appels[0]["prompt"]
+    assert "Reconnaît avoir attendu dans la voiture" in prompt, "les déclarations du mis en cause nourrissent le résumé"
+    assert "« J'ai attendu dans la voiture. »" in prompt, "avec leur citation : le point factuel n'est souvent que le sujet"
+    assert "La victime a quitté" not in prompt, "seules celles du mis en cause"
+    assert "jamais apparaître" not in prompt, "jamais un fait non vérifié"
+    assert "3 ou 4 phrases" in appels[0]["systeme"]
+    assert len(appels) == 1, "un résumé entièrement retenu ne coûte qu'un appel"
+    assert _resume_en_base(db) == (
+        "Un cambriolage est commis à Biviers le 12/02/2026. "
+        "Votre client, Lucas MARTINON, reconnaît avoir attendu dans la voiture."
+    )
 
 
 def test_votre_client_seulement_avec_un_seul_mis_en_cause(monkeypatch, db) -> None:
-    vu = _modele(monkeypatch, "Résumé.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "« votre client, Lucas MARTINON »" in vu["prompt"]
+    appels = _modele(monkeypatch, BON)
+    _generer(db)
+    assert "« votre client, Lucas MARTINON »" in appels[0]["prompt"]
 
 
 def test_plusieurs_mis_en_cause_jamais_votre_client(monkeypatch, db) -> None:
     """Avec des coauteurs, l'outil ne sait pas lequel l'avocat défend."""
     db.execute("INSERT INTO personnes (nom, role) VALUES ('Yannick FONTANEL', 'mis_en_cause')")
     db.commit()
-    vu = _modele(monkeypatch, "Résumé.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "sans jamais écrire « votre client »" in vu["prompt"]
-    assert "désigne-la comme" not in vu["prompt"]
+    appels = _modele(monkeypatch, BON)
+    _generer(db)
+    assert "sans jamais écrire « votre client »" in appels[0]["prompt"]
+    assert "désigne-la comme" not in appels[0]["prompt"]
 
 
-def test_resume_qui_qualifie_ecarte(monkeypatch, db) -> None:
-    _modele(monkeypatch, "La géolocalisation est entachée de nullité, ce qui fragilise l'accusation.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+def test_phrase_qui_qualifie_ecartee(monkeypatch, db) -> None:
+    _modele(monkeypatch, _json(("La géolocalisation est entachée de nullité.", ["F1"])))
+    _generer(db)
     assert _resume_en_base(db) is None
 
 
@@ -101,83 +124,89 @@ def test_client_designe_par_l_avocat_meme_avec_coauteurs(monkeypatch, db) -> Non
     )
     db.execute("UPDATE personnes SET est_client = 1 WHERE nom = 'Lucas MARTINON'")
     db.commit()
-    vu = _modele(monkeypatch, "Résumé.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "« votre client, Lucas MARTINON »" in vu["prompt"]
-    assert "Reconnaît avoir attendu" in vu["prompt"]
-    assert "Refuse de donner" not in vu["prompt"], "pas les déclarations du coauteur"
+    appels = _modele(monkeypatch, BON)
+    _generer(db)
+    assert "« votre client, Lucas MARTINON »" in appels[0]["prompt"]
+    assert "Reconnaît avoir attendu" in appels[0]["prompt"]
+    assert "Refuse de donner" not in appels[0]["prompt"], "pas les déclarations du coauteur"
 
 
 def test_partie_civile_la_victime_peut_etre_le_client(monkeypatch, db) -> None:
     db.execute("UPDATE personnes SET est_client = 1 WHERE nom = 'Odile SERMET'")
     db.commit()
-    vu = _modele(monkeypatch, "Résumé.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "« votre client, Odile SERMET »" in vu["prompt"]
-    assert "La victime a quitté" in vu["prompt"]
+    appels = _modele(monkeypatch, BON)
+    _generer(db)
+    assert "« votre client, Odile SERMET »" in appels[0]["prompt"]
+    assert "La victime a quitté" in appels[0]["prompt"]
 
 
-def _modele_successif(monkeypatch, textes: list[str]) -> list[dict]:
-    appels: list[dict] = []
-
-    class Faux:
-        def appeler(self, systeme, prompt, modele):
-            appels.append({"systeme": systeme, "prompt": prompt})
-            return ReponseLLM(texte=textes[len(appels) - 1], tokens_in=10, tokens_out=10)
-
-    monkeypatch.setattr(resume, "obtenir_provider", lambda config: Faux())
-    return appels
-
-
-def test_la_citation_de_la_declaration_est_fournie(monkeypatch, db) -> None:
-    """Le « point factuel » d'une audition n'est souvent que le sujet de la
-    question : sans la réponse citée, le modèle l'inventait."""
-    db.execute(
-        "INSERT INTO declarations (personne_id, piece_id, page, citation, point_factuel, statut_verif) "
-        "VALUES (1, 1, 1, 'Je suis arrivé vers 22 heures.', 'heure d''arrivée sur les lieux', 'verifie')"
-    )
-    db.commit()
-    vu = _modele(monkeypatch, "Résumé.")
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "« Je suis arrivé vers 22 heures. »" in vu["prompt"]
-
-
-def test_resume_invente_corrige_au_second_essai(monkeypatch, db) -> None:
-    appels = _modele_successif(monkeypatch, [
-        "Des violences sont reprochées à Lucas MARTINON à Biviers vers 21h00.",
-        "Un cambriolage est commis à Biviers le 12/02/2026. Lucas MARTINON reconnaît avoir attendu dans la voiture.",
-    ])
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+def test_detail_prete_a_la_mauvaise_piece_ecarte(monkeypatch, db) -> None:
+    """Observé sur Mistral Large : « le témoin déclare avoir vu une Clio
+    blanche immatriculée GH-482-KL » — la plaque venait d'une autre pièce.
+    Chaque phrase est contrôlée contre SES sources : la Skoda (F3) prêtée à
+    la déclaration du client (D1) est écartée."""
+    appels = _modele(monkeypatch, _json(
+        ("Un cambriolage est commis à Biviers le 12/02/2026.", ["F1"]),
+        ("Votre client, Lucas MARTINON, reconnaît avoir attendu dans la Skoda grise.", ["D1"]),
+    ), BON)
+    _generer(db)
     assert len(appels) == 2
-    assert "violences" in appels[1]["prompt"] and "21h00" in appels[1]["prompt"], "le motif est donné au modèle"
+    assert "Skoda" in appels[1]["prompt"] and "(sources citées : D1)" in appels[1]["prompt"], "le motif est donné au modèle"
+    assert "Skoda" not in _resume_en_base(db)
+
+
+def test_invention_corrigee_au_second_essai(monkeypatch, db) -> None:
+    appels = _modele(monkeypatch, _json(
+        ("Des violences sont reprochées à Lucas MARTINON vers 21h00.", ["F1"]),
+    ), BON)
+    _generer(db)
+    assert len(appels) == 2
+    assert "violences" in appels[1]["prompt"] and "21h00" in appels[1]["prompt"]
     assert _resume_en_base(db).startswith("Un cambriolage")
 
 
-def test_resume_invente_deux_fois_ecarte(monkeypatch, db) -> None:
-    appels = _modele_successif(monkeypatch, [
-        "Entre février 2026 et février 2026, un cambriolage est commis.",
-        "Un cambriolage est commis à Grenoble.",
-    ])
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+def test_le_meilleur_des_deux_essais_est_garde(monkeypatch, db) -> None:
+    """Des phrases fidèles ne sont jamais perdues parce que le second essai
+    fait moins bien."""
+    appels = _modele(monkeypatch, _json(
+        ("Un cambriolage est commis à Biviers le 12/02/2026.", ["F1"]),
+        ("Lucas MARTINON est mis en examen.", ["D1"]),
+    ), _json(("Entre février 2026 et février 2026, un cambriolage est commis.", ["F1"])))
+    _generer(db)
     assert len(appels) == 2
+    assert _resume_en_base(db) == "Un cambriolage est commis à Biviers le 12/02/2026."
+
+
+def test_phrase_sans_source_ecartee(monkeypatch, db) -> None:
+    _modele(monkeypatch, _json(("Un cambriolage est commis à Biviers.", [])), _json(("Un cambriolage est commis à Biviers.", ["F9"])))
+    _generer(db)
     assert _resume_en_base(db) is None
 
 
-def test_resume_trop_long_reecrit_mais_jamais_perdu(monkeypatch, db) -> None:
-    """La forme déclenche un second essai, mais un résumé fidèle et un peu
-    long vaut mieux qu'aucun résumé."""
-    long = "Un cambriolage est commis à Biviers. " + "Lucas MARTINON reconnaît avoir attendu dans la voiture. " * 20
-    appels = _modele_successif(monkeypatch, [long, long])
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+def test_trop_long_reecrit_mais_jamais_perdu(monkeypatch, db) -> None:
+    long = "Votre client, Lucas MARTINON, reconnaît avoir attendu " + "longuement " * 200 + "dans la voiture."
+    appels = _modele(monkeypatch, _json((long, ["D1"])))
+    _generer(db)
     assert len(appels) == 2 and "mots, pour 110 au plus" in appels[1]["prompt"]
-    assert _resume_en_base(db) == long.strip()
+    assert _resume_en_base(db) == long
 
 
-def test_resume_qui_recopie_des_citations_reecrit(monkeypatch, db) -> None:
-    appels = _modele_successif(monkeypatch, [
-        "Lucas MARTINON reconnaît « avoir attendu dans la voiture ».",
-        "Lucas MARTINON reconnaît avoir attendu dans la voiture.",
-    ])
-    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
-    assert "guillemets" in appels[1]["prompt"]
-    assert _resume_en_base(db) == "Lucas MARTINON reconnaît avoir attendu dans la voiture."
+def test_numero_d_element_recopie_retire(monkeypatch, db) -> None:
+    _modele(monkeypatch, _json(("Un cambriolage est commis à Biviers le 12/02/2026 (F1).", ["F1"])))
+    _generer(db)
+    assert _resume_en_base(db) == "Un cambriolage est commis à Biviers le 12/02/2026."
+
+
+def test_une_seule_version_d_une_discordance_reecrite(monkeypatch, db) -> None:
+    """Observé : cinq résumés sur cinq disaient « interpellé à 07h50 » quand
+    une autre pièce dit 08h05. La discordance est connue des règles fixes :
+    la phrase qui n'en garde qu'une version est renvoyée au modèle."""
+    monkeypatch.setattr(resume, "discordances_connues", lambda db: [("Cambriolage", ["12/02/2026", "13/02/2026"])])
+    appels = _modele(monkeypatch, BON, _json(
+        ("Un cambriolage est commis à Biviers le 12/02/2026 ou le 13/02/2026.", ["F1"]),
+    ))
+    db.execute("UPDATE evenements_faits SET description = description || ' ou le 13/02/2026' WHERE id = 1")
+    db.commit()
+    _generer(db)
+    assert len(appels) == 2 and "donne chaque version" in appels[1]["prompt"]
+    assert _resume_en_base(db) == "Un cambriolage est commis à Biviers le 12/02/2026 ou le 13/02/2026."

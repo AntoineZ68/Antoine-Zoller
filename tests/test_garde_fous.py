@@ -95,3 +95,32 @@ def test_mots_de_comptage_acceptes(texte) -> None:
         "couleur blanche. procès-verbaux"
     )
     assert elements_absents(texte, sources) == []
+
+
+DISCORDANCES = [
+    ("Interpellation de Julien MORVANNEC", ["07h50", "08h05"]),
+    ("Plaque d'immatriculation", ["GH-428-KL", "GH-482-KL"]),
+]
+
+
+@pytest.mark.parametrize("texte, tue", [
+    ("Julien MORVANNEC a été interpellé le 14/03/2031 à 07h50.", True),
+    ("Julien MORVANNEC a été interpellé à 07h50 selon un PV, à 08h05 selon un autre.", False),
+    ("Interpellé à 7 h 50 ou à 8 h 05 selon les pièces.", False),
+    ("Le véhicule immatriculé GH 428 KL est stationné devant le domicile.", True),
+    ("Il a été placé en garde à vue à 08h15.", False),
+])
+def test_version_unique_d_une_discordance_signalee(texte, tue) -> None:
+    from depouille.garde_fous import versions_tues
+
+    assert bool(versions_tues(texte, DISCORDANCES)) is tue
+
+
+def test_nom_complete_seulement_s_il_est_deja_en_partie_dans_la_reference() -> None:
+    from depouille.garde_fous import avec_noms_completes
+
+    noms = ["Camille ARZANO", "Lucas MARTINON", "Pierre DUVAL"]
+    reference = avec_noms_completes("J'ai discuté avec Camille. Une pierre a été lancée.", noms)
+    assert elements_absents("Il a discuté avec Camille ARZANO.", reference) == []
+    assert "MARTINON" in elements_absents("Il a discuté avec Lucas MARTINON.", reference), "aucune partie du nom n'y figure"
+    assert "DUVAL" in elements_absents("Pierre DUVAL a lancé une pierre.", reference), "« pierre » n'y est pas un nom propre"

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import RE_JUGEMENT, contient_qualification, elements_absents
+from .garde_fous import RE_JUGEMENT, avec_noms_completes, contient_qualification, elements_absents, noms_identifies
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .recoupements import occurrences_identifiants
 from .resume_detaille import _elements, sans_references
@@ -183,6 +183,18 @@ def contradictions_par_regles(db: sqlite3.Connection) -> list[Contradiction]:
     return _actes_dates_differemment(db) + _identifiants_proches(db)
 
 
+def discordances_connues(db: sqlite3.Connection) -> list[tuple[str, list[str]]]:
+    """Les versions de chaque discordance établie par les règles fixes :
+    [("Interpellation de Julien MORVANNEC", ["07h50", "08h05"])]. Un résumé
+    qui n'en reprend qu'une tranche en silence (voir versions_tues)."""
+    discordances = []
+    for c in contradictions_par_regles(db):
+        libelle, _, versions = c.titre.rpartition(" : ")
+        if libelle and " ou " in versions:
+            discordances.append((libelle, versions.split(" ou ")))
+    return discordances
+
+
 # --- Propositions du modèle ------------------------------------------------
 
 PROMPT = (
@@ -206,7 +218,7 @@ PROMPT = (
 )
 
 
-def proposition_retenue(proposition: dict, elements: dict[str, dict]) -> Contradiction | None:
+def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list[str] = ()) -> Contradiction | None:
     if not isinstance(proposition, dict):
         return None
     titre = sans_references(re.sub(r"\s+", " ", str(proposition.get("titre") or "")).strip(), elements)
@@ -219,7 +231,7 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict]) -> Contrad
     texte = f"{titre} {description}"
     if contient_qualification(texte) or RE_JUGEMENT.search(texte):
         return None
-    if elements_absents(texte, "\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources)):
+    if elements_absents(texte, avec_noms_completes("\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources), noms)):
         return None
     domaine = proposition.get("domaine") if proposition.get("domaine") in ("procedure", "fond") else "fond"
     return Contradiction(
@@ -253,7 +265,8 @@ def generer_contradictions(db: sqlite3.Connection, config: Config, console: Cons
         console.print(f"  [build] contradictions non générées ({exc}).")
         return 0
 
-    retenues = [c for c in map(lambda p: proposition_retenue(p, elements), propositions if isinstance(propositions, list) else []) if c]
+    noms = noms_identifies(db)
+    retenues = [c for c in (proposition_retenue(p, elements, noms) for p in (propositions if isinstance(propositions, list) else [])) if c]
     for ordre, c in enumerate(retenues[:MAX_PROPOSITIONS_MODELE], 1):
         db.execute(
             "INSERT INTO contradictions (ordre, domaine, titre, description, sources_json) VALUES (?, ?, ?, ?, ?)",

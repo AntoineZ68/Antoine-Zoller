@@ -24,7 +24,7 @@ import sqlite3
 import unicodedata
 
 from .config import Config
-from .garde_fous import RE_QUALIFICATION, problemes_redaction
+from .garde_fous import RE_QUALIFICATION, avec_noms_completes, noms_identifies, problemes_redaction
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .verification import verifier_citation
 
@@ -172,9 +172,9 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
     # citées (un détail venu d'ailleurs, ou de la connaissance du modèle)
     # n'est pas affiché — seuls les passages vérifiés le sont.
     pages_citees = {c["page"] for c in citations_verifiees}
-    reference = "\n".join(
-        [question, client["nom"] if client else ""]
-        + [pages_par_numero[n]["texte"] for n in sorted(pages_citees)]
+    reference = avec_noms_completes(
+        "\n".join([question] + [pages_par_numero[n]["texte"] for n in sorted(pages_citees)]),
+        noms_identifies(db),
     )
     if problemes_redaction(texte_reponse, reference):
         return {"statut": "passages", "reponse": MESSAGE_PASSAGES, "citations": citations_verifiees}

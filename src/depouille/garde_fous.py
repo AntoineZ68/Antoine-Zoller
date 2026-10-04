@@ -78,7 +78,7 @@ NOMBRES_AMBIGUS = frozenset({"un", "une", "neuf"})
 DIZAINES_ET = frozenset({"vingt", "trente", "quarante", "cinquante", "soixante"})
 UNITES = frozenset({
     "an", "ans", "annee", "annees", "mois", "semaine", "semaines", "jour", "jours",
-    "nuit", "nuits", "heure", "heures", "minute", "minutes", "seconde", "secondes",
+    "nuit", "nuits", "heure", "heures", "minute", "minutes",
     "fois", "euro", "euros", "metre", "metres", "kilometre", "kilometres", "km",
     "personne", "personnes", "individu", "individus", "homme", "hommes", "femme",
     "femmes", "enfant", "enfants", "coup", "coups", "balle", "balles", "vehicule",
@@ -209,7 +209,7 @@ UNITES_DUREE = {
     "an": "an", "ans": "an", "annee": "an", "annees": "an", "mois": "mois",
     "semaine": "semaine", "semaines": "semaine", "jour": "jour", "jours": "jour",
     "nuit": "nuit", "nuits": "nuit", "minute": "minute", "minutes": "minute",
-    "seconde": "seconde", "secondes": "seconde",
+    # Pas « seconde » : « une seconde audition » n'est pas une durée.
 }
 
 
@@ -281,6 +281,70 @@ def elements_absents(texte: str, reference: str) -> list[str]:
                 absents.append(mot)
                 break
     return list(dict.fromkeys(absents))
+
+
+def noms_identifies(db) -> list[str]:
+    return [r[0] for r in db.execute("SELECT nom FROM personnes") if r[0]]
+
+
+def avec_noms_completes(reference: str, noms: list[str]) -> str:
+    """Ajoute à une référence le nom complet des personnes identifiées dont
+    une partie y figure déjà comme nom propre : une audition dit « Camille »,
+    le modèle écrit à bon droit « Camille ARZANO » (observé : la phrase sur
+    les déclarations du client, la plus utile, écartée pour ce motif). Un
+    nom dont rien ne figure dans la référence reste refusé — y compris celui
+    d'une personne identifiée ailleurs : pas de nom prêté à la mauvaise
+    pièce."""
+    # Toute majuscule initiale compte ici, même en début de phrase : « René
+    # décrit un break » nomme René. Un nom commun (« une pierre ») non.
+    propres = {
+        _normaliser(partie) for mot in RE_MOT.findall(reference) if mot[0].isupper()
+        for partie in re.split(r"['’-]", mot)
+    }
+    complets = [
+        nom for nom in noms
+        if any(len(partie) >= 3 and partie in propres for partie in re.findall(r"[a-z]+", _normaliser(nom)))
+    ]
+    return "\n".join([reference] + complets)
+
+
+def _version_citee(version: str, texte: str) -> bool:
+    heures = horaires(version)
+    if heures and heures & horaires(texte):
+        return True
+    compacter = lambda t: re.sub(r"[\s\-.]", "", _normaliser(t))  # noqa: E731
+    return compacter(version) in compacter(texte)
+
+
+def versions_tues(texte: str, discordances: list[tuple[str, list[str]]]) -> list[str]:
+    """Une phrase qui reprend une seule des versions d'une discordance connue
+    du dossier la tranche en silence : « interpellé à 07h50 » quand une autre
+    pièce dit 08h05 (observé : cinq résumés sur cinq). `discordances` :
+    [(libellé, [version, version…])], tirées des contradictions par règles."""
+    problemes = []
+    for libelle, versions in discordances:
+        citees = [v for v in versions if _version_citee(v, texte)]
+        if citees and len(citees) < len(versions):
+            autres = [v for v in versions if v not in citees]
+            problemes.append(
+                f"une seule version ({', '.join(citees)}) de « {libelle} » : le dossier dit aussi "
+                f"{', '.join(autres)} — donne chaque version"
+            )
+    return problemes
+
+
+def bloc_discordances(discordances: list[tuple[str, list[str]]]) -> str:
+    """À joindre au prompt : le modèle les rapporte d'emblée, et dans la
+    bonne forme (observé : « interpellé à 07h50, puis à nouveau à 08h05 »,
+    deux interpellations là où le dossier en date une de deux façons)."""
+    if not discordances:
+        return ""
+    return (
+        "\n\nDiscordances établies entre les pièces : si tu évoques l'un de ces points, "
+        "donne chaque version, sous la forme « à 07h50 ou à 08h05 selon les pièces », "
+        "jamais comme deux événements successifs :\n"
+        + "\n".join(f"- {libelle} : {' ou '.join(versions)}" for libelle, versions in discordances)
+    )
 
 
 # Une période dont les deux bornes sont identiques (« entre mars 2031 et

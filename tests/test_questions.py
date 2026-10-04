@@ -156,3 +156,16 @@ def test_reponse_qui_avance_un_element_absent_des_pages_citees(monkeypatch, db) 
 
 def test_consigne_de_donner_chaque_version(monkeypatch, db) -> None:
     assert "donne chaque version avec sa page" in questions.PROMPT_SYSTEME
+
+
+def test_nom_complete_par_une_personne_identifiee(monkeypatch, db) -> None:
+    """La page citée dit « René » ; « René CHABERT » est une personne
+    identifiée du dossier : la réponse n'invente rien."""
+    db.execute("INSERT INTO personnes (nom, role) VALUES ('René CHABERT', 'témoin')")
+    db.execute("UPDATE pages SET texte = 'René décrit un break blanc stationné devant le portail.' WHERE numero_global = 2")
+    db.commit()
+    _modele(monkeypatch, {
+        "reponse": "René CHABERT décrit un break blanc.",
+        "citations": [{"page": 2, "citation": "René décrit un break blanc"}],
+    })
+    assert questions.repondre_question(db, Config(offline=False), "Qui a vu le break ?")["statut"] == "sourcee"

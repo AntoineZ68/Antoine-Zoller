@@ -25,7 +25,7 @@ import sqlite3
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import problemes_redaction
+from .garde_fous import avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 
 SECTIONS = (
@@ -123,15 +123,18 @@ def sans_references(texte: str, elements: dict[str, dict]) -> str:
     return re.sub(r"\s{2,}", " ", RE_GROUPE_DE_REFERENCES.sub(remplacer, texte)).strip()
 
 
-def phrase_retenue(texte: str, sources: list[str], elements: dict[str, dict]) -> list[str] | None:
+def phrase_retenue(
+    texte: str, sources: list[str], elements: dict[str, dict],
+    discordances: list[tuple[str, list[str]]] = (), noms: list[str] = (),
+) -> list[str] | None:
     """Renvoie les numéros de sources valides si la phrase passe les trois
     contrôles, None sinon."""
     valides = [s for s in dict.fromkeys(sources) if s in elements]
     if not texte or not valides:
         return None
     # Les pages des sources font partie de la référence : « (p. 4) » est exact.
-    reference = "\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in valides)
-    if problemes_redaction(texte, reference):
+    reference = avec_noms_completes("\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in valides), noms)
+    if problemes_redaction(texte, reference) or versions_tues(texte, discordances):
         return None
     return valides
 
@@ -158,7 +161,12 @@ def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Con
     if not elements:
         return 0
 
+    from .contradictions import discordances_connues  # import ici : contradictions importe ce module
+
+    discordances = discordances_connues(db)
+    noms = noms_identifies(db)
     texte = "\n".join(f"[{cle}] (p. {e['page']}) {e['ligne']}" for cle, e in elements.items())
+    texte += bloc_discordances(discordances)
     try:
         reponse = obtenir_provider(config).appeler(systeme=PROMPT, prompt=texte, modele=config.modele_analyse)
         sections = extraire_json(reponse.texte).get("sections", [])
@@ -181,7 +189,7 @@ def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Con
             proposees += 1
             texte_phrase = sans_references(re.sub(r"\s+", " ", (phrase.get("texte") or "")).strip(), elements)
             sources = phrase.get("sources") or []
-            valides = phrase_retenue(texte_phrase, [str(s) for s in sources], elements)
+            valides = phrase_retenue(texte_phrase, [str(s) for s in sources], elements, discordances, noms)
             if valides:
                 lignes.append((texte_phrase, sources_distinctes(valides, elements)))
         if not lignes:
