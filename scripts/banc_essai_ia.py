@@ -34,6 +34,7 @@ Le rapport complet (rapport.md) est écrit dans le dossier de sortie.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sqlite3
 import sys
@@ -299,7 +300,9 @@ def traiter(pdf: Path, sortie: Path, config, verite=None, essai: int | None = No
         import shutil
 
         shutil.rmtree(affaire)
-    console = Console(record=True, quiet=True, width=160)
+    # Pas quiet=True : une console muette n'enregistre rien non plus, et le
+    # journal des rejets (garde-fous) restait vide dans le rapport.
+    console = Console(record=True, file=io.StringIO(), width=160)
     db = ouvrir_db(affaire / "depouille.db")
     debut = time.monotonic()
     lancer_ingestion(db, [pdf], affaire, force=False, console=console)

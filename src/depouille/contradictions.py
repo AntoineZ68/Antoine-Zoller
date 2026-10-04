@@ -41,7 +41,7 @@ from .config import Config
 from .garde_fous import RE_JUGEMENT, contient_qualification, elements_absents
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .recoupements import occurrences_identifiants
-from .resume_detaille import _elements
+from .resume_detaille import _elements, sans_references
 
 # Actes qui n'ont lieu qu'une fois par personne et par mesure : deux heures
 # différentes pour l'un d'eux, c'est deux pièces qui ne concordent pas. La
@@ -209,8 +209,8 @@ PROMPT = (
 def proposition_retenue(proposition: dict, elements: dict[str, dict]) -> Contradiction | None:
     if not isinstance(proposition, dict):
         return None
-    titre = re.sub(r"\s+", " ", str(proposition.get("titre") or "")).strip()
-    description = re.sub(r"\s+", " ", str(proposition.get("description") or "")).strip()
+    titre = sans_references(re.sub(r"\s+", " ", str(proposition.get("titre") or "")).strip(), elements)
+    description = sans_references(re.sub(r"\s+", " ", str(proposition.get("description") or "")).strip(), elements)
     sources = [s for s in dict.fromkeys(str(x) for x in proposition.get("sources") or []) if s in elements]
     if not titre or not description or len(sources) < 2:
         return None
@@ -219,7 +219,7 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict]) -> Contrad
     texte = f"{titre} {description}"
     if contient_qualification(texte) or RE_JUGEMENT.search(texte):
         return None
-    if elements_absents(texte, "\n".join(elements[s]["ligne"] for s in sources)):
+    if elements_absents(texte, "\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources)):
         return None
     domaine = proposition.get("domaine") if proposition.get("domaine") in ("procedure", "fond") else "fond"
     return Contradiction(

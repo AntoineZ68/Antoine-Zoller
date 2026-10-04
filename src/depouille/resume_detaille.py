@@ -104,13 +104,33 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
     return elements
 
 
+RE_GROUPE_DE_REFERENCES = re.compile(
+    r"\s*[(\[]\s*[FPD]\d+(?:\s*(?:,|;|/|et)\s*[FPD]\d+)*\s*[)\]]"
+)
+
+
+def sans_references(texte: str, elements: dict[str, dict]) -> str:
+    """Retire les numéros d'éléments entre parenthèses ou crochets
+    (« (F6) », « [D3, D7] ») que le modèle recopie parfois : ils ne disent
+    rien à l'avocat — les sources sont affichées à côté — et leurs chiffres
+    passaient pour des nombres inventés (observé : des contradictions exactes
+    écartées). Seuls les groupes faits de numéros existants sont retirés :
+    une cote « (D0003) » reste. Un numéro employé comme un mot (« selon
+    D3 ») n'est pas retiré : la phrase serait bancale, elle sera écartée."""
+    def remplacer(m: re.Match) -> str:
+        return "" if all(r in elements for r in re.findall(r"[FPD]\d+", m.group(0))) else m.group(0)
+
+    return re.sub(r"\s{2,}", " ", RE_GROUPE_DE_REFERENCES.sub(remplacer, texte)).strip()
+
+
 def phrase_retenue(texte: str, sources: list[str], elements: dict[str, dict]) -> list[str] | None:
     """Renvoie les numéros de sources valides si la phrase passe les trois
     contrôles, None sinon."""
     valides = [s for s in dict.fromkeys(sources) if s in elements]
     if not texte or not valides:
         return None
-    reference = "\n".join(elements[s]["ligne"] for s in valides)
+    # Les pages des sources font partie de la référence : « (p. 4) » est exact.
+    reference = "\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in valides)
     if problemes_redaction(texte, reference):
         return None
     return valides
@@ -159,7 +179,7 @@ def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Con
             if not isinstance(phrase, dict):
                 continue
             proposees += 1
-            texte_phrase = re.sub(r"\s+", " ", (phrase.get("texte") or "")).strip()
+            texte_phrase = sans_references(re.sub(r"\s+", " ", (phrase.get("texte") or "")).strip(), elements)
             sources = phrase.get("sources") or []
             valides = phrase_retenue(texte_phrase, [str(s) for s in sources], elements)
             if valides:

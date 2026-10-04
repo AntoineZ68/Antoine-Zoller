@@ -230,3 +230,24 @@ def test_discordance_trouvee_par_les_regles_et_le_modele_affichee_une_fois(db) -
     )
     db.commit()
     assert [c.origine for c in toutes_les_contradictions(db)] == ["regle"]
+
+
+def test_numeros_d_elements_recopies_ne_font_pas_rejeter() -> None:
+    """Observé sur le banc : le modèle recopie « (F6) » dans sa description ;
+    le « 6 » passait pour un nombre inventé et la contradiction, exacte,
+    était écartée. Le numéro est retiré du texte affiché."""
+    from depouille.contradictions import proposition_retenue
+
+    elements = {
+        "F6": {"page": 3, "citation": "Interpellation effectuée le 14/03/2031 à 07h50.",
+               "ligne": "14/03/2031 — Interpellation de Julien MORVANNEC — « Interpellation effectuée le 14/03/2031 à 07h50. »"},
+        "F7": {"page": 4, "citation": "Le 14/03/2031 à 08h05, interpellation de Julien MORVANNEC.",
+               "ligne": "14/03/2031 — Interpellation — « Le 14/03/2031 à 08h05, interpellation de Julien MORVANNEC. »"},
+    }
+    c = proposition_retenue({
+        "titre": "Heure d'interpellation de Julien MORVANNEC",
+        "description": "07h50 selon un PV (F6), 08h05 selon un autre (F7), p. 3 et p. 4.",
+        "sources": ["F6", "F7"],
+    }, elements)
+    assert c is not None
+    assert c.description == "07h50 selon un PV, 08h05 selon un autre, p. 3 et p. 4."

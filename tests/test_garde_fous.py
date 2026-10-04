@@ -80,3 +80,18 @@ def test_description_de_fait_inventee_remplacee_par_la_citation() -> None:
     assert description_affichable("Interpellation de Julien MORVANNEC à 07h50.", citation, piece) == citation
     assert description_affichable("Julien MORVANNEC avoue les faits.", citation, piece) == citation
     assert description_affichable("", citation, piece) == citation
+
+
+@pytest.mark.parametrize("texte", [
+    "Julien MORVANNEC a été interpellé à deux heures différentes selon les procès-verbaux : à 07h50 et à 08h05 le 14/03/2031.",
+    "Deux versions du véhicule sont rapportées : une Renault Clio grise et une Renault Clio blanche.",
+])
+def test_mots_de_comptage_acceptes(texte) -> None:
+    """Observé sur le banc : les bonnes réponses, qui donnaient les deux
+    versions du dossier, étaient écartées pour « deux »."""
+    sources = (
+        "Interpellation effectuée le 14/03/2031 à 07h50. Le 14/03/2031 à 08h05, procédons à "
+        "l'interpellation de Julien MORVANNEC. Renault Clio de couleur grise. Renault Clio de "
+        "couleur blanche. procès-verbaux"
+    )
+    assert elements_absents(texte, sources) == []

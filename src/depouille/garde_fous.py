@@ -139,7 +139,10 @@ def _jetons_chiffres(texte_normalise: str, strict: bool) -> list[tuple[str, int 
     chiffres ou en lettres, None pour un mot ordinaire. Une suite de mots-
     nombres ne forme qu'un jeton. `strict` : « un », « une », « neuf » seuls
     ne comptent comme nombres que suivis d'une unité."""
-    bruts = re.findall(r"\d+|[a-z]+", texte_normalise)
+    # La ponctuation reste un jeton : sans elle, « vers 22 heures. » suivi de
+    # « 14/03/2031 » à la ligne se lisait 22h14, et un « 22h » exact était
+    # écarté (observé sur le banc d'essai).
+    bruts = re.findall(r"\d+|[a-z]+|[.,;:!?()«»\"\n]", texte_normalise)
     jetons: list[tuple[str, int | None]] = []
     i = 0
     while i < len(bruts):
@@ -171,12 +174,22 @@ def _jetons_chiffres(texte_normalise: str, strict: bool) -> list[tuple[str, int 
     return jetons
 
 
+# « à deux heures différentes », « deux heures distinctes » : un compte
+# d'heures, pas l'heure 02h00 (observé : la bonne réponse, qui donnait les
+# deux heures d'interpellation, était écartée).
+ADJECTIFS_DE_COMPTE = frozenset({
+    "differentes", "distinctes", "successives", "contradictoires", "divergentes", "differents",
+})
+
+
 def _horaires(jetons: list[tuple[str, int | None]]) -> list[tuple[str, tuple[int, int]]]:
     """Heures et durées en heures : « 21h10 », « 22 heures 30 »,
     « vingt-deux heures et demie », « 24 heures » → (texte, (h, min))."""
     horaires = []
     for k, (mot, valeur) in enumerate(jetons):
         if valeur is None or k + 1 >= len(jetons) or jetons[k + 1][0] not in ("h", "heure", "heures"):
+            continue
+        if k + 2 < len(jetons) and jetons[k + 2][0] in ADJECTIFS_DE_COMPTE:
             continue
         minutes = 0
         if k + 2 < len(jetons):
@@ -244,8 +257,12 @@ def elements_absents(texte: str, reference: str) -> list[str]:
     horaires_ref = {h for _, h in _horaires(jetons_ref)}
 
     absents: list[str] = []
+    # Un nombre en chiffres est toujours contrôlé. En lettres, il compte le
+    # plus souvent les éléments de la phrase elle-même (« deux versions »,
+    # « les trois témoins ») : il n'est contrôlé que s'il forme une heure ou
+    # une durée (« deux ans »), ci-dessous.
     for mot, valeur in jetons_txt:
-        if valeur is not None and valeur not in nombres_ref:
+        if valeur is not None and mot.isdigit() and valeur not in nombres_ref:
             absents.append(mot)
     absents += [libelle for libelle, h in _horaires(jetons_txt) if h not in horaires_ref]
     durees_ref = {d for _, d in _durees(jetons_ref)}
