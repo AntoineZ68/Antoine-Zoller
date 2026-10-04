@@ -54,10 +54,12 @@ from depouille.build_deliverables import construire_livrables  # noqa: E402
 from depouille.chrono import lancer_chrono  # noqa: E402
 from depouille.classify import lancer_classification  # noqa: E402
 from depouille.config import config_depuis_environnement  # noqa: E402
-from depouille.contradictions import toutes_les_contradictions  # noqa: E402
+from depouille.contradictions import discordances_connues, toutes_les_contradictions  # noqa: E402
 from depouille.db import ouvrir_db  # noqa: E402
 from depouille.declarations import lancer_declarations  # noqa: E402
-from depouille.garde_fous import contient_jugement, contient_qualification, elements_absents, horaires  # noqa: E402
+from depouille.garde_fous import (  # noqa: E402
+    contient_jugement, contient_qualification, elements_absents, horaires, versions_tues,
+)
 from depouille.gardes_a_vue import gardes_a_vue  # noqa: E402
 from depouille.index_builder import construire_index  # noqa: E402
 from depouille.ingest import lancer_ingestion  # noqa: E402
@@ -278,6 +280,17 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
                 bool(resume and "MORVANNEC" in resume[0]), (resume[0][:300] if resume else "aucun résumé"),
             ))
     if not config.offline:
+        discordances = discordances_connues(db)
+        tranchees = [
+            (origine, texte, probleme)
+            for origine, texte in _textes_du_modele(db) if origine in ("résumé", "résumé détaillé")
+            for probleme in versions_tues(texte, discordances)
+        ]
+        resultat.qualite.append((
+            "Résumés : aucune discordance du dossier tranchée en silence", not tranchees,
+            "; ".join(f"{o} : « {t[:100]} » — {p}" for o, t, p in tranchees[:3])
+            or f"{len(discordances)} discordance(s) connue(s)",
+        ))
         nb_detaille = db.execute("SELECT COUNT(*) FROM resume_detaille").fetchone()[0]
         resultat.qualite.append(("Résumé détaillé produit", nb_detaille > 0, f"{nb_detaille} phrase(s) retenue(s)"))
         faits = db.execute(
