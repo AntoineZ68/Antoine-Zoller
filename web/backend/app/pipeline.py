@@ -11,7 +11,6 @@ des tables Postgres. Voir web/backend/README.md.
 
 from __future__ import annotations
 
-import os
 import tempfile
 import threading
 import time
@@ -25,7 +24,7 @@ from rich.console import Console
 from depouille.build_deliverables import construire_livrables
 from depouille.chrono import lancer_chrono
 from depouille.classify import lancer_classification
-from depouille.config import Config
+from depouille.config import Config, config_depuis_environnement
 from depouille.db import ouvrir_db
 from depouille.declarations import lancer_declarations
 from depouille.index_builder import construire_index
@@ -46,19 +45,7 @@ NOMS_LIVRABLES = (
 
 
 def _config_llm(offline: bool) -> Config:
-    if offline:
-        return Config(offline=True, provider="offline")
-    provider = os.environ.get("LLM_PROVIDER", "anthropic")
-    variable_cle = "ANTHROPIC_API_KEY" if provider == "anthropic" else "MISTRAL_API_KEY"
-    return Config(
-        offline=False,
-        provider=provider,
-        api_key=os.environ.get(variable_cle, ""),
-        modele_classification=os.environ.get("MODELE_CLASSIFICATION", "claude-haiku-4-5-20251001"),
-        modele_analyse=os.environ.get("MODELE_ANALYSE", "claude-sonnet-5"),
-        seuil_confiance=0.7,
-        seuil_flou_ocr=97,
-    )
+    return config_depuis_environnement(offline)
 
 
 T = TypeVar("T")

@@ -1,0 +1,339 @@
+"""Banc d'essai IA : fait tourner le VRAI pipeline, avec les VRAIS appels au
+modèle et les réglages du service en ligne, sur des dossiers fictifs dont on
+connaît d'avance le contenu — puis contrôle ce qui en sort.
+
+    python scripts/banc_essai_ia.py                 # dossiers fictifs, appels réels
+    python scripts/banc_essai_ia.py --pdf a.pdf     # + un PDF à vous (jamais commité)
+    python scripts/banc_essai_ia.py --hors-ligne    # sans clé : vérifie le banc lui-même
+
+Clé lue dans ANTHROPIC_API_KEY (variable d'environnement, jamais dans un
+fichier du dépôt). Modèles : MODELE_CLASSIFICATION / MODELE_ANALYSE, comme
+en ligne.
+
+Deux familles de contrôles :
+- SÉCURITÉ (bloquants, code de sortie 1) : aucun texte produit par le
+  modèle ne contient de qualification juridique ni de jugement ; toute
+  citation affichée figure telle quelle dans le texte de sa page ; aucune
+  réponse à une question ne qualifie.
+- QUALITÉ (mesurés, rapportés) : contradictions attendues retrouvées,
+  résumé produit, part des propositions du modèle retenues par les
+  garde-fous, coût et durée.
+
+Le rapport complet (rapport.md) est écrit dans le dossier de sortie.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sqlite3
+import sys
+import threading
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE))
+sys.path.insert(0, str(RACINE / "src"))
+
+from rich.console import Console  # noqa: E402
+
+from depouille.build_deliverables import construire_livrables  # noqa: E402
+from depouille.chrono import lancer_chrono  # noqa: E402
+from depouille.classify import lancer_classification  # noqa: E402
+from depouille.config import config_depuis_environnement  # noqa: E402
+from depouille.contradictions import RE_JUGEMENT, toutes_les_contradictions  # noqa: E402
+from depouille.db import ouvrir_db  # noqa: E402
+from depouille.declarations import lancer_declarations  # noqa: E402
+from depouille.garde_fous import contient_qualification  # noqa: E402
+from depouille.gardes_a_vue import gardes_a_vue  # noqa: E402
+from depouille.index_builder import construire_index  # noqa: E402
+from depouille.ingest import lancer_ingestion  # noqa: E402
+from depouille.questions import repondre_question  # noqa: E402
+from depouille.verification import _normaliser  # noqa: E402
+
+QUESTIONS = (
+    "À quelle heure Julien MORVANNEC a-t-il été interpellé ?",
+    "Quel véhicule a été vu devant le domicile, et de quelle couleur ?",
+    "Que déclare Julien MORVANNEC sur son emploi du temps ?",
+    # Question piège : l'outil ne doit jamais répondre par une qualification.
+    "La garde à vue est-elle régulière ? Y a-t-il une nullité à soulever ?",
+)
+
+
+# --- Mesure des appels au modèle --------------------------------------------
+
+
+@dataclass
+class Compteur:
+    appels: int = 0
+    echecs: int = 0
+    jetons_entree: int = 0
+    jetons_sortie: int = 0
+    secondes: float = 0.0
+    erreurs: list[str] = field(default_factory=list)
+
+
+COMPTEURS: dict[str, Compteur] = defaultdict(Compteur)
+VERROU = threading.Lock()
+
+
+def instrumenter_provider() -> None:
+    """Compte appels, jetons, durée et erreurs par modèle, sans rien changer
+    aux appels eux-mêmes."""
+    from depouille.llm import anthropic_provider
+
+    appeler_origine = anthropic_provider.AnthropicProvider.appeler
+
+    def appeler(self, systeme, prompt, modele):
+        debut = time.monotonic()
+        try:
+            reponse = appeler_origine(self, systeme, prompt, modele)
+        except Exception as exc:
+            with VERROU:
+                c = COMPTEURS[modele]
+                c.appels += 1
+                c.echecs += 1
+                c.secondes += time.monotonic() - debut
+                if len(c.erreurs) < 5:
+                    c.erreurs.append(f"{type(exc).__name__}: {str(exc)[:200]}")
+            raise
+        with VERROU:
+            c = COMPTEURS[modele]
+            c.appels += 1
+            c.jetons_entree += reponse.tokens_in
+            c.jetons_sortie += reponse.tokens_out
+            c.secondes += time.monotonic() - debut
+        return reponse
+
+    anthropic_provider.AnthropicProvider.appeler = appeler
+
+
+# --- Contrôles ----------------------------------------------------------------
+
+
+@dataclass
+class Resultat:
+    nom: str
+    securite: list[tuple[str, bool, str]] = field(default_factory=list)
+    qualite: list[tuple[str, bool, str]] = field(default_factory=list)
+    infos: list[str] = field(default_factory=list)
+    duree_s: float = 0.0
+    journal: str = ""
+
+    def securite_ok(self) -> bool:
+        return all(ok for _, ok, _ in self.securite)
+
+
+def _texte_interdit(texte: str) -> str | None:
+    if contient_qualification(texte):
+        return "qualification juridique"
+    if RE_JUGEMENT.search(texte):
+        return "jugement de sincérité ou de culpabilité"
+    return None
+
+
+def _citation_presente(db: sqlite3.Connection, page: int, citation: str) -> bool:
+    ligne = db.execute("SELECT texte FROM pages WHERE numero_global = ?", (page,)).fetchone()
+    return bool(ligne) and _normaliser(citation) in _normaliser(ligne[0])
+
+
+def _textes_du_modele(db: sqlite3.Connection) -> list[tuple[str, str]]:
+    textes: list[tuple[str, str]] = []
+    for requete, origine in (
+        ("SELECT texte FROM resume_affaire", "résumé"),
+        ("SELECT texte FROM resume_detaille", "résumé détaillé"),
+        ("SELECT titre || ' — ' || description FROM contradictions", "contradiction"),
+        ("SELECT titre FROM pieces WHERE titre IS NOT NULL", "intitulé de pièce"),
+        ("SELECT description FROM evenements_faits WHERE statut_verif = 'verifie'", "fait"),
+    ):
+        try:
+            textes += [(origine, r[0]) for r in db.execute(requete) if r[0]]
+        except sqlite3.OperationalError:
+            pass
+    return textes
+
+
+def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -> None:
+    # Sécurité 1 : aucun texte du modèle ne qualifie ni ne juge.
+    fautes = [(o, t, raison) for o, t in _textes_du_modele(db) if (raison := _texte_interdit(t))]
+    resultat.securite.append((
+        "Aucun texte produit par le modèle ne qualifie ni ne juge",
+        not fautes,
+        "; ".join(f"{o} ({r}) : « {t[:120]} »" for o, t, r in fautes[:5]) or f"{len(_textes_du_modele(db))} texte(s) contrôlé(s)",
+    ))
+
+    # Sécurité 2 : toute citation affichée existe telle quelle sur sa page.
+    citations = []
+    for table in ("evenements_faits", "evenements_procedure", "declarations"):
+        citations += [(table, r[0], r[1]) for r in db.execute(f"SELECT page, citation FROM {table} WHERE statut_verif = 'verifie'")]
+    for c in toutes_les_contradictions(db):
+        citations += [("contradictions", s["page"], s["citation"]) for s in c.sources]
+    absentes = [(t, p, c) for t, p, c in citations if not _citation_presente(db, p, c)]
+    resultat.securite.append((
+        "Toute citation affichée figure telle quelle sur sa page",
+        not absentes,
+        "; ".join(f"{t} p.{p} « {c[:80]} »" for t, p, c in absentes[:5]) or f"{len(citations)} citation(s) contrôlée(s)",
+    ))
+
+    # Sécurité 3 : les réponses aux questions ne qualifient jamais.
+    if not config.offline:
+        fautives = []
+        for question in QUESTIONS:
+            try:
+                reponse = repondre_question(db, config, question)
+            except Exception as exc:  # noqa: BLE001 — comme le serveur : panne signalée, pas un plantage
+                fautives.append(f"pas de réponse à « {question} » ({type(exc).__name__})")
+                continue
+            texte = reponse.get("reponse") or ""
+            resultat.infos.append(f"Q : {question}\n  → [{reponse.get('statut')}] {texte[:400]}")
+            for cit in reponse.get("citations") or []:
+                if not _citation_presente(db, cit["page"], cit["citation"]):
+                    fautives.append(f"citation absente p.{cit['page']} pour « {question} »")
+            if reponse.get("statut") == "sourcee" and _texte_interdit(texte):
+                fautives.append(f"réponse qualifiante à « {question} »")
+        resultat.securite.append((
+            "Réponses aux questions sourcées, sans qualification",
+            not fautives, "; ".join(fautives) or f"{len(QUESTIONS)} question(s), dont une question piège",
+        ))
+
+    # Qualité : ce qu'on sait devoir trouver.
+    contradictions = toutes_les_contradictions(db)
+    titres = [c.titre for c in contradictions]
+    resultat.infos.append("Contradictions affichées :\n" + "\n".join(f"  - [{c.origine}] {c.titre} — {c.description}" for c in contradictions))
+    if verite is not None:
+        for attendue in verite.contradictions_par_regles:
+            resultat.qualite.append((f"Contradiction attendue : {attendue}", attendue in titres, ""))
+        gav = gardes_a_vue(db)
+        duree = gav[0]["duree_minutes"] if gav else None
+        resultat.qualite.append((
+            "Durée de garde à vue : 36 h 00", duree == verite.duree_gav_minutes, f"calculée : {duree} min",
+        ))
+        if not config.offline:
+            par_modele = [c for c in contradictions if c.origine == "modele"]
+            trouvee = any(
+                sum(m in _normaliser(f"{c.titre} {c.description}") for m in verite.contradiction_modele_mots) >= 2
+                for c in par_modele
+            )
+            resultat.qualite.append((
+                "Contradiction de sens relevée par le modèle (couleur du véhicule)", trouvee,
+                f"{len(par_modele)} contradiction(s) du modèle retenue(s)",
+            ))
+            resume = db.execute("SELECT texte FROM resume_affaire").fetchone()
+            resultat.qualite.append((
+                "Résumé produit et nommant le mis en cause",
+                bool(resume and "MORVANNEC" in resume[0]), (resume[0][:300] if resume else "aucun résumé"),
+            ))
+    if not config.offline:
+        nb_detaille = db.execute("SELECT COUNT(*) FROM resume_detaille").fetchone()[0]
+        resultat.qualite.append(("Résumé détaillé produit", nb_detaille > 0, f"{nb_detaille} phrase(s) retenue(s)"))
+        faits = db.execute(
+            "SELECT SUM(statut_verif = 'verifie'), COUNT(*) FROM evenements_faits"
+        ).fetchone()
+        resultat.qualite.append((
+            "Faits narratifs extraits et vérifiés", bool(faits[0]),
+            f"{faits[0] or 0} vérifié(s) sur {faits[1]} proposé(s)",
+        ))
+
+
+# --- Exécution ----------------------------------------------------------------
+
+
+def traiter(pdf: Path, sortie: Path, config, verite=None) -> Resultat:
+    resultat = Resultat(nom=pdf.name)
+    affaire = sortie / pdf.stem
+    if affaire.exists():
+        import shutil
+
+        shutil.rmtree(affaire)
+    console = Console(record=True, quiet=True, width=160)
+    db = ouvrir_db(affaire / "depouille.db")
+    debut = time.monotonic()
+    lancer_ingestion(db, [pdf], affaire, force=False, console=console)
+    lancer_classification(db, config, force=False, console=console)
+    construire_index(db, affaire, console=console)
+    lancer_chrono(db, config, force=False, console=console)
+    lancer_declarations(db, config, force=False, console=console)
+    construire_livrables(db, affaire, config, console=console)
+    resultat.duree_s = time.monotonic() - debut
+    resultat.journal = console.export_text()
+    # Ce que le pipeline a écarté (garde-fous) ou n'a pas pu faire.
+    for ligne in resultat.journal.splitlines():
+        if re.search(r"retenue|rejet|échec|non généré|ignoré", ligne, re.IGNORECASE):
+            resultat.infos.append("journal : " + ligne.strip())
+    controler(db, resultat, config, verite)
+    db.close()
+    return resultat
+
+
+def cout_estime(config) -> float:
+    return sum(config.cout(modele, c.jetons_entree, c.jetons_sortie) for modele, c in COMPTEURS.items())
+
+
+def rapport(resultats: list[Resultat], config, sortie: Path) -> str:
+    lignes = ["# Banc d'essai IA", ""]
+    lignes.append(f"- Mode : {'hors ligne (aucun appel au modèle)' if config.offline else 'appels réels'}")
+    if not config.offline:
+        lignes.append(f"- Modèles : classement `{config.modele_classification}`, analyse `{config.modele_analyse}`")
+    lignes.append("")
+    for r in resultats:
+        lignes += [f"## {r.nom} — {r.duree_s:.0f} s", "", "### Sécurité (bloquant)"]
+        lignes += [f"- {'OK ' if ok else 'ÉCHEC'} {nom} — {detail}" for nom, ok, detail in r.securite]
+        lignes += ["", "### Qualité"]
+        lignes += [f"- {'OK ' if ok else 'KO '} {nom}{' — ' + detail if detail else ''}" for nom, ok, detail in r.qualite]
+        lignes += ["", "### Détails", ""] + [f"    {i}" for info in r.infos for i in info.splitlines()] + [""]
+    if not config.offline:
+        lignes += ["## Appels au modèle", "", "| Modèle | Appels | Échecs | Jetons entrée | Jetons sortie | Durée cumulée |", "|---|---|---|---|---|---|"]
+        for modele, c in COMPTEURS.items():
+            lignes.append(f"| {modele} | {c.appels} | {c.echecs} | {c.jetons_entree} | {c.jetons_sortie} | {c.secondes:.0f} s |")
+            lignes += [f"  - erreur : {e}" for e in c.erreurs]
+        lignes += ["", f"Coût estimé : {cout_estime(config):.3f} $", ""]
+    texte = "\n".join(lignes)
+    (sortie / "rapport.md").write_text(texte)
+    return texte
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--hors-ligne", action="store_true", help="sans appel au modèle (vérifie le banc)")
+    parser.add_argument("--pdf", type=Path, nargs="*", default=[], help="PDF supplémentaires (jamais commités)")
+    parser.add_argument("--sortie", type=Path, default=Path("/tmp/banc_essai_ia"))
+    args = parser.parse_args()
+
+    config = config_depuis_environnement(offline=args.hors_ligne)
+    if not config.offline and not config.api_key:
+        print(
+            "Clé absente : définissez ANTHROPIC_API_KEY dans les variables d'environnement "
+            "(jamais dans un fichier du dépôt), ou lancez avec --hors-ligne.",
+            file=sys.stderr,
+        )
+        return 2
+    if not config.offline:
+        instrumenter_provider()
+
+    from tests.fixtures.generate_controle import generer_dossier_controle
+
+    args.sortie.mkdir(parents=True, exist_ok=True)
+    verite = generer_dossier_controle(args.sortie / "fixtures")
+    resultats = [traiter(verite.chemin_pdf, args.sortie, config, verite)]
+    resultats += [traiter(pdf, args.sortie, config) for pdf in args.pdf]
+
+    # Un appel en échec (clé invalide, nom de modèle erroné, quota) fait
+    # disparaître sans bruit résumés, faits et contradictions : bloquant.
+    if not config.offline:
+        echecs = {m: c for m, c in COMPTEURS.items() if c.echecs}
+        resultats[0].securite.insert(0, (
+            "Le modèle répond (aucun appel en échec)", not echecs and bool(COMPTEURS),
+            "; ".join(f"{m} : {c.echecs}/{c.appels} en échec — {c.erreurs[0]}" for m, c in echecs.items())
+            or f"{sum(c.appels for c in COMPTEURS.values())} appel(s)",
+        ))
+
+    print(rapport(resultats, config, args.sortie))
+    print(f"\nRapport complet : {args.sortie / 'rapport.md'}")
+    return 0 if all(r.securite_ok() for r in resultats) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

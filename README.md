@@ -100,6 +100,24 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Banc d'essai IA
+
+Fait tourner le vrai pipeline, avec les vrais appels au modèle et les
+réglages du service en ligne, sur un dossier fictif dont on connaît le
+contenu (`tests/fixtures/generate_controle.py`), puis contrôle la sortie :
+
+```bash
+export ANTHROPIC_API_KEY=...      # variable d'environnement, jamais dans un fichier du dépôt
+python scripts/banc_essai_ia.py   # rapport dans /tmp/banc_essai_ia/rapport.md
+python scripts/banc_essai_ia.py --pdf mon_dossier.pdf   # + un PDF à vous, jamais commité
+python scripts/banc_essai_ia.py --hors-ligne            # sans clé : vérifie le banc lui-même
+```
+
+Bloquant (code de sortie 1) : un appel au modèle en échec, un texte du
+modèle qui qualifie ou juge, une citation affichée absente de sa page, une
+réponse à une question qui qualifie (une question piège est posée).
+Mesuré : contradictions attendues, résumés, faits vérifiés, coût et durée.
+
 ## Confidentialité
 
 - Tout le traitement PDF/OCR est local.

@@ -48,6 +48,40 @@ class Config:
         )
 
 
+# Modèles et tarifs (dollars par million de jetons) du service en ligne.
+# Une seule source : le serveur web et le banc d'essai IA les lisent ici,
+# pour que le banc teste exactement ce que les avocats utilisent.
+MODELE_CLASSIFICATION_PAR_DEFAUT = "claude-haiku-4-5-20251001"
+MODELE_ANALYSE_PAR_DEFAUT = "claude-sonnet-5"
+TARIFS_CONNUS = {
+    "claude-haiku-4-5": TarifModele(1.0, 5.0),
+    "claude-haiku-4-5-20251001": TarifModele(1.0, 5.0),
+    "claude-sonnet-5": TarifModele(2.0, 10.0),
+    "claude-sonnet-5-5": TarifModele(2.0, 10.0),
+    "claude-opus-5-5": TarifModele(4.0, 20.0),
+}
+
+
+def config_depuis_environnement(offline: bool) -> Config:
+    """Configuration du service en ligne : variables d'environnement
+    LLM_PROVIDER, ANTHROPIC_API_KEY / MISTRAL_API_KEY, MODELE_CLASSIFICATION,
+    MODELE_ANALYSE."""
+    if offline:
+        return Config(offline=True, provider="offline")
+    provider = os.environ.get("LLM_PROVIDER", "anthropic")
+    variable_cle = "ANTHROPIC_API_KEY" if provider == "anthropic" else "MISTRAL_API_KEY"
+    return Config(
+        offline=False,
+        provider=provider,
+        api_key=os.environ.get(variable_cle, ""),
+        modele_classification=os.environ.get("MODELE_CLASSIFICATION", MODELE_CLASSIFICATION_PAR_DEFAUT),
+        modele_analyse=os.environ.get("MODELE_ANALYSE", MODELE_ANALYSE_PAR_DEFAUT),
+        tarifs=dict(TARIFS_CONNUS),
+        seuil_confiance=0.7,
+        seuil_flou_ocr=97,
+    )
+
+
 def charger_config(chemin: Path | None, offline: bool) -> Config:
     if offline:
         return Config(offline=True, provider="offline")
