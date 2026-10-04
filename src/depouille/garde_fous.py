@@ -20,7 +20,7 @@ RE_QUALIFICATION = re.compile(
 # « Mention de la poursuite des investigations » n'est pas un mensonge.
 RE_JUGEMENT = re.compile(
     r"\bment\b|\bmenti(?!on)|mensong|faux t[ée]moignage|coupable|culpabilit|innocen|"
-    r"\bpreuve|\bprouve|\bavoue|incrimin|disculp",
+    r"\bpreuve|\bprouve|\bavoue|incrimin|disculp|r[ée]pr[ée]hensible|d[ée]lictueu",
     re.IGNORECASE,
 )
 
@@ -89,13 +89,16 @@ APPROXIMATIONS = frozenset({
     "cinquantaine", "soixantaine", "centaine", "millier",
 })
 
+# Pas « coups » ni « blessures » : ils décrivent un fait (« des coups de
+# pied »), et les exiger poussait le modèle vers « actes répréhensibles »,
+# un jugement (observé, dossier de 40 pages).
 # Nature des faits et stade de la procédure : un résumé qui écrit
 # « violences » ou « réquisitoire » quand aucune source ne le dit change le
 # dossier que l'avocat croit lire. Motifs sur texte normalisé (sans accents,
 # minuscules).
 TERMES_A_SOURCER = tuple(re.compile(m) for m in (
     r"violen\w*", r"\bvols?\b", r"\bviols?\b", r"meurtr\w*", r"assassin\w*", r"homicid\w*",
-    r"\bcoups?\b", r"blessur\w*", r"agress\w*", r"menac\w*", r"escroq\w*",
+    r"agress\w*", r"menac\w*", r"escroq\w*",
     r"abus de confiance", r"trafic\w*", r"stupefiant\w*", r"recel\w*", r"extorsion\w*",
     r"sequestr\w*", r"harcel\w*", r"degradation\w*", r"incendi\w*", r"outrage\w*",
     r"rebellion\w*", r"\barmes?\b", r"blanchi\w*", r"malfaiteurs", r"cambriol\w*",

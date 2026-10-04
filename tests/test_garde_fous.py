@@ -108,3 +108,10 @@ def test_nom_complete_seulement_s_il_est_deja_en_partie_dans_la_reference() -> N
     assert elements_absents("Il a discuté avec Camille ARZANO.", reference) == []
     assert "MARTINON" in elements_absents("Il a discuté avec Lucas MARTINON.", reference), "aucune partie du nom n'y figure"
     assert "DUVAL" in elements_absents("Pierre DUVAL a lancé une pierre.", reference), "« pierre » n'y est pas un nom propre"
+
+
+def test_coups_est_un_fait_repréhensible_un_jugement() -> None:
+    """Observé : « coups » exigé dans les sources poussait le modèle vers
+    « chacun attribue les actes répréhensibles à l'autre »."""
+    assert "coups" not in elements_absents("Chacun attribue les coups à l'autre.", "Kevin a frappé le livreur.")
+    assert contient_jugement("Chacun attribue les actes répréhensibles à l'autre.")
