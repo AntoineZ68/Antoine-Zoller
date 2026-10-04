@@ -60,7 +60,7 @@ TYPES_IDENTIFIANTS_PROCHES = ("Plaque d'immatriculation", "Téléphone")
 MAX_PROPOSITIONS_MODELE = 8
 
 RE_JUGEMENT = re.compile(
-    r"\bment\b|\bmenti|mensong|faux t[ée]moignage|coupable|culpabilit|innocen|"
+    r"\bment\b|\bmenti(?!on)|mensong|faux t[ée]moignage|coupable|culpabilit|innocen|"
     r"\bpreuve|\bprouve|\bavoue|incrimin|disculp",
     re.IGNORECASE,
 )

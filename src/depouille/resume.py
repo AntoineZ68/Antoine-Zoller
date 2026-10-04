@@ -34,6 +34,9 @@ PROMPT_RESUME = (
     "des déclarations de la personne défendue (à défaut, de la personne mise en cause), "
     "ce qu'elle reconnaît et ce qu'elle conteste, en reprenant ses propres déclarations "
     "sans les interpréter. "
+    "Écris chaque nom exactement comme dans la liste des personnes (NOM en capitales) et "
+    "respecte le rôle indiqué pour chacune. N'écris jamais d'élément entre crochets "
+    "(« [adresse] ») : omets plutôt ce que tu ne connais pas. "
     "Base-toi UNIQUEMENT sur les personnes, faits et déclarations fournis — n'ajoute, ne "
     "déduis et n'invente rien. Si une qualification pénale figure dans les faits fournis, "
     "tu peux la mentionner en l'attribuant à son auteur (« sous la qualification de … "
@@ -116,6 +119,10 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
 
     texte = reponse.texte.strip().strip('"').strip()
     if not texte:
+        return
+    if "[" in texte or "]" in texte:
+        # Un trou à compléter (« [adresse] ») n'a rien à faire devant l'avocat.
+        console.print("  [build] résumé écarté : il contenait un élément entre crochets.")
         return
     if contient_qualification(texte):
         # Aucun résumé plutôt qu'un résumé qui qualifie : l'avocat garde

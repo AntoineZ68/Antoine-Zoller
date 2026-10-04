@@ -369,6 +369,10 @@ def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
 TITRES_A_EXCLURE = {
     "capitaine", "commandant", "lieutenant", "colonel", "major", "brigadier",
     "adjudant", "gardien", "maréchal", "docteur", "maître", "monsieur", "madame",
+    # Magistrats et greffe : « M. Antoine ROQUIER, Procureur de la République »
+    # sur un PV de prolongation faisait du procureur un mis en cause.
+    "procureur", "vice-procureur", "substitut", "juge", "magistrat", "président",
+    "présidente", "greffier", "greffière", "officier", "agent", "avocat", "avocate",
 }
 
 # Abréviations d'honorifiques ("Me SCHMITT") : elles matchent le même motif

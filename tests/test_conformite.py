@@ -33,6 +33,8 @@ def test_dossier_complet_ne_declenche_aucun_signalement(dossier_traite: DossierT
 def test_absence_prolongation_declenchee_si_gav_depasse_24h(dossier_traite: DossierTraite, tmp_path) -> None:
     db = _copie_db(dossier_traite, tmp_path)
     db.execute("DELETE FROM pieces WHERE type = 'PV de prolongation de garde à vue'")
+    # L'acte de prolongation extrait de cette pièce disparaît avec elle.
+    db.execute("DELETE FROM evenements_procedure WHERE nature = 'prolongation_garde_a_vue'")
     db.commit()
 
     signalements = detecter_signalements(db)
@@ -66,6 +68,7 @@ def test_aucun_signalement_ne_qualifie_juridiquement(dossier_traite: DossierTrai
     db.execute("DELETE FROM pieces WHERE type = 'PV de prolongation de garde à vue'")
     db.execute("DELETE FROM pieces WHERE type = \"PV d'entretien avocat\"")
     db.execute("DELETE FROM evenements_procedure WHERE nature = 'notification_droits'")
+    db.execute("DELETE FROM evenements_procedure WHERE nature = 'prolongation_garde_a_vue'")
     db.commit()
 
     signalements = detecter_signalements(db)
