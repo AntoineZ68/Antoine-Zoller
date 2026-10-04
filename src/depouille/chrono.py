@@ -23,6 +23,7 @@ from rich.table import Table
 
 from .classify import _est_titre
 from .config import Config
+from .garde_fous import problemes_redaction
 from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, lots_de_pages, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
@@ -436,6 +437,7 @@ def _extraire_faits_llm(
         return provider.appeler(systeme=PROMPT_EXTRACTION_FAITS, prompt=texte, modele=config.modele_analyse)
 
     nb = 0
+    nb_remplacees = 0
     for (piece, lot), reponse in zip(lots, executer_en_parallele(appeler, lots)):
         try:
             if isinstance(reponse, Exception):
@@ -452,17 +454,36 @@ def _extraire_faits_llm(
             )
             continue
 
+        texte_lot = "\n".join(p["texte"] for p in lot)
         for fait in faits:
             personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
+            description = description_affichable(fait.get("description") or "", fait["citation"], texte_lot)
+            nb_remplacees += description != (fait.get("description") or "")
             db.execute(
                 """INSERT INTO evenements_faits
                    (piece_id, page, citation, personne_id_source, description, statut_verif)
                    VALUES (?, ?, ?, ?, ?, 'a_faire')""",
-                (piece["id"], fait["page"], fait["citation"], personne_id, fait.get("description", "")),
+                (piece["id"], fait["page"], fait["citation"], personne_id, description),
             )
             nb += 1
     db.commit()
+    if nb_remplacees:
+        console.print(
+            f"  [chrono] {nb_remplacees} description(s) de fait remplacée(s) par leur citation "
+            "(élément absent de la pièce, qualification ou jugement)."
+        )
     return nb
+
+
+def description_affichable(description: str, citation: str, texte_piece: str) -> str:
+    """La description d'un fait est rédigée par le modèle et affichée telle
+    quelle dans la chronologie, et reprise par les résumés. Si elle avance
+    un élément absent de la pièce, qualifie ou juge, on affiche à sa place
+    la citation exacte — toujours vraie, puisqu'elle sera vérifiée au
+    caractère près."""
+    if description.strip() and not problemes_redaction(description, texte_piece):
+        return description
+    return citation
 
 
 def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: Console) -> None:

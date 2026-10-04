@@ -115,3 +115,49 @@ def test_partie_civile_la_victime_peut_etre_le_client(monkeypatch, db) -> None:
     resume.generer_resume(db, Config(offline=False), Console(quiet=True))
     assert "« votre client, Odile SERMET »" in vu["prompt"]
     assert "La victime a quitté" in vu["prompt"]
+
+
+def _modele_successif(monkeypatch, textes: list[str]) -> list[dict]:
+    appels: list[dict] = []
+
+    class Faux:
+        def appeler(self, systeme, prompt, modele):
+            appels.append({"systeme": systeme, "prompt": prompt})
+            return ReponseLLM(texte=textes[len(appels) - 1], tokens_in=10, tokens_out=10)
+
+    monkeypatch.setattr(resume, "obtenir_provider", lambda config: Faux())
+    return appels
+
+
+def test_la_citation_de_la_declaration_est_fournie(monkeypatch, db) -> None:
+    """Le « point factuel » d'une audition n'est souvent que le sujet de la
+    question : sans la réponse citée, le modèle l'inventait."""
+    db.execute(
+        "INSERT INTO declarations (personne_id, piece_id, page, citation, point_factuel, statut_verif) "
+        "VALUES (1, 1, 1, 'Je suis arrivé vers 22 heures.', 'heure d''arrivée sur les lieux', 'verifie')"
+    )
+    db.commit()
+    vu = _modele(monkeypatch, "Résumé.")
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert "« Je suis arrivé vers 22 heures. »" in vu["prompt"]
+
+
+def test_resume_invente_corrige_au_second_essai(monkeypatch, db) -> None:
+    appels = _modele_successif(monkeypatch, [
+        "Des violences sont reprochées à Lucas MARTINON à Biviers vers 21h00.",
+        "Un cambriolage est commis à Biviers le 12/02/2026. Lucas MARTINON reconnaît avoir attendu dans la voiture.",
+    ])
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert len(appels) == 2
+    assert "violences" in appels[1]["prompt"] and "21h00" in appels[1]["prompt"], "le motif est donné au modèle"
+    assert _resume_en_base(db).startswith("Un cambriolage")
+
+
+def test_resume_invente_deux_fois_ecarte(monkeypatch, db) -> None:
+    appels = _modele_successif(monkeypatch, [
+        "Entre février 2026 et février 2026, un cambriolage est commis.",
+        "Un cambriolage est commis à Grenoble.",
+    ])
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert len(appels) == 2
+    assert _resume_en_base(db) is None

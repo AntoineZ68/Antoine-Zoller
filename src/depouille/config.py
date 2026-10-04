@@ -59,10 +59,14 @@ TARIFS_CONNUS = {
     "claude-sonnet-5": TarifModele(2.0, 10.0),
     "claude-sonnet-5-5": TarifModele(2.0, 10.0),
     "claude-opus-5-5": TarifModele(4.0, 20.0),
-    # Mistral (tarifs publics, à vérifier sur mistral.ai/pricing).
+    # Mistral (tarifs publics relevés en octobre 2026, à revérifier sur
+    # mistral.ai/pricing). mistral-large-latest désigne Mistral Large 3
+    # depuis décembre 2025 : 0,50 $ / 1,50 $, et non plus les 2 $ / 6 $ de
+    # Large 2 — l'ancien tarif quadruplait le coût affiché. Small : les
+    # relevés varient (0,08-0,10 $ / 0,20-0,30 $), on garde le haut.
     "mistral-small-latest": TarifModele(0.1, 0.3),
     "mistral-medium-latest": TarifModele(0.4, 2.0),
-    "mistral-large-latest": TarifModele(2.0, 6.0),
+    "mistral-large-latest": TarifModele(0.5, 1.5),
 }
 # Sans MODELE_CLASSIFICATION / MODELE_ANALYSE, un provider Mistral recevait
 # des noms de modèles Claude : chaque appel échouait, sans bruit.
@@ -78,7 +82,7 @@ def config_depuis_environnement(offline: bool) -> Config:
     MODELE_ANALYSE."""
     if offline:
         return Config(offline=True, provider="offline")
-    provider = os.environ.get("LLM_PROVIDER", "anthropic")
+    provider = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower() or "anthropic"
     variable_cle = "ANTHROPIC_API_KEY" if provider == "anthropic" else "MISTRAL_API_KEY"
     return Config(
         offline=False,

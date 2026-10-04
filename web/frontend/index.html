@@ -1543,7 +1543,7 @@ function rendreReponseQuestion(etat) {
       <div class="question-posee">${echapperHtml(etat.question)}</div>
       <p class="texte-reponse">${echapperHtml(r.reponse)}</p>
       ${sources ? `<ul class="sources-reponse">${sources}</ul>` : ""}
-      ${r.statut === "introuvable" ? "" : `<p class="note-resume">Réponse rédigée par l'IA à partir des seuls passages cités, chacun vérifié dans la pièce — à relire sur l'original.</p>`}
+      ${r.statut === "sourcee" ? `<p class="note-resume">Réponse rédigée par l'IA à partir des seuls passages cités, chacun vérifié dans la pièce — à relire sur l'original.</p>` : ""}
     </div>`;
 }
 

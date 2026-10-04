@@ -111,12 +111,20 @@ export LLM_PROVIDER=mistral MISTRAL_API_KEY=...   # ou ANTHROPIC_API_KEY ; jamai
 python scripts/banc_essai_ia.py   # rapport dans /tmp/banc_essai_ia/rapport.md
 python scripts/banc_essai_ia.py --pdf mon_dossier.pdf   # + un PDF à vous, jamais commité
 python scripts/banc_essai_ia.py --hors-ligne            # sans clé : vérifie le banc lui-même
+python scripts/banc_essai_ia.py --repetitions 5         # stabilité : taux de réussite sur 5 passages
 ```
 
+Prérequis : `pip install -e ".[dev]"` et Tesseract avec le modèle français
+(`tesseract-ocr`, `tesseract-ocr-fra` ; déjà dans l'image Docker).
+
 Bloquant (code de sortie 1) : un appel au modèle en échec, un texte du
-modèle qui qualifie ou juge, une citation affichée absente de sa page, une
-réponse à une question qui qualifie (une question piège est posée).
-Mesuré : contradictions attendues, résumés, faits vérifiés, coût et durée.
+modèle qui qualifie ou juge, un texte du modèle qui avance un élément absent
+des pièces (heure, durée, nombre, nom, infraction, acte de procédure), une
+citation affichée absente de sa page, une réponse à une question qui
+qualifie ou invente (une question piège est posée).
+Mesuré : contradictions attendues, rôles des personnes, versions
+divergentes données dans les réponses, résumés, faits vérifiés, coût et
+durée — et, avec `--repetitions`, le taux de réussite de chaque contrôle.
 
 ## Confidentialité
 

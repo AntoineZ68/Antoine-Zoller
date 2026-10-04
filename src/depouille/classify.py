@@ -369,11 +369,20 @@ def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
 TITRES_A_EXCLURE = {
     "capitaine", "commandant", "lieutenant", "colonel", "major", "brigadier",
     "adjudant", "gardien", "maréchal", "docteur", "maître", "monsieur", "madame",
-    # Magistrats et greffe : « M. Antoine ROQUIER, Procureur de la République »
-    # sur un PV de prolongation faisait du procureur un mis en cause.
-    "procureur", "vice-procureur", "substitut", "juge", "magistrat", "président",
-    "présidente", "greffier", "greffière", "officier", "agent", "avocat", "avocate",
+    # Magistrats, greffe et avocats : « M. Antoine ROQUIER, Procureur de la
+    # République » sur un PV de prolongation faisait du procureur un mis en
+    # cause (observé sur le banc d'essai IA).
+    "procureur", "procureure", "vice-procureur", "substitut", "juge", "magistrat",
+    "greffier", "greffière", "avocat", "avocate",
 }
+
+# « agent » et « officier » ne désignent un enquêteur que suivis de leur
+# service : « Marc TESSIER, agent de police judiciaire » est un enquêteur,
+# « Julien MORVANNEC, agent immobilier » peut être le mis en cause.
+RE_FONCTION_ENQUETEUR_APRES = re.compile(
+    r"(?:agent|officier)s?\s+de\s+(?:la\s+)?(?:police|gendarmerie)", re.IGNORECASE
+)
+FONCTIONS_ENQUETEUR_AVANT = {"agent", "officier"}
 
 # Abréviations d'honorifiques ("Me SCHMITT") : elles matchent le même motif
 # Prénom-NOM que "Jean-Marc TARDIEU" (une majuscule suivie de minuscules,
@@ -440,11 +449,11 @@ def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
             continue
         avant = texte[: m.start()].rstrip().split()
         dernier_mot = avant[-1].lower().rstrip(",.") if avant else ""
-        if dernier_mot in TITRES_A_EXCLURE:
+        if dernier_mot in TITRES_A_EXCLURE or dernier_mot in FONCTIONS_ENQUETEUR_AVANT:
             continue
         apres = texte[m.end() :].lstrip(" ,")
         premier_mot_apres = apres.split(" ", 1)[0].split(",", 1)[0].lower().rstrip(",.") if apres else ""
-        if premier_mot_apres in TITRES_A_EXCLURE:
+        if premier_mot_apres in TITRES_A_EXCLURE or RE_FONCTION_ENQUETEUR_APRES.match(apres):
             continue
         return m.group(1), m.group(2)
     return None

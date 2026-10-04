@@ -12,7 +12,8 @@ est retirée, le reste du résumé est conservé :
 - au moins un numéro d'élément existant ;
 - aucun nom, lieu ou nombre absent de ses propres sources (un « 12/02 » ou
   un « Biviers » qui n'y figure pas trahit un détail inventé ou déplacé) ;
-- aucune qualification juridique.
+- aucune qualification juridique, aucun jugement sur la sincérité ou la
+  culpabilité.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import sqlite3
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import contient_qualification, elements_absents
+from .garde_fous import problemes_redaction
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 
 SECTIONS = (
@@ -47,6 +48,9 @@ PROMPT = (
     "N'écris rien qui ne soit pas dans les éléments cités par la phrase elle-même : "
     "pas de date, de lieu, de nom ou de chiffre venus d'un autre élément ou de ta "
     "connaissance. Désigne les personnes par leur nom. "
+    "Quand des éléments divergent sur un même point (heure, date, couleur, description), "
+    "la phrase donne chaque version et cite chacun des éléments, sans trancher : "
+    "« interpellé à 07h50 selon un PV, à 08h05 selon un autre ». "
     "Aucune qualification juridique, aucune appréciation sur la culpabilité, la "
     "solidité des charges ou la régularité des actes. "
     'Réponds uniquement en JSON : {"sections": [{"titre": "...", "phrases": '
@@ -104,12 +108,23 @@ def phrase_retenue(texte: str, sources: list[str], elements: dict[str, dict]) ->
     """Renvoie les numéros de sources valides si la phrase passe les trois
     contrôles, None sinon."""
     valides = [s for s in dict.fromkeys(sources) if s in elements]
-    if not texte or not valides or contient_qualification(texte):
+    if not texte or not valides:
         return None
     reference = "\n".join(elements[s]["ligne"] for s in valides)
-    if elements_absents(texte, reference):
+    if problemes_redaction(texte, reference):
         return None
     return valides
+
+
+def sources_distinctes(cles: list[str], elements: dict[str, dict]) -> list[dict]:
+    """Un fait et l'acte de procédure tirés de la même phrase d'une pièce
+    portent la même citation : l'avocat la lisait deux ou trois fois sous
+    la même phrase du résumé."""
+    vues: dict[tuple, dict] = {}
+    for cle in cles:
+        source = {"page": elements[cle]["page"], "citation": elements[cle]["citation"]}
+        vues.setdefault((source["page"], source["citation"]), source)
+    return list(vues.values())
 
 
 def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Console) -> int:
@@ -148,7 +163,7 @@ def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Con
             sources = phrase.get("sources") or []
             valides = phrase_retenue(texte_phrase, [str(s) for s in sources], elements)
             if valides:
-                lignes.append((texte_phrase, [{"page": elements[s]["page"], "citation": elements[s]["citation"]} for s in valides]))
+                lignes.append((texte_phrase, sources_distinctes(valides, elements)))
         if not lignes:
             continue
         ordre_section += 1

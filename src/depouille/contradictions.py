@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import contient_qualification, elements_absents
+from .garde_fous import RE_JUGEMENT, contient_qualification, elements_absents
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .recoupements import occurrences_identifiants
 from .resume_detaille import _elements
@@ -59,11 +59,6 @@ TYPES_IDENTIFIANTS_PROCHES = ("Plaque d'immatriculation", "Téléphone")
 
 MAX_PROPOSITIONS_MODELE = 8
 
-RE_JUGEMENT = re.compile(
-    r"\bment\b|\bmenti(?!on)|mensong|faux t[ée]moignage|coupable|culpabilit|innocen|"
-    r"\bpreuve|\bprouve|\bavoue|incrimin|disculp",
-    re.IGNORECASE,
-)
 
 
 @dataclass

@@ -38,6 +38,12 @@ class VeriteControle:
     contradiction_modele_mots: tuple[str, ...] = ("couleur", "blanc", "gris")
     duree_gav_minutes: int = 36 * 60
     mis_en_cause: str = "Julien MORVANNEC"
+    # Le procureur qui autorise la prolongation n'est jamais en cause.
+    jamais_mis_en_cause: tuple[str, ...] = ("Antoine ROQUIER",)
+    # Les deux heures d'interpellation : une réponse qui n'en donne qu'une
+    # cache à l'avocat une discordance du dossier.
+    question_interpellation: str = "À quelle heure Julien MORVANNEC a-t-il été interpellé ?"
+    heures_interpellation: tuple[tuple[int, int], ...] = ((7, 50), (8, 5))
 
 
 PIECES_AJOUTEES = [

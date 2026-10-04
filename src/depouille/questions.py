@@ -11,8 +11,9 @@ Même contrat que le reste de l'outil, appliqué à une réponse libre :
   affirmation que rien ne permet de contrôler ;
 - aucune qualification juridique : si la réponse du modèle en contient
   malgré la consigne, son texte est retiré et seuls les passages cités sont
-  rendus. Ce filtre est déterministe — il ne dépend pas de la bonne volonté
-  du modèle.
+  rendus. De même si elle avance un élément (heure, nom, durée…) absent
+  des pages qu'elle cite, ou porte un jugement. Ce filtre est déterministe
+  — il ne dépend pas de la bonne volonté du modèle.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import sqlite3
 import unicodedata
 
 from .config import Config
-from .garde_fous import RE_QUALIFICATION
+from .garde_fous import RE_QUALIFICATION, problemes_redaction
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .verification import verifier_citation
 
@@ -49,6 +50,7 @@ MESSAGE_QUALIFICATION = (
     "Je ne qualifie pas juridiquement les éléments du dossier. "
     "Voici les passages des pièces qui se rapportent à votre question."
 )
+MESSAGE_PASSAGES = "Voici les passages des pièces qui se rapportent à votre question."
 
 PROMPT_SYSTEME = (
     "Tu réponds à la question d'un avocat pénaliste sur le dossier de procédure dont "
@@ -62,6 +64,8 @@ PROMPT_SYSTEME = (
     "agir, légalité d'un acte), ni d'appréciation sur la culpabilité, la solidité des "
     "charges ou la stratégie de défense : si la question le demande, rapporte seulement "
     "les faits datés et sourcés qui s'y rapportent, sans conclure. "
+    "Si les pages divergent sur un point (heure, date, couleur, description d'une "
+    "personne), donne chaque version avec sa page et cite chacune, sans trancher. "
     "Réponse courte : quelques phrases au plus, en français. "
     "Réponds uniquement en JSON : "
     "{\"reponse\": \"...\", \"citations\": [{\"page\": N, \"citation\": \"...\"}]}."
@@ -163,4 +167,15 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
         return introuvable
     if RE_QUALIFICATION.search(texte_reponse):
         return {"statut": "passages", "reponse": MESSAGE_QUALIFICATION, "citations": citations_verifiees}
+    # Les citations sont vérifiées, mais le texte de la réponse est rédigé :
+    # une heure, un nom ou une durée qui ne figure sur aucune des pages
+    # citées (un détail venu d'ailleurs, ou de la connaissance du modèle)
+    # n'est pas affiché — seuls les passages vérifiés le sont.
+    pages_citees = {c["page"] for c in citations_verifiees}
+    reference = "\n".join(
+        [question, client["nom"] if client else ""]
+        + [pages_par_numero[n]["texte"] for n in sorted(pages_citees)]
+    )
+    if problemes_redaction(texte_reponse, reference):
+        return {"statut": "passages", "reponse": MESSAGE_PASSAGES, "citations": citations_verifiees}
     return {"statut": "sourcee", "reponse": texte_reponse, "citations": citations_verifiees}

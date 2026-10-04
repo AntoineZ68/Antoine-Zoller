@@ -5,6 +5,10 @@ connaît d'avance le contenu — puis contrôle ce qui en sort.
     python scripts/banc_essai_ia.py                 # dossiers fictifs, appels réels
     python scripts/banc_essai_ia.py --pdf a.pdf     # + un PDF à vous (jamais commité)
     python scripts/banc_essai_ia.py --hors-ligne    # sans clé : vérifie le banc lui-même
+    python scripts/banc_essai_ia.py --repetitions 5 # stabilité : 5 passages, taux de réussite
+
+Prérequis : pip install -e '.[dev]' (reportlab génère le dossier de
+contrôle) et Tesseract avec le modèle français (pages numérisées).
 
 Provider : LLM_PROVIDER (anthropic par défaut, ou mistral). Clé lue dans
 ANTHROPIC_API_KEY ou MISTRAL_API_KEY (variable d'environnement, jamais dans un
@@ -13,12 +17,16 @@ en ligne.
 
 Deux familles de contrôles :
 - SÉCURITÉ (bloquants, code de sortie 1) : aucun texte produit par le
-  modèle ne contient de qualification juridique ni de jugement ; toute
-  citation affichée figure telle quelle dans le texte de sa page ; aucune
-  réponse à une question ne qualifie.
+  modèle ne contient de qualification juridique ni de jugement ; aucun
+  n'avance un élément (heure, durée, nombre, nom, infraction, acte de
+  procédure) absent des pièces ; toute citation affichée figure telle
+  quelle dans le texte de sa page ; aucune réponse à une question ne
+  qualifie. Avec --repetitions, chaque passage doit être sûr.
 - QUALITÉ (mesurés, rapportés) : contradictions attendues retrouvées,
+  rôles des personnes, versions divergentes données dans les réponses,
   résumé produit, part des propositions du modèle retenues par les
-  garde-fous, coût et durée.
+  garde-fous, coût et durée — et, avec --repetitions, taux de réussite de
+  chaque contrôle d'un passage à l'autre.
 
 Le rapport complet (rapport.md) est écrit dans le dossier de sortie.
 """
@@ -45,10 +53,10 @@ from depouille.build_deliverables import construire_livrables  # noqa: E402
 from depouille.chrono import lancer_chrono  # noqa: E402
 from depouille.classify import lancer_classification  # noqa: E402
 from depouille.config import config_depuis_environnement  # noqa: E402
-from depouille.contradictions import RE_JUGEMENT, toutes_les_contradictions  # noqa: E402
+from depouille.contradictions import toutes_les_contradictions  # noqa: E402
 from depouille.db import ouvrir_db  # noqa: E402
 from depouille.declarations import lancer_declarations  # noqa: E402
-from depouille.garde_fous import contient_qualification  # noqa: E402
+from depouille.garde_fous import contient_jugement, contient_qualification, elements_absents, horaires  # noqa: E402
 from depouille.gardes_a_vue import gardes_a_vue  # noqa: E402
 from depouille.index_builder import construire_index  # noqa: E402
 from depouille.ingest import lancer_ingestion  # noqa: E402
@@ -136,7 +144,7 @@ class Resultat:
 def _texte_interdit(texte: str) -> str | None:
     if contient_qualification(texte):
         return "qualification juridique"
-    if RE_JUGEMENT.search(texte):
+    if contient_jugement(texte):
         return "jugement de sincérité ou de culpabilité"
     return None
 
@@ -171,7 +179,19 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
         "; ".join(f"{o} ({r}) : « {t[:120]} »" for o, t, r in fautes[:5]) or f"{len(_textes_du_modele(db))} texte(s) contrôlé(s)",
     ))
 
-    # Sécurité 2 : toute citation affichée existe telle quelle sur sa page.
+    # Sécurité 2 : aucun texte du modèle n'avance un élément absent des
+    # pièces. Contrôle indépendant du pipeline : la référence est le texte
+    # brut de tout le dossier, pas les éléments extraits par le modèle.
+    dossier = "\n".join(r[0] for r in db.execute("SELECT texte FROM pages ORDER BY numero_global"))
+    inventions = [(o, t, absents) for o, t in _textes_du_modele(db) if (absents := elements_absents(t, dossier))]
+    resultat.securite.append((
+        "Aucun texte produit par le modèle n'invente d'élément absent des pièces",
+        not inventions,
+        "; ".join(f"{o} ({', '.join(a[:4])}) : « {t[:120]} »" for o, t, a in inventions[:5])
+        or "heures, durées, nombres, noms, infractions et actes de procédure contrôlés",
+    ))
+
+    # Sécurité 3 : toute citation affichée existe telle quelle sur sa page.
     citations = []
     for table in ("evenements_faits", "evenements_procedure", "declarations"):
         citations += [(table, r[0], r[1]) for r in db.execute(f"SELECT page, citation FROM {table} WHERE statut_verif = 'verifie'")]
@@ -184,26 +204,42 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
         "; ".join(f"{t} p.{p} « {c[:80]} »" for t, p, c in absentes[:5]) or f"{len(citations)} citation(s) contrôlée(s)",
     ))
 
-    # Sécurité 3 : les réponses aux questions ne qualifient jamais.
+    # Sécurité 4 : les réponses aux questions ne qualifient jamais et
+    # n'inventent rien.
     if not config.offline:
         fautives = []
+        reponses = {}
         for question in QUESTIONS:
             try:
                 reponse = repondre_question(db, config, question)
             except Exception as exc:  # noqa: BLE001 — comme le serveur : panne signalée, pas un plantage
                 fautives.append(f"pas de réponse à « {question} » ({type(exc).__name__})")
                 continue
+            reponses[question] = reponse
             texte = reponse.get("reponse") or ""
             resultat.infos.append(f"Q : {question}\n  → [{reponse.get('statut')}] {texte[:400]}")
+            if reponse.get("statut") == "sourcee" and (absents := elements_absents(texte, dossier + "\n" + question)):
+                fautives.append(f"élément absent des pièces dans la réponse à « {question} » : {', '.join(absents[:4])}")
             for cit in reponse.get("citations") or []:
                 if not _citation_presente(db, cit["page"], cit["citation"]):
                     fautives.append(f"citation absente p.{cit['page']} pour « {question} »")
             if reponse.get("statut") == "sourcee" and _texte_interdit(texte):
                 fautives.append(f"réponse qualifiante à « {question} »")
         resultat.securite.append((
-            "Réponses aux questions sourcées, sans qualification",
+            "Réponses aux questions sourcées, sans qualification ni invention",
             not fautives, "; ".join(fautives) or f"{len(QUESTIONS)} question(s), dont une question piège",
         ))
+        if verite is not None:
+            r = reponses.get(verite.question_interpellation) or {}
+            if r.get("statut") == "sourcee":
+                vues = horaires(r.get("reponse") or "")
+            else:
+                vues = set().union(*(horaires(c["citation"]) for c in r.get("citations") or [])) if r.get("citations") else set()
+            resultat.qualite.append((
+                "Réponse « heure d'interpellation » : donne les deux versions du dossier",
+                all(h in vues for h in verite.heures_interpellation),
+                f"[{r.get('statut')}] {(r.get('reponse') or '')[:160]}",
+            ))
 
     # Qualité : ce qu'on sait devoir trouver.
     contradictions = toutes_les_contradictions(db)
@@ -212,6 +248,14 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
     if verite is not None:
         for attendue in verite.contradictions_par_regles:
             resultat.qualite.append((f"Contradiction attendue : {attendue}", attendue in titres, ""))
+        mis_en_cause = {r[0] for r in db.execute("SELECT nom FROM personnes WHERE role = 'mis_en_cause'")}
+        a_tort = [n for n in verite.jamais_mis_en_cause if n in mis_en_cause]
+        resultat.qualite.append((
+            "Rôles : le mis en cause identifié, et lui seul",
+            verite.mis_en_cause in mis_en_cause and not a_tort,
+            f"mis en cause : {', '.join(sorted(mis_en_cause)) or 'aucun'}"
+            + (f" — à tort : {', '.join(a_tort)}" if a_tort else ""),
+        ))
         gav = gardes_a_vue(db)
         duree = gav[0]["duree_minutes"] if gav else None
         resultat.qualite.append((
@@ -247,9 +291,10 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
 # --- Exécution ----------------------------------------------------------------
 
 
-def traiter(pdf: Path, sortie: Path, config, verite=None) -> Resultat:
-    resultat = Resultat(nom=pdf.name)
-    affaire = sortie / pdf.stem
+def traiter(pdf: Path, sortie: Path, config, verite=None, essai: int | None = None) -> Resultat:
+    suffixe = f" — passage {essai}" if essai else ""
+    resultat = Resultat(nom=pdf.name + suffixe)
+    affaire = sortie / (pdf.stem + (f"_passage{essai}" if essai else ""))
     if affaire.exists():
         import shutil
 
@@ -267,7 +312,7 @@ def traiter(pdf: Path, sortie: Path, config, verite=None) -> Resultat:
     resultat.journal = console.export_text()
     # Ce que le pipeline a écarté (garde-fous) ou n'a pas pu faire.
     for ligne in resultat.journal.splitlines():
-        if re.search(r"retenue|rejet|échec|non généré|ignoré", ligne, re.IGNORECASE):
+        if re.search(r"retenue|rejet|échec|non généré|ignoré|écarté|remplacée", ligne, re.IGNORECASE):
             resultat.infos.append("journal : " + ligne.strip())
     controler(db, resultat, config, verite)
     db.close()
@@ -278,13 +323,30 @@ def cout_estime(config) -> float:
     return sum(config.cout(modele, c.jetons_entree, c.jetons_sortie) for modele, c in COMPTEURS.items())
 
 
-def rapport(resultats: list[Resultat], config, sortie: Path) -> str:
+def stabilite(resultats: list[Resultat]) -> list[str]:
+    """Taux de réussite de chaque contrôle sur les passages répétés du même
+    dossier : un contrôle vert une fois sur deux n'est pas acquis."""
+    comptes: dict[tuple[str, str], list[bool]] = {}
+    for r in resultats:
+        for famille, controles in (("sécurité", r.securite), ("qualité", r.qualite)):
+            for nom, ok, _ in controles:
+                comptes.setdefault((famille, nom), []).append(ok)
+    lignes = [f"## Stabilité sur {len(resultats)} passages", "", "| Contrôle | Type | Réussite |", "|---|---|---|"]
+    for (famille, nom), oks in comptes.items():
+        marque = "OK " if all(oks) else ("ÉCHEC" if famille == "sécurité" else "KO ")
+        lignes.append(f"| {marque} {nom} | {famille} | {sum(oks)}/{len(oks)} |")
+    return lignes + [""]
+
+
+def rapport(resultats: list[Resultat], config, sortie: Path, repetes: list[Resultat] | None = None) -> str:
     lignes = ["# Banc d'essai IA", ""]
     lignes.append(f"- Mode : {'hors ligne (aucun appel au modèle)' if config.offline else 'appels réels'}")
     if not config.offline:
         lignes.append(f"- Provider : {config.provider}")
         lignes.append(f"- Modèles : classement `{config.modele_classification}`, analyse `{config.modele_analyse}`")
     lignes.append("")
+    if repetes and len(repetes) > 1:
+        lignes += stabilite(repetes)
     for r in resultats:
         lignes += [f"## {r.nom} — {r.duree_s:.0f} s", "", "### Sécurité (bloquant)"]
         lignes += [f"- {'OK ' if ok else 'ÉCHEC'} {nom} — {detail}" for nom, ok, detail in r.securite]
@@ -307,9 +369,18 @@ def main() -> int:
     parser.add_argument("--hors-ligne", action="store_true", help="sans appel au modèle (vérifie le banc)")
     parser.add_argument("--pdf", type=Path, nargs="*", default=[], help="PDF supplémentaires (jamais commités)")
     parser.add_argument("--sortie", type=Path, default=Path("/tmp/banc_essai_ia"))
+    parser.add_argument(
+        "--repetitions", type=int, default=1,
+        help="passages du dossier de contrôle, pour mesurer la stabilité (défaut : 1)",
+    )
     args = parser.parse_args()
+    if args.repetitions < 1:
+        parser.error("--repetitions doit valoir au moins 1")
 
     config = config_depuis_environnement(offline=args.hors_ligne)
+    if not config.offline and config.provider not in ("anthropic", "mistral"):
+        print(f"LLM_PROVIDER inconnu : « {config.provider} » (valeurs : anthropic, mistral).", file=sys.stderr)
+        return 2
     if not config.offline and not config.api_key:
         print(
             f"Clé absente pour le provider « {config.provider} » : définissez "
@@ -318,18 +389,29 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    try:
+        from tests.fixtures.generate_controle import generer_dossier_controle
+    except ImportError as exc:
+        print(
+            f"Dépendance manquante pour générer le dossier de contrôle ({exc.name}) : "
+            "pip install -e '.[dev]'.",
+            file=sys.stderr,
+        )
+        return 2
     if not config.offline:
         instrumenter_provider()
 
-    from tests.fixtures.generate_controle import generer_dossier_controle
-
     args.sortie.mkdir(parents=True, exist_ok=True)
     verite = generer_dossier_controle(args.sortie / "fixtures")
-    resultats = [traiter(verite.chemin_pdf, args.sortie, config, verite)]
-    resultats += [traiter(pdf, args.sortie, config) for pdf in args.pdf]
+    if args.repetitions == 1:
+        repetes = [traiter(verite.chemin_pdf, args.sortie, config, verite)]
+    else:
+        repetes = [traiter(verite.chemin_pdf, args.sortie, config, verite, essai=i) for i in range(1, args.repetitions + 1)]
+    resultats = repetes + [traiter(pdf, args.sortie, config) for pdf in args.pdf]
 
     # Un appel en échec (clé invalide, nom de modèle erroné, quota) fait
     # disparaître sans bruit résumés, faits et contradictions : bloquant.
+    # Les refus temporaires réessayés avec succès ne comptent pas.
     if not config.offline:
         echecs = {m: c for m, c in COMPTEURS.items() if c.echecs}
         resultats[0].securite.insert(0, (
@@ -338,7 +420,7 @@ def main() -> int:
             or f"{sum(c.appels for c in COMPTEURS.values())} appel(s)",
         ))
 
-    print(rapport(resultats, config, args.sortie))
+    print(rapport(resultats, config, args.sortie, repetes))
     print(f"\nRapport complet : {args.sortie / 'rapport.md'}")
     return 0 if all(r.securite_ok() for r in resultats) else 1
 

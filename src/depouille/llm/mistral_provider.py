@@ -4,17 +4,33 @@ appelée directement en HTTP pour ne pas ajouter de SDK supplémentaire."""
 
 from __future__ import annotations
 
+import random
 import time
 
 from .base import LLMProvider, ReponseLLM
 
 URL_API = "https://api.mistral.ai/v1/chat/completions"
 
-# Refus temporaires (429 : débit du compte dépassé ; 5xx : surcharge) :
-# réessayés avec une attente croissante, en respectant Retry-After si l'API
-# l'indique. Sans cela, un lot refusé est perdu (résumé, réponse manquants).
+# Refus temporaires (429 : débit du compte dépassé ; 5xx : surcharge) et
+# coupures réseau : réessayés avec une attente croissante, en respectant
+# Retry-After si l'API l'indique. Sans cela, un appel refusé est perdu :
+# mesuré sur le banc d'essai, 7 appels d'analyse sur 22 refusés (429), et
+# avec eux le résumé et les quatre réponses aux questions.
 TENTATIVES_MAX = 6
 CODES_TEMPORAIRES = {429, 500, 502, 503, 504}
+ATTENTE_MAX_S = 60.0
+# Connexion, puis lecture : un résumé détaillé de Mistral Large dépasse
+# parfois la minute de génération sur un gros dossier.
+DELAIS_S = (10, 180)
+
+
+def _attente(tentative: int, retry_after: str | None) -> float:
+    try:
+        return min(float(retry_after), ATTENTE_MAX_S)
+    except (TypeError, ValueError):
+        # Un peu d'aléa : les appels menés de front ne repartent pas tous
+        # à la même seconde, ce qui reproduirait le dépassement.
+        return min(2.0 * 2**tentative, ATTENTE_MAX_S) * random.uniform(0.75, 1.25)
 
 
 class MistralProvider(LLMProvider):
@@ -31,14 +47,17 @@ class MistralProvider(LLMProvider):
         import requests  # import différé : jamais chargé en mode offline
 
         for tentative in range(TENTATIVES_MAX):
-            reponse = self._poster(requests, systeme, prompt, modele)
-            if reponse.status_code not in CODES_TEMPORAIRES or tentative == TENTATIVES_MAX - 1:
-                break
+            derniere = tentative == TENTATIVES_MAX - 1
             try:
-                attente = float(reponse.headers.get("Retry-After", ""))
-            except ValueError:
-                attente = 2.0 * 2**tentative
-            time.sleep(min(attente, 60.0))
+                reponse = self._poster(requests, systeme, prompt, modele)
+            except (requests.ConnectionError, requests.Timeout):
+                if derniere:
+                    raise
+                time.sleep(_attente(tentative, None))
+                continue
+            if reponse.status_code not in CODES_TEMPORAIRES or derniere:
+                break
+            time.sleep(_attente(tentative, reponse.headers.get("Retry-After")))
         reponse.raise_for_status()
         data = reponse.json()
         texte = data["choices"][0]["message"]["content"]
@@ -66,5 +85,5 @@ class MistralProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
             },
-            timeout=60,
+            timeout=DELAIS_S,
         )

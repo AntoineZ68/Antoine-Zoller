@@ -43,3 +43,74 @@ def test_config_ne_confond_pas_les_variables_denvironnement(tmp_path, monkeypatc
     config = charger_config(config_toml, offline=False)
 
     assert config.api_key == ""
+
+
+class _Reponse:
+    def __init__(self, status_code: int, headers: dict | None = None) -> None:
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.HTTPError(f"{self.status_code}")
+
+    def json(self) -> dict:
+        return {"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 1}}
+
+
+def _requetes(monkeypatch, issues: list) -> list[dict]:
+    """Remplace requests.post : chaque appel consomme une issue (réponse
+    ou exception). Aucune attente réelle."""
+    import requests
+
+    import depouille.llm.mistral_provider as module
+
+    envois: list[dict] = []
+
+    def post(url, headers, json, timeout):
+        envois.append(json)
+        issue = issues[len(envois) - 1]
+        if isinstance(issue, Exception):
+            raise issue
+        return issue
+
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(module.time, "sleep", lambda s: None)
+    return envois
+
+
+def test_refus_temporaire_reessaye(monkeypatch) -> None:
+    import requests
+
+    envois = _requetes(monkeypatch, [
+        _Reponse(429, {"Retry-After": "1"}),
+        requests.ConnectionError("coupure"),
+        _Reponse(503),
+        _Reponse(200),
+    ])
+    reponse = MistralProvider("cle").appeler("systeme", "prompt", "mistral-large-latest")
+    assert reponse.texte == "ok" and reponse.tokens_in == 3
+    assert len(envois) == 4
+    assert envois[0]["temperature"] <= 0.2, "peu d'aléa : deux passages, même résultat"
+
+
+def test_refus_definitif_non_reessaye(monkeypatch) -> None:
+    import requests
+
+    envois = _requetes(monkeypatch, [_Reponse(401)])
+    with pytest.raises(requests.HTTPError):
+        MistralProvider("cle").appeler("systeme", "prompt", "mistral-large-latest")
+    assert len(envois) == 1, "une clé invalide ne se corrige pas en réessayant"
+
+
+def test_abandon_apres_le_nombre_maximal_de_tentatives(monkeypatch) -> None:
+    import requests
+
+    from depouille.llm.mistral_provider import TENTATIVES_MAX
+
+    envois = _requetes(monkeypatch, [_Reponse(429)] * TENTATIVES_MAX)
+    with pytest.raises(requests.HTTPError):
+        MistralProvider("cle").appeler("systeme", "prompt", "mistral-large-latest")
+    assert len(envois) == TENTATIVES_MAX

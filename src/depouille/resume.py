@@ -22,27 +22,38 @@ from datetime import datetime, timezone
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import contient_qualification
+from .garde_fous import problemes_redaction
 from .llm import ErreurModeOffline, obtenir_provider
+from .resume_detaille import _elements
+
+MAX_FAITS, MAX_ACTES, MAX_DECLARATIONS = 100, 40, 40
 
 PROMPT_RESUME = (
     "Tu rédiges le résumé factuel d'un dossier de procédure pénale française, pour un "
     "avocat qui l'ouvre pour la première fois. Un seul paragraphe de 3 à 5 phrases, 110 "
     "mots au maximum, sans titre, sans liste, sans guillemets ni préambule. "
-    "Dans l'ordre : la nature des faits et leur période ; les personnes en cause et leur "
-    "rôle tel qu'il apparaît dans le dossier ; le stade de la procédure ; puis, s'il y a "
-    "des déclarations de la personne défendue (à défaut, de la personne mise en cause), "
-    "ce qu'elle reconnaît et ce qu'elle conteste, en reprenant ses propres déclarations "
-    "sans les interpréter. "
+    "Dans l'ordre : ce qui s'est passé et quand ; les personnes en cause et leur rôle tel "
+    "qu'il apparaît dans le dossier ; le stade de la procédure ; puis, s'il y a des "
+    "déclarations de la personne défendue (à défaut, de la personne mise en cause), ce "
+    "qu'elle reconnaît et ce qu'elle conteste. "
+    "Chaque élément fourni se termine par sa citation exacte entre « » : c'est elle qui "
+    "fait foi. Reprends heures, durées, dates et chiffres tels qu'ils y sont écrits, sans "
+    "les arrondir ni les convertir. Si une personne a varié d'une audition à l'autre, "
+    "donne chaque version avec sa date, sans trancher. "
+    "Décris les faits avec les mots des éléments fournis : n'écris jamais « violences », "
+    "« vol », « plainte », « réquisitoire » ou tout autre nom d'infraction ou d'acte de "
+    "procédure qui n'y figure pas. Une qualification pénale ne peut être mentionnée que "
+    "si un élément la cite, en l'attribuant à la pièce qui la retient. "
+    "Écris les dates comme dans les éléments (14/03/2031) ; n'écris de période que si ses "
+    "deux bornes diffèrent. "
     "Écris chaque nom exactement comme dans la liste des personnes (NOM en capitales) et "
     "respecte le rôle indiqué pour chacune. N'écris jamais d'élément entre crochets "
     "(« [adresse] ») : omets plutôt ce que tu ne connais pas. "
-    "Base-toi UNIQUEMENT sur les personnes, faits et déclarations fournis — n'ajoute, ne "
-    "déduis et n'invente rien. Si une qualification pénale figure dans les faits fournis, "
-    "tu peux la mentionner en l'attribuant à son auteur (« sous la qualification de … "
-    "retenue par le réquisitoire »), jamais comme une appréciation de ta part. "
-    "Jamais d'appréciation sur la culpabilité, la solidité des charges, la régularité des "
-    "actes ou la stratégie de défense ; jamais les mots « nullité » ou « irrégularité »."
+    "Base-toi UNIQUEMENT sur les personnes et éléments fournis — n'ajoute, ne déduis et "
+    "n'invente rien. "
+    "Jamais d'appréciation sur la culpabilité, la sincérité, la solidité des charges, la "
+    "régularité des actes ou la stratégie de défense ; jamais les mots « nullité » ou "
+    "« irrégularité »."
 )
 
 
@@ -68,66 +79,82 @@ def _bloc_client(personnes: list[sqlite3.Row]) -> str:
     return "Aucune personne mise en cause n'est identifiée : n'écris pas « votre client »."
 
 
+def _elements_du_resume(
+    db: sqlite3.Connection, personnes: list[sqlite3.Row]
+) -> tuple[list[str], list[str], list[str]]:
+    """Faits et actes vérifiés, et déclarations vérifiées du client désigné
+    (à défaut, des mises en cause) — chacun avec sa date et sa citation.
+
+    La citation est indispensable : pour une audition, le « point factuel »
+    n'est souvent que le sujet de la question (« heure d'arrivée sur les
+    lieux »). Sans la réponse elle-même, le modèle l'inventait — observé en
+    réel : « arrivé vers 21h00 » pour un client qui a dit 22 h puis 23 h 30."""
+    filtre = "pe.est_client = 1" if any(p["est_client"] for p in personnes) else "pe.role = 'mis_en_cause'"
+    declarations_retenues = {
+        f"D{r['id']}" for r in db.execute(
+            f"""SELECT d.id FROM declarations d JOIN personnes pe ON pe.id = d.personne_id
+                WHERE d.statut_verif = 'verifie' AND {filtre}"""
+        )
+    }
+    elements = _elements(db)
+    faits = [e["ligne"] for cle, e in elements.items() if cle[0] == "F"][:MAX_FAITS]
+    actes = [e["ligne"] for cle, e in elements.items() if cle[0] == "P"][:MAX_ACTES]
+    declarations = [e["ligne"] for cle, e in elements.items() if cle in declarations_retenues][:MAX_DECLARATIONS]
+    return faits, actes, declarations
+
+
 def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> None:
     if config.offline:
         console.print("  [build] --offline actif : pas de résumé (nécessite un appel au modèle).")
         return
 
     personnes = db.execute("SELECT nom, role, est_client FROM personnes ORDER BY role, nom").fetchall()
-    faits = db.execute(
-        "SELECT description FROM evenements_faits WHERE statut_verif = 'verifie' ORDER BY page LIMIT 100"
-    ).fetchall()
-    # Déclarations du client désigné s'il y en a un, sinon de toutes les
-    # personnes mises en cause.
-    filtre = "pe.est_client = 1" if any(p["est_client"] for p in personnes) else "pe.role = 'mis_en_cause'"
-    declarations = db.execute(
-        f"""SELECT pe.nom, d.point_factuel FROM declarations d
-            JOIN personnes pe ON pe.id = d.personne_id
-            WHERE d.statut_verif = 'verifie' AND {filtre}
-            ORDER BY d.page LIMIT 40"""
-    ).fetchall()
-
+    faits, actes, declarations = _elements_du_resume(db, personnes)
     if not faits:
         console.print("  [build] aucun fait vérifié en base — pas de résumé généré.")
         return
 
     bloc_personnes = "\n".join(f"- {p['nom']} ({p['role']})" for p in personnes) or "Aucune personne identifiée."
-    bloc_faits = "\n".join(f"- {f['description']}" for f in faits)
-    bloc_declarations = (
-        "\n".join(f"- {d['nom']} : {d['point_factuel']}" for d in declarations)
-        or "Aucune déclaration vérifiée."
+    prompt = (
+        f"{_bloc_client(personnes)}\n\n"
+        f"Personnes identifiées :\n{bloc_personnes}\n\n"
+        "Faits établis :\n" + "\n".join(f"- {f}" for f in faits) + "\n\n"
+        "Actes de procédure :\n" + ("\n".join(f"- {a}" for a in actes) or "Aucun acte vérifié.") + "\n\n"
+        "Déclarations vérifiées de la personne défendue (ou des mises en cause) :\n"
+        + ("\n".join(f"- {d}" for d in declarations) or "Aucune déclaration vérifiée.")
     )
 
     debut = datetime.now(timezone.utc)
     provider = obtenir_provider(config)
-    try:
-        reponse = provider.appeler(
-            systeme=PROMPT_RESUME,
-            prompt=(
-                f"{_bloc_client(personnes)}\n\n"
-                f"Personnes identifiées :\n{bloc_personnes}\n\n"
-                f"Faits établis :\n{bloc_faits}\n\n"
-                f"Déclarations vérifiées de la personne défendue (ou des mises en cause) :\n{bloc_declarations}"
-            ),
-            modele=config.modele_analyse,
+    tokens_in = tokens_out = 0
+    texte, problemes = "", []
+    # Deux essais au plus : un résumé écarté l'est pour une raison précise
+    # (une heure absente des sources, un mot d'infraction inventé), que le
+    # modèle corrige presque toujours quand on la lui donne. Au-delà, mieux
+    # vaut aucun résumé : l'avocat garde la chronologie et les autres onglets.
+    for essai in range(2):
+        consigne = prompt if essai == 0 else (
+            f"{prompt}\n\nTa proposition précédente a été écartée :\n« {texte} »\n"
+            f"Motif : {' ; '.join(problemes)}. Réécris le paragraphe en corrigeant ces "
+            "points, sans rien ajouter qui ne figure dans les éléments fournis."
         )
-    except ErreurModeOffline:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        console.print(f"  [build] échec de la génération du résumé ({exc}).")
-        return
-
-    texte = reponse.texte.strip().strip('"').strip()
-    if not texte:
-        return
-    if "[" in texte or "]" in texte:
-        # Un trou à compléter (« [adresse] ») n'a rien à faire devant l'avocat.
-        console.print("  [build] résumé écarté : il contenait un élément entre crochets.")
-        return
-    if contient_qualification(texte):
-        # Aucun résumé plutôt qu'un résumé qui qualifie : l'avocat garde
-        # la chronologie et les autres onglets, qui ne dépendent pas de lui.
-        console.print("  [build] résumé écarté : il contenait une qualification juridique.")
+        try:
+            reponse = provider.appeler(systeme=PROMPT_RESUME, prompt=consigne, modele=config.modele_analyse)
+        except ErreurModeOffline:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"  [build] échec de la génération du résumé ({exc}).")
+            return
+        tokens_in += reponse.tokens_in
+        tokens_out += reponse.tokens_out
+        texte = reponse.texte.strip().strip('"').strip()
+        if not texte:
+            return
+        problemes = problemes_redaction(texte, prompt)
+        if not problemes:
+            break
+        console.print(f"  [build] résumé écarté (essai {essai + 1}/2) : {' ; '.join(problemes)}.")
+    if problemes:
         return
 
     maintenant = datetime.now(timezone.utc).isoformat()
@@ -138,11 +165,9 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
     )
 
     fin = datetime.now(timezone.utc)
-    cout = config.cout(config.modele_analyse, reponse.tokens_in, reponse.tokens_out)
+    cout = config.cout(config.modele_analyse, tokens_in, tokens_out)
     db.execute(
         "INSERT INTO run_log (etape, statut, debut, fin, tokens_in, tokens_out, cout_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("build", "termine", debut.isoformat(), fin.isoformat(), reponse.tokens_in, reponse.tokens_out, cout),
+        ("build", "termine", debut.isoformat(), fin.isoformat(), tokens_in, tokens_out, cout),
     )
     db.commit()
-
-    console.print(f"  [build] résumé généré ({len(texte.split())} mots).")

@@ -139,3 +139,20 @@ def test_sans_client_designe_mon_client_n_est_pas_devine(monkeypatch, db) -> Non
     vu = _modele(monkeypatch, {"reponse": None, "citations": []})
     questions.repondre_question(db, Config(offline=False), "Mon client a-t-il vu un avocat ?")
     assert "n'a pas désigné son client" in vu["prompt"]
+
+
+def test_reponse_qui_avance_un_element_absent_des_pages_citees(monkeypatch, db) -> None:
+    """Le texte de la réponse est rédigé : une heure qui ne figure sur aucune
+    page citée n'est pas affichée, seuls les passages vérifiés le sont."""
+    _modele(monkeypatch, {
+        "reponse": "Mme SERMET a quitté son domicile de Biviers à 14h15.",
+        "citations": [{"page": 1, "citation": "déclare avoir quitté son domicile de Biviers à 13h30"}],
+    })
+    r = questions.repondre_question(db, Config(offline=False), "Quand la victime est-elle partie ?")
+    assert r["statut"] == "passages"
+    assert r["reponse"] == questions.MESSAGE_PASSAGES
+    assert [c["page"] for c in r["citations"]] == [1]
+
+
+def test_consigne_de_donner_chaque_version(monkeypatch, db) -> None:
+    assert "donne chaque version avec sa page" in questions.PROMPT_SYSTEME

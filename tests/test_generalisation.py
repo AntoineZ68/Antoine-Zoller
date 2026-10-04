@@ -638,3 +638,24 @@ def test_repli_modele_jamais_en_mode_offline(monkeypatch) -> None:
 
     assert personne_id is None
     assert methode == "non_identifie"
+
+
+def test_procureur_jamais_pris_pour_la_personne_concernee() -> None:
+    """PV de prolongation : le premier nom est celui du procureur qui
+    autorise, pas celui du gardé à vue (observé sur le banc d'essai IA :
+    le procureur devenait « mis en cause »)."""
+    texte = (
+        "Le 15/03/2031 à 08h10, M. Antoine ROQUIER, Procureur de la République de Vaucressin, "
+        "autorise la prolongation de la garde à vue de Julien MORVANNEC pour une durée de "
+        "vingt-quatre heures."
+    )
+    assert _premiere_mention_hors_titres(texte) == ("Julien", "MORVANNEC")
+
+
+def test_enqueteur_ecarte_mais_pas_un_agent_immobilier() -> None:
+    assert _premiere_mention_hors_titres(
+        "Nous, Marc TESSIER, agent de police judiciaire, entendons Paul LEROUX."
+    ) == ("Paul", "LEROUX")
+    assert _premiere_mention_hors_titres(
+        "Julien MORVANNEC, agent immobilier, demeurant 14 rue des Tanneurs."
+    ) == ("Julien", "MORVANNEC")
