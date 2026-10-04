@@ -128,7 +128,7 @@ def _elements_du_resume(
 
 def _examiner(
     reponse_texte: str, elements: dict[str, dict], bloc_client: str,
-    discordances: list[tuple[str, list[str]]] = (), noms: list[str] = (),
+    discordances: list[tuple[str, list[str]]] = (), noms: list[str] = (), victimes: list[str] = (),
 ) -> tuple[list[str], list[str]]:
     """Renvoie (phrases retenues, motifs de rejet des autres)."""
     try:
@@ -147,8 +147,13 @@ def _examiner(
             motifs.append(f"« {texte} » : aucune source")
             continue
         # « votre client, NOM » est une consigne : le nom est une référence.
+        # Les victimes identifiées aussi : une audition dit « le livreur », le
+        # modèle écrit son nom — sans quoi la version d'un coauteur était
+        # écartée et le résumé n'en donnait qu'une (observé). Les autres noms
+        # restent tenus à leurs sources : pas d'acte prêté au mauvais auteur.
         reference = avec_noms_completes(
-            "\n".join([bloc_client] + [f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources]), noms,
+            "\n".join([bloc_client, *victimes] + [f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources]),
+            noms,
         )
         problemes = problemes_redaction(texte, reference) + versions_tues(texte, discordances)
         if problemes:
@@ -172,6 +177,7 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
     bloc_client = _bloc_client(personnes)
     discordances = discordances_connues(db)
     noms = noms_identifies(db)
+    victimes = [p["nom"] for p in personnes if p["role"] == "victime"]
     bloc_personnes = "\n".join(f"- {p['nom']} ({p['role']})" for p in personnes) or "Aucune personne identifiée."
     prompt = (
         f"{bloc_client}\n\nPersonnes identifiées :\n{bloc_personnes}\n\nÉléments :\n"
@@ -206,7 +212,7 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
             break
         tokens_in += reponse.tokens_in
         tokens_out += reponse.tokens_out
-        retenues, rejets = _examiner(reponse.texte, elements, bloc_client, discordances, noms)
+        retenues, rejets = _examiner(reponse.texte, elements, bloc_client, discordances, noms, victimes)
         motifs = rejets + defauts_de_forme(" ".join(retenues))
         if len(retenues) >= len(meilleures):
             meilleures = retenues

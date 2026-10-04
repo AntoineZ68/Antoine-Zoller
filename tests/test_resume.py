@@ -210,3 +210,16 @@ def test_une_seule_version_d_une_discordance_reecrite(monkeypatch, db) -> None:
     _generer(db)
     assert len(appels) == 2 and "donne chaque version" in appels[1]["prompt"]
     assert _resume_en_base(db) == "Un cambriolage est commis à Biviers le 12/02/2026 ou le 13/02/2026."
+
+
+def test_la_victime_peut_etre_nommee_les_autres_noms_restent_sources(monkeypatch, db) -> None:
+    """Une audition dit « le livreur » : nommer la victime identifiée n'est
+    pas une invention. Un autre nom absent des sources reste écarté."""
+    appels = _modele(monkeypatch, _json(
+        ("Votre client, Lucas MARTINON, reconnaît avoir attendu dans la voiture d'Odile SERMET.", ["D1"]),
+        ("Yannick FONTANEL a attendu dans la voiture.", ["D1"]),
+    ), BON)
+    _generer(db)
+    motifs = appels[1]["prompt"].split("en partie écartée")[1]
+    assert "Yannick FONTANEL a attendu" in motifs, "un nom hors sources reste écarté"
+    assert "Odile SERMET" not in motifs, "la victime identifiée peut être nommée"
