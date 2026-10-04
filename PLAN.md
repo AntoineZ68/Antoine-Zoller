@@ -70,7 +70,7 @@ pages OCR.
 
 Sur un dossier réel où une part significative des pages est scannée (PV
 manuscrits, fax, photocopies), le poste de temps dominant est l'OCR
-(`ocrmypdf` + Tesseract), pas l'appel au modèle. À titre indicatif, Tesseract
+(Tesseract, page par page en parallèle), pas l'appel au modèle. À titre indicatif, Tesseract
 en local tourne autour de quelques secondes par page selon la résolution — sur
 150-200 pages scannées, l'OCR seul peut représenter l'essentiel du budget de
 20 minutes, avant même la classification et l'analyse. J'architecture le
@@ -158,9 +158,10 @@ Bannière obligatoire à chaque lancement, avant toute action :
 ### 2.4 Étapes — détail d'implémentation
 
 **Ingestion** : `pypdf` pour split/pages, `pdfplumber` pour texte natif. Seuil
-« page scannée » : < 50 caractères extraits → passage à `ocrmypdf` (langue
-`fra`), le texte OCR remplace le texte natif pour cette page, `ocr_applique =
-1`. Détection de cote par regex multi-motifs (en-tête/pied de page,
+« page scannée » : < 50 caractères extraits, ou < 300 sur une page couverte
+aux trois cinquièmes par une image (mention ajoutée par le greffe) → passage à
+Tesseract (langue `fra`), calque de texte invisible posé sur la page d'origine
+sans réencoder ses images, `ocr_applique = 1`. Détection de cote par regex multi-motifs (en-tête/pied de page,
 tolérance sur variantes de format) ; à défaut `NON TROUVÉ`, jamais de
 déduction.
 

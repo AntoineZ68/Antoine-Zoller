@@ -1,7 +1,6 @@
 # Image d'hébergement du serveur web (web/backend). Installe aussi Tesseract
-# et Ghostscript : sans eux, ocrmypdf plante dès qu'une page scannée du
-# dossier n'a pas de texte natif — un hébergeur Python standard ne les
-# fournit pas d'office.
+# (et son modèle français) : sans lui, aucune page scannée du dossier ne
+# peut être lue — un hébergeur Python standard ne le fournit pas d'office.
 FROM python:3.11-slim
 
 # Sans ça, la sortie standard est mise en mémoire tampon par blocs dès
@@ -17,10 +16,6 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-fra \
-    ghostscript \
-    qpdf \
-    unpaper \
-    pngquant \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -23,7 +23,7 @@ from rich.table import Table
 
 from .classify import _est_titre
 from .config import Config
-from .llm import ErreurModeOffline, extraire_json, lots_de_pages, obtenir_provider
+from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, lots_de_pages, obtenir_provider
 from .regex_patterns import (
     FRAGMENT_DATE,
     FRAGMENT_HEURE,
@@ -364,7 +364,11 @@ def _extraire_faits_llm(
     db: sqlite3.Connection, config: Config, pieces: list[sqlite3.Row], console: Console, compteur: dict[str, int]
 ) -> int:
     provider = obtenir_provider(config)
-    nb = 0
+    # Une pièce longue est analysée en plusieurs appels plutôt que tronquée
+    # à la taille d'un seul : voir lots_de_pages. Tous les lots de toutes
+    # les pièces sont préparés d'abord (lecture de la base), envoyés au
+    # modèle en parallèle, puis enregistrés dans l'ordre.
+    lots: list[tuple[sqlite3.Row, list]] = []
     for piece in pieces:
         if piece["type"] in TYPES_SANS_FAITS_NARRATIFS:
             continue
@@ -372,37 +376,39 @@ def _extraire_faits_llm(
             "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
             (piece["page_debut"], piece["page_fin"]),
         ).fetchall()
-        # Une pièce longue est analysée en plusieurs appels successifs plutôt
-        # que tronquée à la taille d'un seul : voir lots_de_pages.
-        for lot in lots_de_pages(pages):
-            texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in lot)
-            try:
-                reponse = provider.appeler(
-                    systeme=PROMPT_EXTRACTION_FAITS,
-                    prompt=texte,
-                    modele=config.modele_analyse,
-                )
-                compteur["tokens_in"] += reponse.tokens_in
-                compteur["tokens_out"] += reponse.tokens_out
-                faits = extraire_json(reponse.texte)
-            except ErreurModeOffline:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                console.print(
-                    f"  [chrono] échec extraction des faits pour la pièce {piece['id']} "
-                    f"(pages {lot[0]['numero_global']}-{lot[-1]['numero_global']}) : {exc}, lot ignoré."
-                )
-                continue
+        lots.extend((piece, lot) for lot in lots_de_pages(pages))
 
-            for fait in faits:
-                personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
-                db.execute(
-                    """INSERT INTO evenements_faits
-                       (piece_id, page, citation, personne_id_source, description, statut_verif)
-                       VALUES (?, ?, ?, ?, ?, 'a_faire')""",
-                    (piece["id"], fait["page"], fait["citation"], personne_id, fait.get("description", "")),
-                )
-                nb += 1
+    def appeler(element: tuple[sqlite3.Row, list]):
+        _, lot = element
+        texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in lot)
+        return provider.appeler(systeme=PROMPT_EXTRACTION_FAITS, prompt=texte, modele=config.modele_analyse)
+
+    nb = 0
+    for (piece, lot), reponse in zip(lots, executer_en_parallele(appeler, lots)):
+        try:
+            if isinstance(reponse, Exception):
+                raise reponse
+            compteur["tokens_in"] += reponse.tokens_in
+            compteur["tokens_out"] += reponse.tokens_out
+            faits = extraire_json(reponse.texte)
+        except ErreurModeOffline:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            console.print(
+                f"  [chrono] échec extraction des faits pour la pièce {piece['id']} "
+                f"(pages {lot[0]['numero_global']}-{lot[-1]['numero_global']}) : {exc}, lot ignoré."
+            )
+            continue
+
+        for fait in faits:
+            personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
+            db.execute(
+                """INSERT INTO evenements_faits
+                   (piece_id, page, citation, personne_id_source, description, statut_verif)
+                   VALUES (?, ?, ?, ?, ?, 'a_faire')""",
+                (piece["id"], fait["page"], fait["citation"], personne_id, fait.get("description", "")),
+            )
+            nb += 1
     db.commit()
     return nb
 

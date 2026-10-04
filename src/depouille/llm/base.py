@@ -8,9 +8,12 @@ toucher au pipeline.
 from __future__ import annotations
 
 import json
+import os
 import re
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Callable, TypeVar
 
 
 @dataclass
@@ -21,6 +24,47 @@ class ReponseLLM:
 
 
 TAILLE_LOT_CARACTERES = 8000
+
+# Appels au modèle menés de front. Un appel d'analyse prend 10 à 30 s ; un
+# dossier de 2 000 pages en demande plus d'un millier : en file indienne,
+# c'est une nuit entière. Plafonné bas par défaut — au-delà, le palier de
+# débit du compte chez le fournisseur (requêtes et jetons par minute) refuse
+# les appels (429), que le SDK réessaie mais qui rallongent d'autant.
+# Réglable par LLM_APPELS_PARALLELES selon le palier du compte.
+APPELS_PARALLELES_PAR_DEFAUT = 4
+
+
+def appels_paralleles() -> int:
+    try:
+        return max(1, int(os.environ.get("LLM_APPELS_PARALLELES", APPELS_PARALLELES_PAR_DEFAUT)))
+    except ValueError:
+        return APPELS_PARALLELES_PAR_DEFAUT
+
+
+E = TypeVar("E")
+R = TypeVar("R")
+
+
+def executer_en_parallele(fonction: Callable[[E], R], elements: list[E]) -> list[R | Exception]:
+    """Applique `fonction` à chaque élément, au plus appels_paralleles() à la
+    fois, et rend les résultats DANS L'ORDRE des éléments — l'ordre
+    d'insertion en base reste celui d'un traitement séquentiel.
+
+    Une exception est rendue à la place du résultat, jamais levée : chaque
+    appelant traite l'échec d'un lot à sa place, comme il le faisait en
+    séquentiel (un lot en échec ne fait pas perdre les autres). La base
+    SQLite ne doit être touchée que par le fil appelant, avant ou après."""
+    def protege(element: E) -> R | Exception:
+        try:
+            return fonction(element)
+        except Exception as exc:  # noqa: BLE001 — rendue à l'appelant
+            return exc
+
+    n = appels_paralleles()
+    if n == 1 or len(elements) <= 1:
+        return [protege(e) for e in elements]
+    with ThreadPoolExecutor(max_workers=n) as executeur:
+        return list(executeur.map(protege, elements))
 
 
 def lots_de_pages(pages, taille_max: int = TAILLE_LOT_CARACTERES) -> list[list]:

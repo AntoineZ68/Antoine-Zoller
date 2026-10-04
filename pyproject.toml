@@ -14,8 +14,7 @@ dependencies = [
     "rapidfuzz>=3.9",
     "tomli>=2.0; python_version < '3.11'",
     "Pillow>=10.3",
-    "ocrmypdf>=16.0",
-    "pymupdf>=1.24",
+    "pymupdf>=1.25",
     "requests>=2.31",
 ]
 

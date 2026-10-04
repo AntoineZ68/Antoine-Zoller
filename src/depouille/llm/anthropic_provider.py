@@ -25,7 +25,11 @@ class AnthropicProvider(LLMProvider):
         # jamais échouer ni aboutir. 60 s (même valeur que MistralProvider)
         # borne l'attente à une durée raisonnable pour une réponse dont le
         # nombre de tokens de sortie reste modéré (max_tokens=4096).
-        self._client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        # Les appels partent désormais en parallèle (executer_en_parallele) :
+        # sur un gros dossier, le plafond de débit du compte renverra des
+        # refus temporaires (429). Le SDK les réessaie en respectant le délai
+        # indiqué par l'API ; 2 tentatives (défaut) feraient perdre des lots.
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=60.0, max_retries=6)
 
     def appeler(self, systeme: str, prompt: str, modele: str) -> ReponseLLM:
         reponse = self._client.messages.create(

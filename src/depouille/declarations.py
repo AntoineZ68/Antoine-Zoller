@@ -30,7 +30,7 @@ from rich.table import Table
 
 from .classify import TYPES_AUDITION
 from .config import Config
-from .llm import ErreurModeOffline, extraire_json, lots_de_pages, obtenir_provider
+from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, lots_de_pages, obtenir_provider
 from .verification import _normaliser, verifier_table
 
 RE_QUESTION = re.compile(r"^(?:Question|Q)[.:\s]+(.+)$")
@@ -123,25 +123,31 @@ PROMPT_EXTRACTION_DECLARATIONS = (
 
 
 def _extraire_declarations_llm(
-    config: Config, pages: list[sqlite3.Row], console: Console, compteur: dict[str, int]
-) -> list[dict]:
-    """Une audition longue est analysée en plusieurs appels successifs plutôt
-    que tronquée à la taille d'un seul : la fin d'un interrogatoire (aveux,
+    config: Config, pages_par_piece: list[list[sqlite3.Row]], console: Console, compteur: dict[str, int]
+) -> list[list[dict]]:
+    """Points déclarés de chaque pièce (une liste par pièce, dans l'ordre).
+
+    Une audition longue est analysée en plusieurs appels plutôt que
+    tronquée à la taille d'un seul : la fin d'un interrogatoire (aveux,
     rétractation, contradiction) est précisément ce qu'on ne peut pas perdre.
-    Voir lots_de_pages."""
+    Voir lots_de_pages. Les lots de toutes les pièces partent en parallèle ;
+    les points reviennent dans l'ordre des pièces et des pages."""
     provider = obtenir_provider(config)
-    resultats: list[dict] = []
-    for lot in lots_de_pages(pages):
+    lots = [(i, lot) for i, pages in enumerate(pages_par_piece) for lot in lots_de_pages(pages)]
+
+    def appeler(element: tuple[int, list]):
+        _, lot = element
         texte = "\n".join(f"[page {p['numero_global']}]\n{p['texte']}" for p in lot)
+        return provider.appeler(systeme=PROMPT_EXTRACTION_DECLARATIONS, prompt=texte, modele=config.modele_analyse)
+
+    resultats: list[list[dict]] = [[] for _ in pages_par_piece]
+    for (i, lot), reponse in zip(lots, executer_en_parallele(appeler, lots)):
         try:
-            reponse = provider.appeler(
-                systeme=PROMPT_EXTRACTION_DECLARATIONS,
-                prompt=texte,
-                modele=config.modele_analyse,
-            )
+            if isinstance(reponse, Exception):
+                raise reponse
             compteur["tokens_in"] += reponse.tokens_in
             compteur["tokens_out"] += reponse.tokens_out
-            resultats.extend(extraire_json(reponse.texte))
+            resultats[i].extend(extraire_json(reponse.texte))
         except ErreurModeOffline:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -174,6 +180,8 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
     nb_llm = 0
     nb_non_couvert = 0
     compteur = {"tokens_in": 0, "tokens_out": 0}
+    a_enregistrer: list[tuple[sqlite3.Row, int, list[dict] | None]] = []
+    pages_pour_le_modele: list[list[sqlite3.Row]] = []
 
     for piece in pieces:
         pages = db.execute(
@@ -193,17 +201,25 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
         points = _extraire_qr_deterministe(pages)
         if points:
             nb_deterministe += len(points)
+            a_enregistrer.append((piece, personne_id, points))
         elif not config.offline:
-            points = _extraire_declarations_llm(config, pages, console, compteur)
-            nb_llm += len(points)
+            a_enregistrer.append((piece, personne_id, None))
+            pages_pour_le_modele.append(pages)
         else:
             nb_non_couvert += 1
             console.print(
                 f"  [decl] pièce {piece['id']} (pages {piece['page_debut']}-{piece['page_fin']}) "
                 "sans structure Question/Réponse reconnue -- non couverte en --offline."
             )
-            continue
 
+    # Les pièces sans structure Question/Réponse passent par le modèle, toutes
+    # ensemble (appels en parallèle) ; on enregistre ensuite dans l'ordre.
+    points_du_modele = iter(_extraire_declarations_llm(config, pages_pour_le_modele, console, compteur)
+                            if pages_pour_le_modele else [])
+    for piece, personne_id, points in a_enregistrer:
+        if points is None:
+            points = next(points_du_modele)
+            nb_llm += len(points)
         for point in points:
             db.execute(
                 """INSERT INTO declarations
