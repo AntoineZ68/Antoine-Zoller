@@ -71,7 +71,7 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
         quand = " ".join(x for x in (f["date"], f["heure"]) if x)
         qui = f" ({f['nom']})" if f["nom"] else ""
         elements[f"F{f['id']}"] = {
-            "page": f["page"], "citation": f["citation"],
+            "page": f["page"], "citation": f["citation"], "libelle": f["nom"] or "",
             "ligne": f"{quand + ' — ' if quand else ''}{f['description']}{qui} — « {f['citation']} »",
         }
     for p in db.execute(
@@ -82,7 +82,7 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
         quand = " ".join(x for x in (p["date"], p["heure"]) if x)
         qui = f", {p['nom']}" if p["nom"] else ""
         elements[f"P{p['id']}"] = {
-            "page": p["page"], "citation": p["citation"],
+            "page": p["page"], "citation": p["citation"], "libelle": p["nom"] or "",
             "ligne": f"{p['nature']} {quand}{qui} — « {p['citation']} »",
         }
     for d in db.execute(
@@ -94,7 +94,7 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
     ):
         quand = f"Le {d['date']}, " if d["date"] else ""
         elements[f"D{d['id']}"] = {
-            "page": d["page"], "citation": d["citation"],
+            "page": d["page"], "citation": d["citation"], "libelle": d["nom"] or "",
             "ligne": f"{quand}{d['nom'] or 'déclarant non identifié'} déclare : {d['point_factuel']} — « {d['citation']} »",
         }
     return elements

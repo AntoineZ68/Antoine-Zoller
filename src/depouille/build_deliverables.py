@@ -28,6 +28,7 @@ from .index_builder import _cle_tri_date
 from .qualite_texte import grouper_en_plages, pages_peu_lisibles
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
 from .resume import generer_resume
+from .contradictions import generer_contradictions
 from .resume_detaille import generer_resume_detaille
 from .surlignage import construire_pdf_surligne
 from .verification import verifier_citation
@@ -444,6 +445,7 @@ def construire_livrables(db: sqlite3.Connection, affaire_dir: Path, config: Conf
     _construire_signalements(db, dossier_out / "06_signalements_procedure.docx")
     generer_resume(db, config, console)
     generer_resume_detaille(db, config, console)
+    generer_contradictions(db, config, console)
     _construire_controle(db, dossier_out / "99_controle.md", resultat_surlignage)
 
     console.print(f"  [build] livrables générés dans {dossier_out}")

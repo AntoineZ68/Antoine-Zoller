@@ -510,6 +510,9 @@
   .description-signalement { font-size: 13px; color: var(--texte-att); line-height: 1.5; }
   .source-signalement { font-size: 12px; color: var(--texte-att-2); font-style: italic; margin-top: 6px; }
 
+  .liste-contradictions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+  .contradiction { border-left: 3px solid var(--accent); padding: 2px 0 2px 14px; }
+  .sources-contradiction { margin-top: 10px; }
   .liste-confrontations { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
   .point-factuel { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--accent); margin-bottom: 8px; }
   .declaration-personne { border-top: 1px solid var(--bordure-douce); padding: 9px 0; }
@@ -1364,6 +1367,10 @@ window.designerClient = designerClient;
 function rendreBlocProcedure(donnees) {
   const sections = [];
 
+  const contradictionsProcedure = rendreContradictions(
+    (donnees.contradictions || []).filter((c) => c.domaine === "procedure"),
+    "Contradictions dans les actes de procédure", null);
+
   if (donnees.gardes_a_vue && donnees.gardes_a_vue.length) {
     sections.push(rendreChronogrammeGav(donnees.gardes_a_vue));
   } else if (donnees.duree_garde_a_vue) {
@@ -1383,6 +1390,8 @@ function rendreBlocProcedure(donnees) {
         <p class="note-resume" style="margin-top:14px;">« — » : acte non retrouvé dans le dossier. Délais calculés à partir des horodatages vérifiés — à recouper avec les textes applicables, jamais une conclusion en soi.</p>
       </div>`);
   }
+
+  if (contradictionsProcedure) sections.push(contradictionsProcedure);
 
   if (donnees.chronologie_procedure.length) {
     sections.push(`
@@ -1418,8 +1427,37 @@ function rendreBlocProcedure(donnees) {
   return sections.join("");
 }
 
+// Contradictions entre pièces : passages qui ne concordent pas, côte à
+// côte, chaque citation cliquable (ouvre la pièce, passage encadré).
+function rendreContradictions(liste, titre, messageVide) {
+  if (!liste.length && !messageVide) return "";
+  return `
+    <div class="carte bloc-contradictions">
+      <h2>${titre}</h2>
+      ${liste.length ? `<ul class="liste-contradictions">${liste.map((c) => `
+        <li class="contradiction">
+          <div class="titre-signalement">${echapperHtml(c.titre)}</div>
+          <div class="description-signalement">${echapperHtml(c.description)}</div>
+          <div class="sources-contradiction">
+            ${c.sources.map((s) => `
+              <div class="declaration-personne">
+                <div class="nom-declarant">${s.libelle ? echapperHtml(s.libelle) + " " : ""}${badgeSource(s.page, s.citation)}</div>
+                <div class="citation-declarant element-source" ${attributsCliquables(s.page, s.citation)}>« ${echapperHtml(s.citation)} »</div>
+              </div>`).join("")}
+          </div>
+        </li>`).join("")}</ul>
+        <p class="note-resume" style="margin-top:14px;">Rapprochements établis à partir des citations du dossier — une erreur de plume ou de lecture du scan peut en expliquer certains. À apprécier par l'avocat, jamais une conclusion en soi.</p>`
+      : `<p class="vide">${messageVide}</p>`}
+    </div>`;
+}
+
 function rendreBlocFond(donnees) {
   const sections = [];
+
+  sections.push(rendreContradictions(
+    (donnees.contradictions || []).filter((c) => c.domaine === "fond"),
+    "Contradictions entre pièces",
+    "Aucune contradiction relevée entre les pièces (identifiants, descriptions, horaires)."));
 
   sections.push(`
     <div class="carte">
@@ -1594,7 +1632,7 @@ async function rendreDetailDossier(dossier) {
   } else if (dossier.statut === "termine") {
     let donnees = {
       resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [],
-      duree_garde_a_vue: null, signalements: [], confrontations: [], recoupements: [],
+      duree_garde_a_vue: null, signalements: [], confrontations: [], recoupements: [], contradictions: [],
       sources: [], index_pieces: [],
     };
     let erreurDonnees = "";

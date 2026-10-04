@@ -102,6 +102,23 @@ class EntiteCommune(BaseModel):
     occurrences: list[OccurrenceEntite]
 
 
+class SourceContradiction(BaseModel):
+    libelle: str = ""
+    page: int
+    citation: str
+
+
+class Contradiction(BaseModel):
+    """Passages qui ne concordent pas d'une pièce à l'autre. `origine` :
+    « regle » (comparaison mécanique) ou « modele » (proposée par le modèle,
+    retenue par les contrôles déterministes)."""
+    domaine: str
+    titre: str
+    description: str
+    sources: list[SourceContradiction]
+    origine: str
+
+
 class SourcePage(BaseModel):
     """Référence de traçabilité d'UNE page du dossier fusionné : de quel
     fichier d'origine elle vient, à quelle page de ce fichier, sous quelle
@@ -207,6 +224,7 @@ class DonneesDossier(BaseModel):
     signalements: list[Signalement] = []
     confrontations: list[PointConfrontation] = []
     recoupements: list[EntiteCommune] = []
+    contradictions: list[Contradiction] = []
     sources: list[SourcePage] = []
     index_pieces: list[PieceIndex] = []
 

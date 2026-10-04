@@ -30,6 +30,7 @@ from depouille.client import PersonneInconnue, designer_client
 from depouille.db import appliquer_migrations, ouvrir_db
 from depouille.gardes_a_vue import gardes_a_vue
 from depouille.conformite import detecter_signalements
+from depouille.contradictions import toutes_les_contradictions
 from depouille.qualite_texte import pages_peu_lisibles
 from depouille.questions import repondre_question
 from depouille.recoupements import detecter_recoupements
@@ -558,6 +559,12 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                 for e in detecter_recoupements(db)
             ]
 
+            contradictions = [
+                {"domaine": c.domaine, "titre": c.titre, "description": c.description,
+                 "sources": c.sources, "origine": c.origine}
+                for c in toutes_les_contradictions(db)
+            ]
+
             # Traçabilité : de quel document d'origine vient chaque page du
             # dossier fusionné. Renvoyé une fois pour tout le dossier plutôt
             # que recopié dans chaque élément extrait — tous portent déjà
@@ -613,6 +620,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         "signalements": signalements,
         "confrontations": confrontations,
         "recoupements": recoupements,
+        "contradictions": contradictions,
         "sources": sources,
         "index_pieces": index_pieces,
     }

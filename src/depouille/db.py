@@ -146,6 +146,18 @@ CREATE TABLE IF NOT EXISTS resume_detaille (
     sources_json TEXT NOT NULL
 );
 
+-- Contradictions entre pièces proposées par le modèle et retenues par les
+-- contrôles déterministes (celles établies par règles fixes se recalculent
+-- à l'affichage). sources_json : [{libelle, page, citation}].
+CREATE TABLE IF NOT EXISTS contradictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ordre INTEGER NOT NULL,
+    domaine TEXT NOT NULL,
+    titre TEXT NOT NULL,
+    description TEXT NOT NULL,
+    sources_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS resume_affaire (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     texte TEXT NOT NULL,

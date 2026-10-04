@@ -87,11 +87,9 @@ class EntiteCommune:
     occurrences: list[OccurrenceEntite] = field(default_factory=list)
 
 
-def detecter_recoupements(db: sqlite3.Connection) -> list[EntiteCommune]:
-    """Un identifiant compte comme "recoupé" s'il apparaît sur au moins deux
-    PAGES différentes du dossier — jamais seulement répété deux fois sur la
-    même page (ex. un numéro de téléphone dans l'en-tête ET la signature
-    d'une même lettre), ce qui ne recouperait rien du tout."""
+def occurrences_identifiants(db: sqlite3.Connection) -> dict[tuple[str, str], list[OccurrenceEntite]]:
+    """Toutes les occurrences de chaque identifiant, par (type, valeur
+    normalisée) — une seule par page."""
     pages = db.execute("SELECT numero_global, texte FROM pages ORDER BY numero_global").fetchall()
 
     par_cle: dict[tuple[str, str], list[OccurrenceEntite]] = {}
@@ -110,8 +108,16 @@ def detecter_recoupements(db: sqlite3.Connection) -> list[EntiteCommune]:
                     OccurrenceEntite(page=page["numero_global"], citation=citation, valeur_brute=valeur_brute)
                 )
 
+    return par_cle
+
+
+def detecter_recoupements(db: sqlite3.Connection) -> list[EntiteCommune]:
+    """Un identifiant compte comme "recoupé" s'il apparaît sur au moins deux
+    PAGES différentes du dossier — jamais seulement répété deux fois sur la
+    même page (ex. un numéro de téléphone dans l'en-tête ET la signature
+    d'une même lettre), ce qui ne recouperait rien du tout."""
     resultats = []
-    for (type_entite, _cle), occurrences in par_cle.items():
+    for (type_entite, _cle), occurrences in occurrences_identifiants(db).items():
         pages_distinctes = {o.page for o in occurrences}
         if len(pages_distinctes) >= 2:
             resultats.append(EntiteCommune(type_entite=type_entite, valeur=occurrences[0].valeur_brute, occurrences=occurrences))
