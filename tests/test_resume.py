@@ -161,3 +161,23 @@ def test_resume_invente_deux_fois_ecarte(monkeypatch, db) -> None:
     resume.generer_resume(db, Config(offline=False), Console(quiet=True))
     assert len(appels) == 2
     assert _resume_en_base(db) is None
+
+
+def test_resume_trop_long_reecrit_mais_jamais_perdu(monkeypatch, db) -> None:
+    """La forme déclenche un second essai, mais un résumé fidèle et un peu
+    long vaut mieux qu'aucun résumé."""
+    long = "Un cambriolage est commis à Biviers. " + "Lucas MARTINON reconnaît avoir attendu dans la voiture. " * 20
+    appels = _modele_successif(monkeypatch, [long, long])
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert len(appels) == 2 and "mots, pour 110 au plus" in appels[1]["prompt"]
+    assert _resume_en_base(db) == long.strip()
+
+
+def test_resume_qui_recopie_des_citations_reecrit(monkeypatch, db) -> None:
+    appels = _modele_successif(monkeypatch, [
+        "Lucas MARTINON reconnaît « avoir attendu dans la voiture ».",
+        "Lucas MARTINON reconnaît avoir attendu dans la voiture.",
+    ])
+    resume.generer_resume(db, Config(offline=False), Console(quiet=True))
+    assert "guillemets" in appels[1]["prompt"]
+    assert _resume_en_base(db) == "Lucas MARTINON reconnaît avoir attendu dans la voiture."

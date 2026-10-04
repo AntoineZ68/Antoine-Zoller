@@ -38,8 +38,10 @@ PROMPT_RESUME = (
     "qu'elle reconnaît et ce qu'elle conteste. "
     "Chaque élément fourni se termine par sa citation exacte entre « » : c'est elle qui "
     "fait foi. Reprends heures, durées, dates et chiffres tels qu'ils y sont écrits, sans "
-    "les arrondir ni les convertir. Si une personne a varié d'une audition à l'autre, "
-    "donne chaque version avec sa date, sans trancher. "
+    "les arrondir ni les convertir, mais reformule : ne recopie aucune citation entre "
+    "guillemets dans le paragraphe. Si des éléments divergent (une heure, une couleur) "
+    "ou si une personne a varié d'une audition à l'autre, donne chaque version, sans "
+    "trancher. "
     "Décris les faits avec les mots des éléments fournis : n'écris jamais « violences », "
     "« vol », « plainte », « réquisitoire » ou tout autre nom d'infraction ou d'acte de "
     "procédure qui n'y figure pas. Une qualification pénale ne peut être mentionnée que "
@@ -77,6 +79,19 @@ def _bloc_client(personnes: list[sqlite3.Row]) -> str:
             "jamais écrire « votre client »."
         )
     return "Aucune personne mise en cause n'est identifiée : n'écris pas « votre client »."
+
+
+MOTS_MAX = 140  # 110 demandés, avec une marge
+
+
+def defauts_de_forme(texte: str) -> list[str]:
+    defauts = []
+    mots = len(texte.split())
+    if mots > MOTS_MAX:
+        defauts.append(f"{mots} mots, pour 110 au plus")
+    if "«" in texte or "»" in texte:
+        defauts.append("citations recopiées entre guillemets : reformule")
+    return defauts
 
 
 def _elements_du_resume(
@@ -132,11 +147,17 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
     # (une heure absente des sources, un mot d'infraction inventé), que le
     # modèle corrige presque toujours quand on la lui donne. Au-delà, mieux
     # vaut aucun résumé : l'avocat garde la chronologie et les autres onglets.
+    #
+    # La forme (longueur, citations recopiées) déclenche aussi le second
+    # essai, mais n'écarte jamais un résumé fidèle : mieux vaut un résumé un
+    # peu long que pas de résumé. Observé sur Mistral Large : 200 mots
+    # entrecoupés de citations, pour 110 demandés.
+    defauts: list[str] = []
     for essai in range(2):
         consigne = prompt if essai == 0 else (
             f"{prompt}\n\nTa proposition précédente a été écartée :\n« {texte} »\n"
-            f"Motif : {' ; '.join(problemes)}. Réécris le paragraphe en corrigeant ces "
-            "points, sans rien ajouter qui ne figure dans les éléments fournis."
+            f"Motif : {' ; '.join(problemes + defauts)}. Réécris le paragraphe en corrigeant "
+            "ces points, sans rien ajouter qui ne figure dans les éléments fournis."
         )
         try:
             reponse = provider.appeler(systeme=PROMPT_RESUME, prompt=consigne, modele=config.modele_analyse)
@@ -151,9 +172,10 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
         if not texte:
             return
         problemes = problemes_redaction(texte, prompt)
-        if not problemes:
+        defauts = defauts_de_forme(texte)
+        if not problemes and (not defauts or essai == 1):
             break
-        console.print(f"  [build] résumé écarté (essai {essai + 1}/2) : {' ; '.join(problemes)}.")
+        console.print(f"  [build] résumé écarté (essai {essai + 1}/2) : {' ; '.join(problemes + defauts)}.")
     if problemes:
         return
 
