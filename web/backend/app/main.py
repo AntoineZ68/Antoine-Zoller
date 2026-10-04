@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 from supabase import Client
 
-from depouille.chrono import calculer_durees
+from depouille.chrono import calculer_durees, trier_actes_procedure
 from depouille.client import PersonneInconnue, designer_client
 from depouille.db import appliquer_migrations, ouvrir_db
 from depouille.gardes_a_vue import gardes_a_vue
@@ -135,12 +135,20 @@ def _verifier_limites(chemins: list[Path]) -> None:
             )
         try:
             with pymupdf.open(chemin) as doc:
+                protege = doc.needs_pass
                 total_pages += doc.page_count
-        except Exception as exc:  # noqa: BLE001 — PDF corrompu ou protégé
+        except Exception as exc:  # noqa: BLE001 — PDF corrompu
             raise HTTPException(
                 status_code=400,
-                detail=f"« {chemin.name} » ne peut pas être ouvert (PDF endommagé ou protégé par mot de passe).",
+                detail=f"« {chemin.name} » ne peut pas être ouvert (PDF endommagé).",
             ) from exc
+        if protege:
+            # Il s'ouvrirait ici, mais aucune page ne pourrait être lue :
+            # le traitement échouerait plus loin, sans explication.
+            raise HTTPException(
+                status_code=400,
+                detail=f"« {chemin.name} » est protégé par un mot de passe : enregistrez-en une copie sans mot de passe, puis renvoyez-la.",
+            )
     if total_pages > LIMITE_PAGES:
         raise HTTPException(
             status_code=413,
@@ -467,13 +475,15 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             # quand seule l'heure manque.
             faits.sort(key=lambda f: (_cle_tri_date(f["date"]), f["heure"] or "00h00", f["page"]))
             procedure = [
-                dict(r)
-                for r in db.execute(
-                    """SELECT ep.date, ep.heure, ep.nature, ep.page, ep.citation, p.nom AS personne
-                       FROM evenements_procedure ep LEFT JOIN personnes p ON p.id = ep.personne_id
-                       WHERE ep.statut_verif = 'verifie'
-                       ORDER BY ep.date, ep.heure"""
-                )
+                {k: v for k, v in acte.items() if k != "piece_id"}
+                for acte in trier_actes_procedure([
+                    dict(r)
+                    for r in db.execute(
+                        """SELECT ep.date, ep.heure, ep.nature, ep.page, ep.citation, ep.piece_id, p.nom AS personne
+                           FROM evenements_procedure ep LEFT JOIN personnes p ON p.id = ep.personne_id
+                           WHERE ep.statut_verif = 'verifie'"""
+                    )
+                ])
             ]
 
             # Chronologie de garde à vue et signalements structurels : mêmes

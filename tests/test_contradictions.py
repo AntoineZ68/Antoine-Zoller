@@ -217,3 +217,16 @@ def test_dossier_traite_avant_cette_fonction_regles_seules(db) -> None:
     _page(db, 12, "immatriculé ZV-535-RT")
     db.commit()
     assert [c.origine for c in toutes_les_contradictions(db)] == ["regle"]
+
+
+def test_discordance_trouvee_par_les_regles_et_le_modele_affichee_une_fois(db) -> None:
+    _deux_pieces(db)
+    _acte(db, 1, "interpellation", "10/03/2026", "06h05", 1, "interpellé à 06h05")
+    _acte(db, 2, "interpellation", "10/03/2026", "06h30", 2, "interpellé vers 06h30")
+    sources = [{"libelle": "", "page": 1, "citation": "interpellé à 06h05"}, {"libelle": "", "page": 2, "citation": "interpellé vers 06h30"}]
+    db.execute(
+        "INSERT INTO contradictions (ordre, domaine, titre, description, sources_json) VALUES (1, 'procedure', 'Heure d''interpellation', 'd', ?)",
+        (json.dumps(sources),),
+    )
+    db.commit()
+    assert [c.origine for c in toutes_les_contradictions(db)] == ["regle"]

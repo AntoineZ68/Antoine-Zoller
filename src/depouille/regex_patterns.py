@@ -138,7 +138,11 @@ def trouver_dates(texte: str) -> list[str]:
     return resultats
 
 
-RE_FIN_PHRASE = re.compile(r"(?<!\b[A-ZÀ-Ÿ])\.(?=\s|$)")
+# Frontière posée par texte_sans_entete là où des lignes ont été retirées
+# (intitulé, cote, référence) : une phrase ne la traverse jamais. C'est un
+# séparateur de paragraphe Unicode — un blanc pour str.strip() et pour \s.
+SEPARATEUR_LIGNES_RETIREES = "\u2029"
+RE_FIN_PHRASE = re.compile(r"(?<!\b[A-ZÀ-Ÿ])\.(?=\s|$)|\u2029")
 
 
 def phrase_contenant(texte: str, position: int) -> str:
@@ -388,18 +392,46 @@ def detecter_date_acte(texte: str) -> str | None:
     return normaliser_date(m.group(1))
 
 
+RE_LIGNE_COTE = re.compile(
+    r"cote\s*(?:n[°ºo]\.?\s*)?[:.]?\s*[A-Za-z]?\s*[.\-]?\s*\d{1,6}(?:\s*/\s*\d{1,4})?",
+    re.IGNORECASE,
+)
+
+
+def _ligne_de_cote(ligne: str, position: int, nb_lignes: int) -> bool:
+    """« Cote D12 » n'importe où ; « D 12 » ou « D45/3 » seul sur sa ligne,
+    seulement en marge (premières ou dernières lignes), comme detecter_cote."""
+    if RE_LIGNE_COTE.fullmatch(ligne):
+        return True
+    en_marge = position < LIGNES_DE_MARGE or position >= nb_lignes - LIGNES_DE_MARGE
+    return en_marge and bool(RE_TAMPON_COTE.match(ligne))
+
+
 def texte_sans_entete(texte: str, est_titre) -> str:
-    """Reconstruit le corps d'une page en excluant l'intitulé en capitales
-    et le pied de page (numéro de procédure/cote), et en recollant les
-    lignes en un seul bloc — une phrase peut être répartie sur plusieurs
-    lignes visuelles du PDF, découper ligne à ligne couperait une citation
-    en plein mot."""
-    lignes = [
-        ligne.strip()
-        for ligne in texte.splitlines()
-        if ligne.strip() and not est_titre(ligne.strip()) and "N° PARQUET" not in ligne
-    ]
-    return " ".join(lignes)
+    """Reconstruit le corps d'une page en excluant l'intitulé en capitales,
+    la cote tamponnée et le pied de page (numéro de procédure), et en
+    recollant les lignes en un seul bloc — une phrase peut être répartie sur
+    plusieurs lignes visuelles du PDF, découper ligne à ligne couperait une
+    citation en plein mot.
+
+    Là où des lignes ont été retirées, une frontière de phrase est posée
+    (SEPARATEUR_LIGNES_RETIREES). Sans elle, la cote « D3 » tamponnée en haut
+    de page et la première phrase sous l'intitulé se retrouvaient collées :
+    citation « D3 Le 14/03/2031 à 08h15, … » introuvable telle quelle sur la
+    page, donc rejetée — et avec elle le placement en garde à vue, la
+    notification des droits ou la fin de mesure de toute pièce cotée en tête."""
+    lignes = [ligne.strip() for ligne in texte.splitlines() if ligne.strip()]
+    morceaux: list[str] = []
+    retiree = False
+    for position, ligne in enumerate(lignes):
+        if est_titre(ligne) or "N° PARQUET" in ligne or _ligne_de_cote(ligne, position, len(lignes)):
+            retiree = True
+            continue
+        if retiree and morceaux:
+            morceaux.append(SEPARATEUR_LIGNES_RETIREES)
+        morceaux.append(ligne)
+        retiree = False
+    return " ".join(morceaux)
 
 
 def trouver_heures(texte: str) -> list[str]:

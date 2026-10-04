@@ -114,3 +114,14 @@ def test_pdf_illisible_refuse(api) -> None:
     assert r.status_code == 400
     assert "abime.pdf" in r.json()["detail"]
     assert supabase.inserts == []
+
+
+def test_pdf_protege_par_mot_de_passe_refuse(api) -> None:
+    client, supabase, _ = api
+    with pymupdf.open() as doc:
+        doc.new_page()
+        protege = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="secret")
+    r = _envoyer(client, ("verrouille.pdf", protege))
+    assert r.status_code == 400
+    assert "mot de passe" in r.json()["detail"]
+    assert supabase.inserts == []

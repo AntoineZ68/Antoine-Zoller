@@ -20,15 +20,16 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from rich.console import Console
 
+from .chrono import trier_actes_procedure
 from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
+from .contradictions import generer_contradictions, toutes_les_contradictions
 from .gardes_a_vue import formater_duree, gardes_a_vue
 from .index_builder import _cle_tri_date
 from .qualite_texte import grouper_en_plages, pages_peu_lisibles
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
 from .resume import generer_resume
-from .contradictions import generer_contradictions
 from .resume_detaille import generer_resume_detaille
 from .surlignage import construire_pdf_surligne
 from .verification import verifier_citation
@@ -37,13 +38,6 @@ RE_NE_LE = re.compile(r"né(?:e)?\s+le\s+(\d{2}/\d{2}/\d{4})\s+à\s+([A-ZÀ-Ÿ][
 RE_DEMEURANT = re.compile(r"demeurant\s+([^,.\n]+)")
 
 PIECES_PERSONNALITE = ("Enquête de personnalité", "Casier judiciaire")
-
-
-def _cle_tri_date_heure(date_str: str | None, heure_str: str | None) -> tuple[int, str, str]:
-    if not date_str:
-        return (1, "9999", "99h99")
-    j, m, a = date_str.split("/")
-    return (0, f"{a}{m}{j}", heure_str or "")
 
 
 def _ajouter_table_docx(doc: Document, entetes: list[str], lignes: list[list[str]]) -> None:
@@ -91,7 +85,7 @@ def _construire_chronologie_procedure(db: sqlite3.Connection, chemin: Path) -> N
            LEFT JOIN personnes p ON p.id = ep.personne_id
            WHERE ep.statut_verif = 'verifie'"""
     ).fetchall()
-    lignes = sorted(lignes, key=lambda r: _cle_tri_date_heure(r["date"], r["heure"]))
+    lignes = trier_actes_procedure(lignes)
     _ajouter_table_docx(
         doc,
         ["Date", "Heure", "Nature", "Personne", "Page", "Citation"],
@@ -294,6 +288,25 @@ def _construire_signalements(db: sqlite3.Connection, chemin: Path) -> None:
                 p.add_run(f"Source (p. {s.page_reference}) : ").bold = True
                 p.add_run(f"« {s.citation_reference} »")
 
+    # Les contradictions entre pièces, comme à l'écran : chaque passage avec
+    # sa page et sa citation exacte, jamais une conclusion.
+    doc.add_heading("Contradictions entre pièces", level=1)
+    doc.add_paragraph(
+        "Passages qui ne concordent pas d'une pièce à l'autre, rapprochés automatiquement. "
+        "Une erreur de plume ou de lecture du scan peut en expliquer certains — à apprécier "
+        "par l'avocat."
+    )
+    contradictions = toutes_les_contradictions(db)
+    if not contradictions:
+        doc.add_paragraph("Aucune contradiction relevée entre les pièces.")
+    for c in contradictions:
+        doc.add_heading(c.titre, level=2)
+        doc.add_paragraph(c.description)
+        for source in c.sources:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(f"{source['libelle'] + ' — ' if source.get('libelle') else ''}p. {source['page']} : ").bold = True
+            p.add_run(f"« {source['citation']} »")
+
     doc.save(chemin)
 
 
@@ -442,10 +455,11 @@ def construire_livrables(db: sqlite3.Connection, affaire_dir: Path, config: Conf
     _construire_chronologie_faits(db, dossier_out / "03_chronologie_faits.docx")
     _construire_declarations(db, dossier_out / "04_declarations.xlsx")
     _construire_personnalite(db, dossier_out / "05_personnalite.docx", config.seuil_flou_ocr)
+    # Avant le document des signalements, qui les reprend.
+    generer_contradictions(db, config, console)
     _construire_signalements(db, dossier_out / "06_signalements_procedure.docx")
     generer_resume(db, config, console)
     generer_resume_detaille(db, config, console)
-    generer_contradictions(db, config, console)
     _construire_controle(db, dossier_out / "99_controle.md", resultat_surlignage)
 
     console.print(f"  [build] livrables générés dans {dossier_out}")

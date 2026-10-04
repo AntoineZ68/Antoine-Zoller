@@ -92,3 +92,14 @@ def test_personnalite_ne_contient_que_des_elements_sources(dossier_traite: Dossi
     for texte in textes:
         citation = texte.split("«", 1)[1].rsplit("»", 1)[0].strip()
         assert len(citation) > 0
+
+
+def test_document_des_signalements_reprend_les_contradictions(dossier_traite: DossierTraite, tmp_path) -> None:
+    """L'avocat qui imprime doit retrouver les contradictions affichées à
+    l'écran, avec leurs citations."""
+    from docx import Document
+
+    affaire_copie = _preparer_affaire_copie(dossier_traite, tmp_path, "affaire_contradictions")
+    construire_livrables(dossier_traite.db, affaire_copie, dossier_traite.config, console=Console(quiet=True))
+    textes = [p.text for p in Document(affaire_copie / "out" / "06_signalements_procedure.docx").paragraphs]
+    assert "Contradictions entre pièces" in textes

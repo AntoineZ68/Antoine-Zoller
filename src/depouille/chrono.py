@@ -360,6 +360,58 @@ PROMPT_EXTRACTION_FAITS = (
 )
 
 
+RE_HEURE_TRI = re.compile(r"(\d{1,2})\s*h\s*(\d{0,2})", re.IGNORECASE)
+
+
+def _cle_date(date: str | None) -> tuple[int, int, int] | None:
+    try:
+        jour, mois, annee = (int(x) for x in date.split("/"))
+        return (annee, mois, jour)
+    except (AttributeError, ValueError):
+        return None
+
+
+def _minutes(heure: str | None) -> int:
+    m = RE_HEURE_TRI.search(heure or "")
+    return int(m.group(1)) * 60 + int(m.group(2) or 0) if m else 24 * 60
+
+
+def trier_actes_procedure(actes: list) -> list:
+    """Ordre chronologique des actes de procédure, pour la frise, le
+    document Word et la console.
+
+    Trier sur la date telle qu'écrite (« JJ/MM/AAAA ») plaçait le 15/03
+    avant le 16/02 ; et un acte sans date propre (« Audition close à
+    11h15 », la date n'étant écrite qu'en tête de l'audition) passait en
+    tête de frise. Un tel acte prend la date de l'acte daté qui le précède
+    dans la même pièce ; à défaut, il garde sa place dans l'ordre des pages,
+    après les actes datés. Chaque acte reste affiché avec ses seules données
+    lues : la date empruntée ne sert qu'à ranger."""
+    def champ(acte, nom):
+        try:
+            return acte[nom]
+        except (KeyError, IndexError):
+            return None
+
+    par_page = sorted(actes, key=lambda a: champ(a, "page") or 0)
+    date_par_acte: dict[int, tuple[int, int, int] | None] = {}
+    derniere_date_piece: dict[object, tuple[int, int, int]] = {}
+    for acte in par_page:
+        date = _cle_date(champ(acte, "date"))
+        piece = champ(acte, "piece_id")
+        if date is None and piece is not None:
+            date = derniere_date_piece.get(piece)
+        if date is not None and piece is not None:
+            derniere_date_piece[piece] = date
+        date_par_acte[id(acte)] = date
+
+    def cle(acte):
+        date = date_par_acte[id(acte)]
+        return (date is None, date or (0, 0, 0), _minutes(champ(acte, "heure")), champ(acte, "page") or 0)
+
+    return sorted(actes, key=cle)
+
+
 def _extraire_faits_llm(
     db: sqlite3.Connection, config: Config, pieces: list[sqlite3.Row], console: Console, compteur: dict[str, int]
 ) -> int:
@@ -470,8 +522,8 @@ def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: 
     table.add_column("Nature")
     table.add_column("Page")
     table.add_column("Statut")
-    for row in db.execute(
-        "SELECT * FROM evenements_procedure WHERE statut_verif = 'verifie' ORDER BY date, heure"
+    for row in trier_actes_procedure(
+        db.execute("SELECT * FROM evenements_procedure WHERE statut_verif = 'verifie'").fetchall()
     ):
         table.add_row(row["date"] or "NON TROUVÉ", row["heure"] or "NON TROUVÉ", row["nature"], str(row["page"]), row["statut_verif"])
     console.print(table)

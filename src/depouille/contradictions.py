@@ -273,11 +273,19 @@ def toutes_les_contradictions(db: sqlite3.Connection) -> list[Contradiction]:
     """Règles fixes d'abord, puis propositions du modèle (table absente sur
     un dossier traité avant cette fonction : règles seules)."""
     resultats = contradictions_par_regles(db)
+    # Le modèle peut retrouver une discordance déjà établie par les règles
+    # (deux heures d'interpellation) : la même ne s'affiche pas deux fois.
+    deja = [{(src["page"], src["citation"]) for src in c.sources} for c in resultats]
     try:
         for ligne in db.execute("SELECT * FROM contradictions ORDER BY ordre"):
+            sources = json.loads(ligne["sources_json"])
+            cles = {(src["page"], src["citation"]) for src in sources}
+            if any(len(cles & d) >= 2 for d in deja):
+                continue
+            deja.append(cles)
             resultats.append(Contradiction(
                 domaine=ligne["domaine"], titre=ligne["titre"], description=ligne["description"],
-                sources=json.loads(ligne["sources_json"]), origine="modele",
+                sources=sources, origine="modele",
             ))
     except sqlite3.OperationalError:
         pass

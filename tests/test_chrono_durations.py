@@ -53,3 +53,21 @@ def test_tous_les_evenements_de_duree_ont_ete_verifies(dossier_traite: DossierTr
         ).fetchone()
         assert row is not None, f"événement {nature} attendu introuvable"
         assert row["statut_verif"] == "verifie"
+
+
+def test_frise_triee_par_vraie_date_et_actes_sans_date_a_leur_place() -> None:
+    """Trier « JJ/MM/AAAA » comme du texte plaçait le 15/03 avant le 16/02,
+    et un acte sans date (« Audition close à 11h15 ») en tête de frise."""
+    from depouille.chrono import trier_actes_procedure
+
+    actes = [
+        {"nature": "fin_audition", "date": None, "heure": "11h15", "page": 10, "piece_id": 9},
+        {"nature": "fin_garde_a_vue", "date": "15/03/2031", "heure": "20h15", "page": 16, "piece_id": 14},
+        {"nature": "debut_audition", "date": "14/03/2031", "heure": "10h00", "page": 9, "piece_id": 9},
+        {"nature": "plainte", "date": "16/02/2031", "heure": "09h00", "page": 1, "piece_id": 1},
+        {"nature": "interpellation", "date": "14/03/2031", "heure": "7h50", "page": 3, "piece_id": 3},
+        {"nature": "sans_rien", "date": None, "heure": None, "page": 2, "piece_id": 2},
+    ]
+    ordre = [a["nature"] for a in trier_actes_procedure(actes)]
+    assert ordre == ["plainte", "interpellation", "debut_audition", "fin_audition", "fin_garde_a_vue", "sans_rien"]
+    assert actes[0]["date"] is None, "la date empruntée ne sert qu'à ranger, l'acte n'est pas modifié"
