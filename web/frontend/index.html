@@ -585,6 +585,7 @@
           <input type="file" id="champ-fichier" accept="application/pdf" multiple required />
           <p class="vide" style="margin: 8px 0 0;">Un dossier pénal arrive souvent en plusieurs PDF distincts —
           sélectionne-les tous d'un coup (Ctrl ou Maj + clic).</p>
+          <p class="vide" style="margin: 6px 0 0;">Pour l'instant : jusqu'à 150 pages par dossier et 50 Mo par fichier.</p>
           <button type="submit" id="bouton-envoi" class="bouton-primaire">Envoyer</button>
           <div class="erreur" id="erreur-envoi" hidden></div>
         </form>
@@ -1843,6 +1844,12 @@ formEnvoi.addEventListener("submit", async (evenement) => {
   boutonEnvoi.disabled = true;
   boutonEnvoi.textContent = "Envoi en cours...";
   try {
+    // Refus immédiat d'un fichier trop lourd, plutôt qu'après de longues
+    // minutes d'envoi (le serveur vérifie aussi, ainsi que le nombre de pages).
+    const tropLourd = [...document.getElementById("champ-fichier").files].find((f) => f.size > 50 * 1024 * 1024);
+    if (tropLourd) {
+      throw new Error(`« ${tropLourd.name} » fait ${Math.round(tropLourd.size / 1048576)} Mo : la limite est de 50 Mo par fichier pour l'instant. Découpez-le en plusieurs PDF, ou réduisez sa taille (« Réduire la taille du fichier » dans Acrobat ou Aperçu).`);
+    }
     const donnees = new FormData();
     donnees.append("nom", document.getElementById("champ-nom").value);
     donnees.append("reference", document.getElementById("champ-reference").value);

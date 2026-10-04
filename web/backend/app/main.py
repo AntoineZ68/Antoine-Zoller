@@ -107,6 +107,50 @@ def _nom_disponible(repertoire: Path, nom_souhaite: str) -> str:
     return f"{tige}_{compteur}{suffixe}"
 
 
+# Taille de dossier prise en charge pour l'instant. Au-delà, le traitement
+# dépasse ce que le serveur actuel tient en un temps raisonnable, et un
+# fichier de plus de 50 Mo est refusé par le Storage en offre gratuite —
+# mieux vaut le dire à l'envoi qu'échouer au bout d'une heure.
+# Réglables sans redéploiement de code (variables d'environnement).
+LIMITE_PAGES = int(os.environ.get("LIMITE_PAGES", "150"))
+LIMITE_MO_PAR_FICHIER = int(os.environ.get("LIMITE_MO_PAR_FICHIER", "50"))
+
+
+def _verifier_limites(chemins: list[Path]) -> None:
+    import pymupdf
+
+    total_pages = 0
+    for chemin in chemins:
+        taille_mo = chemin.stat().st_size / (1024 * 1024)
+        if taille_mo > LIMITE_MO_PAR_FICHIER:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"« {chemin.name} » fait {taille_mo:.0f} Mo : la limite est de "
+                    f"{LIMITE_MO_PAR_FICHIER} Mo par fichier pour l'instant. Découpez-le en "
+                    "plusieurs PDF, ou réduisez sa taille (« Réduire la taille du fichier » "
+                    "dans Acrobat ou Aperçu)."
+                ),
+            )
+        try:
+            with pymupdf.open(chemin) as doc:
+                total_pages += doc.page_count
+        except Exception as exc:  # noqa: BLE001 — PDF corrompu ou protégé
+            raise HTTPException(
+                status_code=400,
+                detail=f"« {chemin.name} » ne peut pas être ouvert (PDF endommagé ou protégé par mot de passe).",
+            ) from exc
+    if total_pages > LIMITE_PAGES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Ce dossier compte {total_pages} pages : l'outil prend en charge les dossiers "
+                f"jusqu'à {LIMITE_PAGES} pages pour l'instant. Vous pouvez envoyer les tomes "
+                "séparément, chacun comme un dossier."
+            ),
+        )
+
+
 @app.post("/api/dossiers", response_model=schemas.DossierResume, status_code=201)
 async def creer_dossier(
     background_tasks: BackgroundTasks,
@@ -124,24 +168,32 @@ async def creer_dossier(
         if fichier.content_type not in ("application/pdf", "application/x-pdf"):
             raise HTTPException(status_code=400, detail=f"'{fichier.filename}' n'est pas un PDF.")
 
+    # Fichiers écrits et contrôlés AVANT de créer le dossier : un dossier
+    # refusé ne laisse ni ligne en base ni fichier dans le Storage.
+    repertoire_local = Path(tempfile.mkdtemp(prefix="depouille_upload_"))
+    chemins_locaux: list[Path] = []
+    try:
+        for fichier in fichiers:
+            chemin_local = repertoire_local / _nom_disponible(repertoire_local, fichier.filename or "dossier.pdf")
+            with chemin_local.open("wb") as f:
+                shutil.copyfileobj(fichier.file, f)
+            await fichier.close()
+            chemins_locaux.append(chemin_local)
+        _verifier_limites(chemins_locaux)
+    except BaseException:
+        shutil.rmtree(repertoire_local, ignore_errors=True)
+        raise
+
     resultat = supabase.table("dossiers").insert(
         {"nom": nom, "reference": reference, "owner_id": utilisateur_id}
     ).execute()
     dossier = resultat.data[0]
     dossier_id = dossier["id"]
 
-    repertoire_local = Path(tempfile.mkdtemp(prefix=f"depouille_upload_{dossier_id}_"))
     try:
-        chemins_locaux: list[Path] = []
         bucket_source = client_service().storage.from_("dossiers-source")
-        for fichier in fichiers:
-            nom_fichier = _nom_disponible(repertoire_local, fichier.filename or "dossier.pdf")
-            chemin_local = repertoire_local / nom_fichier
-            with chemin_local.open("wb") as f:
-                shutil.copyfileobj(fichier.file, f)
-            await fichier.close()
-            chemins_locaux.append(chemin_local)
-
+        for chemin_local in chemins_locaux:
+            nom_fichier = chemin_local.name
             chemin_storage = f"{utilisateur_id}/{dossier_id}/{nom_fichier}"
             bucket_source.upload(chemin_storage, str(chemin_local), {"upsert": "true", "content-type": "application/pdf"})
 
