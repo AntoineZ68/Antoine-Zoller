@@ -33,9 +33,8 @@ from .config import Config
 from .contradictions import discordances_connues
 from .garde_fous import avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
-from .resume_detaille import _elements, sans_references
+from .resume_detaille import BUDGET_ELEMENTS_CARACTERES, _dans_le_budget, _tous_les_elements, sans_references
 
-MAX_FAITS, MAX_ACTES, MAX_DECLARATIONS = 100, 40, 40
 MAX_PHRASES = 4
 # 110 demandés ; au-delà de 160, un second essai. Entre les deux, quatre
 # phrases restent lisibles, et un appel de plus pour raccourcir coûte sans
@@ -48,6 +47,8 @@ PROMPT_RESUME = (
     "Tu disposes UNIQUEMENT d'éléments déjà extraits du dossier, chacun précédé de son "
     "numéro entre crochets (F = fait, P = acte de procédure, D = déclaration de la "
     "personne défendue) et terminé par sa citation exacte entre « », qui fait foi. "
+    "« [pièce du …] » est la date de la pièce qui rapporte le fait, pas forcément celle "
+    "de l'événement : la date d'un événement est celle que donne sa citation. "
     "Dans l'ordre : ce qui a déclenché l'enquête et quand ; la situation procédurale de "
     "la personne défendue (interpellation, garde à vue, stade actuel) ; ce qu'elle "
     "déclare, reconnaît ou conteste — si elle a varié d'une audition à l'autre, donne "
@@ -103,7 +104,9 @@ def defauts_de_forme(texte: str) -> list[str]:
     return defauts
 
 
-def _elements_du_resume(db: sqlite3.Connection, personnes: list[sqlite3.Row]) -> dict[str, dict]:
+def _elements_du_resume(
+    db: sqlite3.Connection, personnes: list[sqlite3.Row], console: Console | None = None,
+) -> dict[str, dict]:
     """Faits et actes vérifiés, et déclarations vérifiées du client désigné
     (à défaut, des mises en cause) — chacun avec sa date et sa citation.
 
@@ -118,11 +121,9 @@ def _elements_du_resume(db: sqlite3.Connection, personnes: list[sqlite3.Row]) ->
                 WHERE d.statut_verif = 'verifie' AND {filtre}"""
         )
     }
-    tous = _elements(db)
-    faits = [c for c in tous if c[0] == "F"][:MAX_FAITS]
-    actes = [c for c in tous if c[0] == "P"][:MAX_ACTES]
-    declarations = [c for c in tous if c in declarations_retenues][:MAX_DECLARATIONS]
-    return {c: tous[c] for c in faits + actes + declarations}
+    tous = _tous_les_elements(db)
+    retenus = {c: e for c, e in tous.items() if c[0] in "FP" or c in declarations_retenues}
+    return _dans_le_budget(retenus, BUDGET_ELEMENTS_CARACTERES, console)
 
 
 def _examiner(
@@ -163,7 +164,7 @@ def generer_resume(db: sqlite3.Connection, config: Config, console: Console) -> 
         return
 
     personnes = db.execute("SELECT nom, role, est_client FROM personnes ORDER BY role, nom").fetchall()
-    elements = _elements_du_resume(db, personnes)
+    elements = _elements_du_resume(db, personnes, console)
     if not any(c[0] == "F" for c in elements):
         console.print("  [build] aucun fait vérifié en base — pas de résumé généré.")
         return

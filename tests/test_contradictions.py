@@ -251,3 +251,17 @@ def test_numeros_d_elements_recopies_ne_font_pas_rejeter() -> None:
     }, elements)
     assert c is not None
     assert c.description == "07h50 selon un PV, 08h05 selon un autre, p. 3 et p. 4."
+
+
+def test_silence_d_une_piece_n_est_pas_une_contradiction() -> None:
+    from depouille.contradictions import proposition_retenue
+
+    elements = {
+        "F1": {"page": 1, "citation": "Un scooter de couleur noire s'arrête.", "ligne": "« Un scooter de couleur noire s'arrête. »"},
+        "D1": {"page": 2, "citation": "Il y avait des scooters.", "ligne": "« Il y avait des scooters. »"},
+    }
+    assert proposition_retenue({
+        "titre": "Couleur du scooter : noire selon le PV, non précisée par la témoin",
+        "description": "Le PV décrit un scooter de couleur noire ; la témoin ne précise pas sa couleur.",
+        "sources": ["F1", "D1"],
+    }, elements) is None

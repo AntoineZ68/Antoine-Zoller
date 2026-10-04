@@ -692,3 +692,34 @@ def test_pieces_courantes_classees(entete, attendu) -> None:
     from depouille.classify import _classifier_type_deterministe
 
     assert _classifier_type_deterministe(entete)[0] == attendu
+
+
+def test_role_tague_en_en_tete_l_emporte_sur_une_pièce_antérieure(tmp_path) -> None:
+    """Observé sur un dossier d'essai de 46 pages : un PV de surveillance,
+    plus tôt dans le dossier, faisait de Yanis BOUCHARD un « témoin » ; ses
+    auditions le désignent « MIS EN CAUSE ». Le tag d'en-tête l'emporte, et
+    entre deux tags, « mis en cause » l'emporte sur « témoin »."""
+    from depouille.classify import _enregistrer_personnes_taguees, identifier_declarant
+    from depouille.db import ouvrir_db
+
+    db = ouvrir_db(tmp_path / "t.db")
+    _enregistrer_personnes_taguees(db, [
+        "PROCÈS-VERBAL DE SURVEILLANCE\nYanis BOUCHARD arrive à pied.",
+        "PROCÈS-VERBAL D'AUDITION DE YANIS BOUCHARD (TÉMOIN)",
+        "PROCÈS-VERBAL D'AUDITION DE YANIS BOUCHARD (MIS EN CAUSE)",
+    ])
+    assert [tuple(r) for r in db.execute("SELECT nom, role FROM personnes")] == [("Yanis BOUCHARD", "mis_en_cause")]
+    assert identifier_declarant(db, "PROCÈS-VERBAL D'AUDITION DE YANIS BOUCHARD (TÉMOIN)") is not None
+
+
+@pytest.mark.parametrize("nom, attendu", [
+    ("Docteur Agathe MERCIER", "Agathe MERCIER"),
+    ("Me Inès VALLON", "Inès VALLON"),
+    ("Dr. Marc ROUSSEL", "Marc ROUSSEL"),
+    ("Karim TALBI", "Karim TALBI"),
+    ("Docteur MERCIER", "Docteur MERCIER"),
+])
+def test_titre_retire_du_nom_rendu_par_le_modele(nom, attendu) -> None:
+    from depouille.classify import sans_titre
+
+    assert sans_titre(nom) == attendu

@@ -61,7 +61,7 @@ MOTS_GENERIQUES = frozenset({
 })
 # Ce qui précède un début de phrase : un mot à majuscule initiale y est un
 # mot ordinaire (« Il », « Lors »), pas un nom propre.
-FINS_DE_PHRASE = ".!?…:;«\"(\n"
+FINS_DE_PHRASE = ".!?…:;«\"(\n—–"
 
 NOMBRES_EN_LETTRES = {
     "zero": 0, "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5,

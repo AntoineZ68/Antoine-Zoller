@@ -457,7 +457,7 @@ def _extraire_faits_llm(
         texte_lot = "\n".join(p["texte"] for p in lot)
         for fait in faits:
             personne_id = _personne_par_nom(db, fait.get("personne_source", ""))
-            description = description_affichable(fait.get("description") or "", fait["citation"], texte_lot)
+            description = description_affichable(fait.get("description") or "", texte_lot)
             nb_remplacees += description != (fait.get("description") or "")
             db.execute(
                 """INSERT INTO evenements_faits
@@ -469,21 +469,22 @@ def _extraire_faits_llm(
     db.commit()
     if nb_remplacees:
         console.print(
-            f"  [chrono] {nb_remplacees} description(s) de fait remplacée(s) par leur citation "
+            f"  [chrono] {nb_remplacees} description(s) de fait retirée(s), citation affichée seule "
             "(élément absent de la pièce, qualification ou jugement)."
         )
     return nb
 
 
-def description_affichable(description: str, citation: str, texte_piece: str) -> str:
+def description_affichable(description: str, texte_piece: str) -> str:
     """La description d'un fait est rédigée par le modèle et affichée telle
     quelle dans la chronologie, et reprise par les résumés. Si elle avance
-    un élément absent de la pièce, qualifie ou juge, on affiche à sa place
-    la citation exacte — toujours vraie, puisqu'elle sera vérifiée au
-    caractère près."""
+    un élément absent de la pièce, qualifie ou juge, elle est retirée :
+    l'interface montre alors la citation exacte, entre guillemets, comme
+    ce qu'elle est — les mots d'une pièce, pas ceux de l'outil (« Il ment
+    pour se protéger » est une déclaration, pas un jugement)."""
     if description.strip() and not problemes_redaction(description, texte_piece):
         return description
-    return citation
+    return ""
 
 
 def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: Console) -> None:

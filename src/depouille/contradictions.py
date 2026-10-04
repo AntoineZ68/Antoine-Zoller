@@ -59,6 +59,15 @@ TYPES_IDENTIFIANTS_PROCHES = ("Plaque d'immatriculation", "Téléphone")
 
 MAX_PROPOSITIONS_MODELE = 8
 
+# « Couleur du scooter : noir selon le PV, non précisée par la témoin » :
+# qu'une pièce se taise n'est pas une discordance (observé, proposé deux
+# fois sur deux par le modèle malgré la consigne). Bruit pour l'avocat.
+RE_ABSENCE_N_EST_PAS_CONTRADICTION = re.compile(
+    r"non\s+pr[ée]cis|ne\s+pr[ée]cise\s+pas|sans\s+pr[ée]ciser|non\s+mentionn|ne\s+mentionne\s+pas|"
+    r"non\s+indiqu|n'indique\s+pas|ne\s+dit\s+rien|non\s+renseign",
+    re.IGNORECASE,
+)
+
 
 
 @dataclass
@@ -206,7 +215,10 @@ PROMPT = (
     "éléments de pages différentes portant sur le même fait : heure, date, lieu, "
     "véhicule, couleur, description d'une personne, présence de quelqu'un, montant, "
     "déroulé. N'en relève pas pour une simple dénégation opposée à une accusation, ni "
-    "pour une différence de point de vue sans détail vérifiable. "
+    "pour une différence de point de vue sans détail vérifiable, ni quand l'un des "
+    "éléments ne dit rien du point (« non précisé » n'est pas une contradiction), ni "
+    "pour un simple écart d'approximation (« 23h05 » et « vers 23 heures »), ni entre "
+    "deux choses distinctes (une enveloppe et une somme saisie). "
     "Titre court et factuel (ex. « Couleur du véhicule : blanc selon le témoin, gris "
     "selon le PV de surveillance »), description en une ou deux phrases neutres. "
     "N'écris aucun nom, lieu, date ou chiffre qui ne figure pas dans les éléments cités. "
@@ -231,6 +243,8 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list
     texte = f"{titre} {description}"
     if contient_qualification(texte) or RE_JUGEMENT.search(texte):
         return None
+    if RE_ABSENCE_N_EST_PAS_CONTRADICTION.search(texte):
+        return None
     if elements_absents(texte, avec_noms_completes("\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources), noms)):
         return None
     domaine = proposition.get("domaine") if proposition.get("domaine") in ("procedure", "fond") else "fond"
@@ -251,7 +265,7 @@ def generer_contradictions(db: sqlite3.Connection, config: Config, console: Cons
     db.commit()
     if config.offline:
         return 0
-    elements = _elements(db)
+    elements = _elements(db, console)
     if len({e["page"] for e in elements.values()}) < 2:
         return 0
 

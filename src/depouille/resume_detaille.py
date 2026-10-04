@@ -35,7 +35,13 @@ SECTIONS = (
     "Les déclarations",
     "Les expertises et l'état du dossier",
 )
-MAX_FAITS, MAX_ACTES, MAX_DECLARATIONS = 120, 80, 80
+# Budget du texte des éléments soumis au modèle (~30 000 jetons, loin de la
+# fenêtre de Mistral Large ou de Claude). Il remplace une coupe aux 120
+# premiers faits par ordre de pages, silencieuse : sur un dossier d'essai de
+# 46 pages, l'expertise (page 41) en sortait, et avec elle le poids de 980 g
+# qui contredit les 1 200 g de la saisie. Au-delà du budget, les éléments
+# gardés sont répartis sur tout le dossier, et l'omission est annoncée.
+BUDGET_ELEMENTS_CARACTERES = 120_000
 
 PROMPT = (
     "Tu rédiges le résumé détaillé d'un dossier de procédure pénale française pour un "
@@ -45,6 +51,9 @@ PROMPT = (
     "lesquelles aucun élément ne convient : " + " ; ".join(SECTIONS) + ". "
     "Chaque section compte de 1 à 4 phrases factuelles, claires et complètes. Chaque "
     "phrase s'appuie sur un ou plusieurs éléments et indique leurs numéros. "
+    "Entre crochets, « pièce du … » est la date de la pièce qui rapporte le fait, pas "
+    "forcément celle de l'événement : la date d'un événement est celle que donne sa "
+    "citation. "
     "N'écris rien qui ne soit pas dans les éléments cités par la phrase elle-même : "
     "pas de date, de lieu, de nom ou de chiffre venus d'un autre élément ou de ta "
     "connaissance. Désigne les personnes par leur nom. "
@@ -58,8 +67,35 @@ PROMPT = (
 )
 
 
-def _elements(db: sqlite3.Connection) -> dict[str, dict]:
-    """Numérote les éléments vérifiés : {"F3": {page, citation, ligne}}."""
+def _elements(
+    db: sqlite3.Connection, console: Console | None = None, budget: int = BUDGET_ELEMENTS_CARACTERES,
+) -> dict[str, dict]:
+    """Numérote les éléments vérifiés : {"F3": {page, citation, ligne}},
+    dans la limite du budget (voir BUDGET_ELEMENTS_CARACTERES)."""
+    return _dans_le_budget(_tous_les_elements(db), budget, console)
+
+
+def _dans_le_budget(elements: dict[str, dict], budget: int, console: Console | None) -> dict[str, dict]:
+    taille = sum(len(e["ligne"]) + 16 for e in elements.values())
+    if taille <= budget:
+        return elements
+    # Même proportion gardée dans chaque famille (faits, actes,
+    # déclarations), à intervalles réguliers dans l'ordre des pages.
+    ratio = budget / taille
+    gardes: set[str] = set()
+    for famille in "FPD":
+        cles = [c for c in elements if c[0] == famille]
+        n = int(len(cles) * ratio)
+        gardes |= {cles[int(i * len(cles) / n)] for i in range(n)} if n else set()
+    if console is not None:
+        console.print(
+            f"  [build] dossier volumineux : {len(gardes)} élément(s) sur {len(elements)} soumis au "
+            "modèle, répartis sur tout le dossier ; les autres restent dans la chronologie."
+        )
+    return {c: e for c, e in elements.items() if c in gardes}
+
+
+def _tous_les_elements(db: sqlite3.Connection) -> dict[str, dict]:
     elements: dict[str, dict] = {}
     # La date d'un fait est celle de sa pièce, comme dans la chronologie :
     # elle fait partie de l'élément, pour qu'une phrase qui la reprend ne
@@ -70,18 +106,21 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
            FROM evenements_faits ef
            LEFT JOIN personnes pe ON pe.id = ef.personne_id_source
            LEFT JOIN pieces pi ON pi.id = ef.piece_id
-           WHERE ef.statut_verif = 'verifie' ORDER BY ef.page LIMIT ?""", (MAX_FAITS,)
+           WHERE ef.statut_verif = 'verifie' ORDER BY ef.page"""
     ):
         quand = " ".join(x for x in (f["date"], f["heure"]) if x)
         qui = f" ({f['nom']})" if f["nom"] else ""
+        # « pièce du … » et non la date seule : une synthèse du 26/09 qui
+        # raconte l'ouverture de l'enquête le 02/09 faisait écrire au modèle
+        # « enquête déclenchée le 26/09 » (observé, dossier de 46 pages).
         elements[f"F{f['id']}"] = {
             "page": f["page"], "citation": f["citation"], "libelle": f["nom"] or "",
-            "ligne": f"{quand + ' — ' if quand else ''}{f['description']}{qui} — « {f['citation']} »",
+            "ligne": f"{'[pièce du ' + quand + '] ' if quand else ''}{f['description']}{qui} — « {f['citation']} »",
         }
     for p in db.execute(
         """SELECT e.id, e.page, e.citation, e.nature, e.date, e.heure, pe.nom
            FROM evenements_procedure e LEFT JOIN personnes pe ON pe.id = e.personne_id
-           WHERE e.statut_verif = 'verifie' ORDER BY e.page LIMIT ?""", (MAX_ACTES,)
+           WHERE e.statut_verif = 'verifie' ORDER BY e.page"""
     ):
         quand = " ".join(x for x in (p["date"], p["heure"]) if x)
         qui = f", {p['nom']}" if p["nom"] else ""
@@ -94,7 +133,7 @@ def _elements(db: sqlite3.Connection) -> dict[str, dict]:
            FROM declarations d
            LEFT JOIN personnes pe ON pe.id = d.personne_id
            LEFT JOIN pieces pi ON pi.id = d.piece_id
-           WHERE d.statut_verif = 'verifie' ORDER BY d.page LIMIT ?""", (MAX_DECLARATIONS,)
+           WHERE d.statut_verif = 'verifie' ORDER BY d.page"""
     ):
         quand = f"Le {d['date']}, " if d["date"] else ""
         elements[f"D{d['id']}"] = {
@@ -157,7 +196,7 @@ def generer_resume_detaille(db: sqlite3.Connection, config: Config, console: Con
     db.commit()
     if config.offline:
         return 0
-    elements = _elements(db)
+    elements = _elements(db, console)
     if not elements:
         return 0
 

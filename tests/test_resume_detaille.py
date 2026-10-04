@@ -116,3 +116,22 @@ def test_regeneration_remplace_l_ancien(monkeypatch, db) -> None:
 
 def test_hors_ligne_aucun_resume_detaille(db) -> None:
     assert rd.generer_resume_detaille(db, Config(offline=True), Console(quiet=True)) == 0
+
+
+def test_elements_de_fin_de_dossier_jamais_coupes_en_silence() -> None:
+    """Observé : une coupe aux 120 premiers faits retirait l'expertise de la
+    page 41 d'un dossier de 46 pages. Sous le budget, tout passe ; au-delà,
+    les éléments gardés couvrent tout le dossier, et l'omission est dite."""
+    from rich.console import Console
+
+    from depouille.resume_detaille import _dans_le_budget
+
+    elements = {f"F{i}": {"page": i, "citation": "c", "ligne": "x" * 100} for i in range(1, 201)}
+    assert _dans_le_budget(elements, 1_000_000, None) == elements
+
+    console = Console(record=True, width=200)
+    gardes = _dans_le_budget(elements, 116 * 50, console)
+    pages = sorted(e["page"] for e in gardes.values())
+    assert len(gardes) == 50
+    assert pages[0] <= 4 and pages[-1] >= 190, "répartis du début à la fin du dossier"
+    assert "50 élément(s) sur 200" in console.export_text()

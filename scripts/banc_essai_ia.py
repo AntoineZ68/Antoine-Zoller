@@ -350,7 +350,7 @@ def traiter(pdf: Path, sortie: Path, config, verite=None, essai: int | None = No
     resultat.journal = console.export_text()
     # Ce que le pipeline a écarté (garde-fous) ou n'a pas pu faire.
     for ligne in resultat.journal.splitlines():
-        if re.search(r"retenue|rejet|échec|non généré|ignoré|écarté|remplacée", ligne, re.IGNORECASE):
+        if re.search(r"retenue|rejet|échec|non généré|ignoré|écarté|retirée", ligne, re.IGNORECASE):
             resultat.infos.append("journal : " + ligne.strip())
     controler(db, resultat, config, verite)
     db.close()

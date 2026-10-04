@@ -365,9 +365,37 @@ def identifier_declarant(db: sqlite3.Connection, page_entete: str) -> int | None
     roles = _detecter_personnes_avec_role(page_entete)
     if not roles:
         return None
-    nom, role = roles[0]
-    row = db.execute("SELECT id FROM personnes WHERE nom = ? AND role = ?", (nom, role)).fetchone()
+    # Par le nom seul : la personne a pu être enregistrée avec un autre rôle
+    # (entendue comme témoin, puis comme mise en cause) — voir
+    # _enregistrer_personnes_taguees.
+    nom, _ = roles[0]
+    row = db.execute("SELECT id FROM personnes WHERE nom = ?", (nom,)).fetchone()
     return row["id"] if row else None
+
+
+# Quand une même personne est désignée avec des rôles différents selon les
+# auditions, celui qui compte pour l'avocat l'emporte.
+PRIORITE_ROLE_TAGUE = {"mis_en_cause": 3, "victime": 2, "témoin": 1}
+
+
+def _enregistrer_personnes_taguees(db: sqlite3.Connection, textes: list[str]) -> None:
+    """Enregistre, AVANT toute autre identification, chaque personne que le
+    dossier désigne explicitement en en-tête d'audition (« (MIS EN CAUSE) »,
+    « (VICTIME) », « (TÉMOIN) »).
+
+    Sans cela, la première pièce qui nommait une personne fixait son rôle
+    pour tout le dossier — observé sur un dossier d'essai de 46 pages : le
+    modèle, appelé en dernier recours sur un PV de surveillance, classait
+    « témoin » un homme que ses deux auditions désignent ensuite « MIS EN
+    CAUSE » ; il manquait aux mis en cause et ses auditions n'étaient plus
+    rattachées par leur en-tête."""
+    roles: dict[str, str] = {}
+    for texte in textes:
+        for nom, role in _detecter_personnes_avec_role(texte):
+            if PRIORITE_ROLE_TAGUE[role] > PRIORITE_ROLE_TAGUE.get(roles.get(nom, ""), 0):
+                roles[nom] = role
+    for nom, role in roles.items():
+        _upsert_personne(db, nom, role)
 
 
 RE_MOT = re.compile(r"[0-9A-Za-zÀ-ÿ]+")
@@ -607,6 +635,7 @@ def identifier_personne_via_llm(
             nom, role = data.get("nom"), data.get("role")
             if not nom or role not in ROLES_VALIDES:
                 continue
+            nom = sans_titre(nom)
 
             if nom.lower() in noms_connus:
                 return noms_connus[nom.lower()], role
@@ -639,6 +668,19 @@ def identifier_personne_via_llm(
     except Exception as exc:  # noqa: BLE001 — dégrade en None, jamais une exception qui casse le run
         console.print(f"  [classify] échec de l'identification de personne par le modèle ({exc}).")
         return None
+
+
+TITRES_ET_CIVILITES = TITRES_A_EXCLURE | HONORIFIQUES_ABREGES | {"dr", "pr", "professeur", "mademoiselle"}
+
+
+def sans_titre(nom: str) -> str:
+    """« Docteur Agathe MERCIER » -> « Agathe MERCIER » : le modèle recopie
+    le titre avec le nom (observé), et la même personne, nommée sans titre
+    ailleurs, apparaissait en double."""
+    mots = nom.split()
+    while len(mots) > 2 and mots[0].lower().rstrip(".") in TITRES_ET_CIVILITES:
+        mots = mots[1:]
+    return " ".join(mots)
 
 
 def identifier_personne_principale(
@@ -706,6 +748,8 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
     nb_llm = 0
     nb_non_identifie = 0
     compteur = {"tokens_in": 0, "tokens_out": 0}
+
+    _enregistrer_personnes_taguees(db, ["\n".join(p["texte"] for p in groupe["pages"]) for groupe in groupes])
 
     for groupe in groupes:
         texte_complet = "\n".join(p["texte"] for p in groupe["pages"])
