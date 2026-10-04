@@ -59,6 +59,16 @@ TARIFS_CONNUS = {
     "claude-sonnet-5": TarifModele(2.0, 10.0),
     "claude-sonnet-5-5": TarifModele(2.0, 10.0),
     "claude-opus-5-5": TarifModele(4.0, 20.0),
+    # Mistral (tarifs publics, à vérifier sur mistral.ai/pricing).
+    "mistral-small-latest": TarifModele(0.1, 0.3),
+    "mistral-medium-latest": TarifModele(0.4, 2.0),
+    "mistral-large-latest": TarifModele(2.0, 6.0),
+}
+# Sans MODELE_CLASSIFICATION / MODELE_ANALYSE, un provider Mistral recevait
+# des noms de modèles Claude : chaque appel échouait, sans bruit.
+MODELES_PAR_DEFAUT = {
+    "anthropic": (MODELE_CLASSIFICATION_PAR_DEFAUT, MODELE_ANALYSE_PAR_DEFAUT),
+    "mistral": ("mistral-small-latest", "mistral-large-latest"),
 }
 
 
@@ -74,8 +84,8 @@ def config_depuis_environnement(offline: bool) -> Config:
         offline=False,
         provider=provider,
         api_key=os.environ.get(variable_cle, ""),
-        modele_classification=os.environ.get("MODELE_CLASSIFICATION", MODELE_CLASSIFICATION_PAR_DEFAUT),
-        modele_analyse=os.environ.get("MODELE_ANALYSE", MODELE_ANALYSE_PAR_DEFAUT),
+        modele_classification=os.environ.get("MODELE_CLASSIFICATION") or MODELES_PAR_DEFAUT.get(provider, ("", ""))[0],
+        modele_analyse=os.environ.get("MODELE_ANALYSE") or MODELES_PAR_DEFAUT.get(provider, ("", ""))[1],
         tarifs=dict(TARIFS_CONNUS),
         seuil_confiance=0.7,
         seuil_flou_ocr=97,

@@ -107,7 +107,7 @@ réglages du service en ligne, sur un dossier fictif dont on connaît le
 contenu (`tests/fixtures/generate_controle.py`), puis contrôle la sortie :
 
 ```bash
-export ANTHROPIC_API_KEY=...      # variable d'environnement, jamais dans un fichier du dépôt
+export LLM_PROVIDER=mistral MISTRAL_API_KEY=...   # ou ANTHROPIC_API_KEY ; jamais dans un fichier du dépôt
 python scripts/banc_essai_ia.py   # rapport dans /tmp/banc_essai_ia/rapport.md
 python scripts/banc_essai_ia.py --pdf mon_dossier.pdf   # + un PDF à vous, jamais commité
 python scripts/banc_essai_ia.py --hors-ligne            # sans clé : vérifie le banc lui-même

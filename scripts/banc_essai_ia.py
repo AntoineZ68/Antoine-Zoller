@@ -6,7 +6,8 @@ connaît d'avance le contenu — puis contrôle ce qui en sort.
     python scripts/banc_essai_ia.py --pdf a.pdf     # + un PDF à vous (jamais commité)
     python scripts/banc_essai_ia.py --hors-ligne    # sans clé : vérifie le banc lui-même
 
-Clé lue dans ANTHROPIC_API_KEY (variable d'environnement, jamais dans un
+Provider : LLM_PROVIDER (anthropic par défaut, ou mistral). Clé lue dans
+ANTHROPIC_API_KEY ou MISTRAL_API_KEY (variable d'environnement, jamais dans un
 fichier du dépôt). Modèles : MODELE_CLASSIFICATION / MODELE_ANALYSE, comme
 en ligne.
 
@@ -83,9 +84,14 @@ VERROU = threading.Lock()
 def instrumenter_provider() -> None:
     """Compte appels, jetons, durée et erreurs par modèle, sans rien changer
     aux appels eux-mêmes."""
-    from depouille.llm import anthropic_provider
+    from depouille.llm import anthropic_provider, mistral_provider
 
-    appeler_origine = anthropic_provider.AnthropicProvider.appeler
+    for classe in (anthropic_provider.AnthropicProvider, mistral_provider.MistralProvider):
+        _instrumenter(classe)
+
+
+def _instrumenter(classe) -> None:
+    appeler_origine = classe.appeler
 
     def appeler(self, systeme, prompt, modele):
         debut = time.monotonic()
@@ -108,7 +114,7 @@ def instrumenter_provider() -> None:
             c.secondes += time.monotonic() - debut
         return reponse
 
-    anthropic_provider.AnthropicProvider.appeler = appeler
+    classe.appeler = appeler
 
 
 # --- Contrôles ----------------------------------------------------------------
@@ -276,6 +282,7 @@ def rapport(resultats: list[Resultat], config, sortie: Path) -> str:
     lignes = ["# Banc d'essai IA", ""]
     lignes.append(f"- Mode : {'hors ligne (aucun appel au modèle)' if config.offline else 'appels réels'}")
     if not config.offline:
+        lignes.append(f"- Provider : {config.provider}")
         lignes.append(f"- Modèles : classement `{config.modele_classification}`, analyse `{config.modele_analyse}`")
     lignes.append("")
     for r in resultats:
@@ -305,7 +312,8 @@ def main() -> int:
     config = config_depuis_environnement(offline=args.hors_ligne)
     if not config.offline and not config.api_key:
         print(
-            "Clé absente : définissez ANTHROPIC_API_KEY dans les variables d'environnement "
+            f"Clé absente pour le provider « {config.provider} » : définissez "
+            f"{'ANTHROPIC_API_KEY' if config.provider == 'anthropic' else 'MISTRAL_API_KEY'} dans les variables d'environnement "
             "(jamais dans un fichier du dépôt), ou lancez avec --hors-ligne.",
             file=sys.stderr,
         )
