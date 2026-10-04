@@ -28,6 +28,7 @@ from supabase import Client
 from depouille.chrono import calculer_durees
 from depouille.client import PersonneInconnue, designer_client
 from depouille.db import appliquer_migrations, ouvrir_db
+from depouille.gardes_a_vue import gardes_a_vue
 from depouille.conformite import detecter_signalements
 from depouille.qualite_texte import pages_peu_lisibles
 from depouille.questions import repondre_question
@@ -435,6 +436,27 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
             if a_une_garde_a_vue:
                 duree_garde_a_vue = calculer_durees(db)
 
+            # Une entrée par personne placée en garde à vue, avec ses seuls
+            # actes : c'est ce que l'interface trace heure par heure.
+            def _acte(e: dict) -> dict:
+                return {"nature": e["nature"], "date": e["date"], "heure": e["heure"], "page": e["page"],
+                        "citation": e["citation"], "instant": e["instant"].isoformat() if e["instant"] else None}
+
+            gav_par_personne = [
+                {
+                    "nom": g["nom"], "est_client": g["est_client"],
+                    "debut": g["placement"]["instant"].isoformat() if g["placement"]["instant"] else None,
+                    "fin": g["fin"]["instant"].isoformat() if g["fin"] and g["fin"]["instant"] else None,
+                    "duree_minutes": g["duree_minutes"],
+                    "delai_notification_minutes": g["delai_notification_minutes"],
+                    "delai_examen_medical_minutes": g["delai_examen_medical_minutes"],
+                    "delai_entretien_avocat_minutes": g["delai_entretien_avocat_minutes"],
+                    "actes_sans_personne_rattaches": g["actes_sans_personne_rattaches"],
+                    "evenements": [_acte(e) for e in g["evenements"]],
+                }
+                for g in gardes_a_vue(db)
+            ]
+
             signalements = [
                 {
                     "titre": s.titre,
@@ -535,6 +557,7 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
         "chronologie_faits": faits,
         "chronologie_procedure": procedure,
         "duree_garde_a_vue": duree_garde_a_vue,
+        "gardes_a_vue": gav_par_personne,
         "signalements": signalements,
         "confrontations": confrontations,
         "recoupements": recoupements,

@@ -20,10 +20,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from rich.console import Console
 
-from .chrono import calculer_durees
 from .classify import _est_titre
 from .config import Config
 from .conformite import detecter_signalements
+from .gardes_a_vue import formater_duree, gardes_a_vue
 from .index_builder import _cle_tri_date
 from .qualite_texte import grouper_en_plages, pages_peu_lisibles
 from .regex_patterns import decouper_en_phrases, texte_sans_entete
@@ -61,13 +61,28 @@ def _construire_chronologie_procedure(db: sqlite3.Connection, chemin: Path) -> N
     doc = Document()
     doc.add_heading("Chronologie de procédure", level=1)
 
-    doc.add_heading("Durées calculées", level=2)
-    durees = calculer_durees(db)
-    _ajouter_table_docx(
-        doc,
-        ["Indicateur", "Valeur"],
-        [[cle.replace("_", " "), valeur] for cle, valeur in durees.items()],
-    )
+    # Une ligne par garde à vue : avec plusieurs gardés à vue, un délai
+    # unique pour tout le dossier mélangeait les actes des uns et des autres.
+    doc.add_heading("Gardes à vue — durées et délais calculés", level=2)
+    toutes = gardes_a_vue(db)
+    if toutes:
+        _ajouter_table_docx(
+            doc,
+            ["Personne", "Durée totale", "Placement → notification des droits",
+             "Demande → examen médical", "Demande → entretien avocat"],
+            [
+                [
+                    (g["nom"] or "Personne non identifiée") + (" (client)" if g["est_client"] else ""),
+                    formater_duree(g["duree_minutes"]),
+                    formater_duree(g["delai_notification_minutes"]),
+                    formater_duree(g["delai_examen_medical_minutes"]),
+                    formater_duree(g["delai_entretien_avocat_minutes"]),
+                ]
+                for g in toutes
+            ],
+        )
+    else:
+        doc.add_paragraph("Aucun placement en garde à vue identifié dans le dossier.")
 
     doc.add_heading("Événements", level=2)
     lignes = db.execute(

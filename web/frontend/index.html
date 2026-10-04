@@ -455,6 +455,50 @@
   .bloc-analyse-ia h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: var(--texte); }
   .bloc-analyse-ia p { margin: 0; font-size: 13.5px; color: var(--texte-att); max-width: 360px; margin: 0 auto; }
 
+  /* --- Gardes à vue, heure par heure --- */
+  .bloc-chronogramme {
+    --c-interpellation: #2E1F24; --c-placement: #5E0F24; --c-droits: #3f6591; --c-avocat: #8a6a1c;
+    --c-medecin: #426b4b; --c-audition: #6b4f86; --c-perquisition: #a6412f; --c-prolongation: #6F5C62; --c-fin: #5E0F24;
+  }
+  .legende-gav { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--texte-att); margin: -4px 0 14px; }
+  .legende-gav span { display: inline-flex; align-items: center; gap: 5px; }
+  .legende-gav i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .legende-gav i.cle-delai { width: 16px; height: 8px; border-radius: 2px; }
+  .ligne-gav { padding: 10px 0 12px; border-top: 1px solid var(--bordure-douce); }
+  .ligne-gav:first-of-type { border-top: none; }
+  .entete-ligne-gav { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .nom-gav { font-weight: 600; font-size: 13.5px; color: var(--encre); }
+  .duree-gav { margin-left: auto; font-size: 12.5px; color: var(--texte-att); font-variant-numeric: tabular-nums; }
+  .piste-gav { position: relative; height: 26px; background: var(--carte-creuse); border-radius: 999px; }
+  .barre-gav { position: absolute; top: 9px; height: 8px; border-radius: 999px; background: var(--accent-voile-fort); }
+  .barre-gav.sans-fin { background: repeating-linear-gradient(90deg, var(--accent-voile-fort) 0 8px, transparent 8px 12px);
+    -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent); mask-image: linear-gradient(90deg, #000 60%, transparent); }
+  .segment-delai-gav, .legende-gav i.cle-delai {
+    background: repeating-linear-gradient(135deg, rgba(166,65,47,0.55) 0 3px, rgba(166,65,47,0.15) 3px 6px);
+  }
+  .segment-delai-gav { position: absolute; top: 9px; height: 8px; border-radius: 999px; }
+  .repere-gav {
+    position: absolute; top: 6px; width: 14px; height: 14px; margin-left: -7px; padding: 0;
+    border-radius: 50%; border: 2px solid var(--carte); cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
+  }
+  .repere-gav:hover, .repere-gav:focus-visible { transform: scale(1.35); z-index: 2; background-clip: padding-box; }
+
+  .repere-interpellation, .legende-gav i.repere-interpellation { background: var(--c-interpellation); }
+  .repere-placement, .legende-gav i.repere-placement { background: var(--c-placement); }
+  .repere-droits, .legende-gav i.repere-droits { background: var(--c-droits); }
+  .repere-avocat, .legende-gav i.repere-avocat { background: var(--c-avocat); }
+  .repere-medecin, .legende-gav i.repere-medecin { background: var(--c-medecin); }
+  .repere-audition, .legende-gav i.repere-audition { background: var(--c-audition); }
+  .repere-perquisition, .legende-gav i.repere-perquisition { background: var(--c-perquisition); }
+  .repere-prolongation, .legende-gav i.repere-prolongation { background: var(--c-prolongation); }
+  .repere-fin, .legende-gav i.repere-fin { background: var(--c-fin); }
+  .repere-fin { border-radius: 3px; }
+  .legende-gav i.repere-fin { border-radius: 2px; }
+  .delais-gav { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 12px; color: var(--texte-att); }
+  .delais-gav strong { color: var(--encre); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .axe-gav { position: relative; height: 18px; margin-top: 4px; border-top: 1px solid var(--bordure); }
+  .graduation-gav { position: absolute; top: 3px; transform: translateX(-50%); font-size: 10.5px; color: var(--texte-att); white-space: nowrap; }
+  .graduation-gav.minuit { font-weight: 600; color: var(--encre); }
   .stats-gav { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
   .stat-gav { background: var(--carte-creuse); border: 1px solid var(--bordure-douce); border-radius: var(--rayon-sm); padding: 16px 18px; }
   .stat-gav .valeur-stat { font-family: 'Playfair Display', Georgia, serif; font-size: 24px; font-weight: 500; color: var(--encre); }
@@ -1174,6 +1218,98 @@ const LIBELLES_NATURE_PROCEDURE = {
   fin_audition: "Fin d'audition",
 };
 
+// --- Gardes à vue, heure par heure ---
+// Famille visuelle de chaque acte sur la frise horaire.
+const FAMILLE_ACTE_GAV = {
+  interpellation: "interpellation", placement_garde_a_vue: "placement",
+  notification_droits: "droits", prolongation_garde_a_vue: "prolongation", fin_garde_a_vue: "fin",
+  demande_examen_medical: "medecin", realisation_examen_medical: "medecin",
+  demande_entretien_avocat: "avocat", realisation_entretien_avocat: "avocat",
+  debut_audition: "audition", fin_audition: "audition",
+  debut_perquisition: "perquisition", fin_perquisition: "perquisition",
+};
+const LEGENDE_GAV = [
+  ["interpellation", "Interpellation"], ["placement", "Placement"], ["droits", "Notification des droits"],
+  ["avocat", "Avocat"], ["medecin", "Médecin"], ["audition", "Audition"],
+  ["perquisition", "Perquisition"], ["prolongation", "Prolongation"], ["fin", "Fin de la mesure"],
+];
+
+function formaterMinutes(minutes) {
+  if (minutes === null || minutes === undefined) return "—";
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function rendreChronogrammeGav(gardes) {
+  const t = (iso) => (iso ? new Date(iso).getTime() : null);
+  const instants = gardes.flatMap((g) => [t(g.debut), t(g.fin), ...g.evenements.map((e) => t(e.instant))]).filter((x) => x !== null);
+  if (!instants.length) return "";
+  const heure = 3600 * 1000;
+  // Bornes arrondies à l'heure, avec une heure de marge de part et d'autre.
+  const debutAxe = Math.floor(Math.min(...instants) / heure) * heure - heure;
+  const finAxe = Math.ceil(Math.max(...instants) / heure) * heure + heure;
+  const pct = (ms) => ((ms - debutAxe) / (finAxe - debutAxe)) * 100;
+
+  // Graduations : un pas qui garde une dizaine de repères au plus.
+  const pas = [1, 2, 3, 6, 12, 24].find((h) => (finAxe - debutAxe) / (h * heure) <= 10) || 24;
+  const graduations = [];
+  for (let ms = Math.ceil(debutAxe / (pas * heure)) * pas * heure; ms <= finAxe; ms += pas * heure) {
+    const d = new Date(ms);
+    const minuit = d.getHours() === 0;
+    graduations.push(`<span class="graduation-gav ${minuit ? "minuit" : ""}" style="left:${pct(ms)}%">${
+      minuit ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}` : `${d.getHours()}h`}</span>`);
+  }
+
+  const lignes = gardes.map((g) => {
+    const debut = t(g.debut);
+    const actes = g.evenements.filter((e) => e.instant);
+    const finConnue = t(g.fin);
+    // Fin non retrouvée : pointillés estompés jusqu'au bout de l'axe — la
+    // mesure se poursuit, on ignore jusqu'à quand.
+    const finTrace = finConnue ?? finAxe;
+    const barre = debut !== null
+      ? `<div class="barre-gav ${finConnue ? "" : "sans-fin"}" style="left:${pct(debut)}%;width:${Math.max(pct(finTrace) - pct(debut), 0.5)}%"></div>`
+      : "";
+    const notification = actes.find((e) => e.nature === "notification_droits" && debut !== null && t(e.instant) >= debut);
+    const segmentDelai = notification && t(notification.instant) > debut
+      ? `<div class="segment-delai-gav" style="left:${pct(debut)}%;width:${pct(t(notification.instant)) - pct(debut)}%"
+           title="Placement → notification des droits : ${formaterMinutes(g.delai_notification_minutes)}"></div>`
+      : "";
+    const reperes = actes.map((e) => {
+      const libelle = LIBELLES_NATURE_PROCEDURE[e.nature] || e.nature;
+      return `<button type="button" class="repere-gav repere-${FAMILLE_ACTE_GAV[e.nature] || "autre"}" style="left:${pct(t(e.instant))}%"
+        title="${e.date || ""} ${e.heure || ""} — ${echapperHtml(libelle)}" aria-label="${echapperHtml(libelle)}, ${e.heure || ""}"
+        onclick="ouvrirCitation(${refCitation(e.page, e.citation)})"></button>`;
+    }).join("");
+    const nom = echapperHtml(g.nom || "Personne non identifiée");
+    return `
+      <div class="ligne-gav ${g.est_client ? "ligne-client" : ""}">
+        <div class="entete-ligne-gav">
+          <span class="nom-gav">${nom}</span>${g.est_client ? `<span class="role-personne">Client</span>` : ""}
+          <span class="duree-gav">${g.duree_minutes !== null ? formaterMinutes(g.duree_minutes) : "fin de mesure non retrouvée"}</span>
+        </div>
+        <div class="piste-gav">${barre}${segmentDelai}${reperes}</div>
+        <div class="delais-gav">
+          <span>Placement → notification des droits : <strong>${formaterMinutes(g.delai_notification_minutes)}</strong></span>
+          <span>Demande → examen médical : <strong>${formaterMinutes(g.delai_examen_medical_minutes)}</strong></span>
+          <span>Demande → entretien avocat : <strong>${formaterMinutes(g.delai_entretien_avocat_minutes)}</strong></span>
+        </div>
+      </div>`;
+  }).join("");
+
+  const orphelins = gardes.some((g) => g.actes_sans_personne_rattaches);
+  return `
+    <div class="carte bloc-chronogramme">
+      <h2>Gardes à vue, heure par heure</h2>
+      <div class="legende-gav">${LEGENDE_GAV.map(([cle, libelle]) => `<span><i class="repere-${cle}"></i>${libelle}</span>`).join("")}
+        <span><i class="cle-delai"></i>Placement → notification des droits</span></div>
+      ${lignes}
+      <div class="axe-gav">${graduations.join("")}</div>
+      <p class="note-resume" style="margin-top:12px;">Horodatages tirés des pièces ; un clic sur un repère ouvre la pièce, passage encadré. « — » : acte non retrouvé dans le dossier. Délais à recouper avec les textes applicables, jamais une conclusion en soi.${
+        orphelins ? " Des actes dont la personne n'est pas nommée sont rattachés à la seule garde à vue du dossier." : ""}</p>
+    </div>`;
+}
+
 // Rôles qu'un avocat peut défendre : le mis en cause, mais aussi la
 // victime (partie civile) ou un témoin assisté.
 const ROLES_DESIGNABLES = new Set(["mis_en_cause", "victime", "témoin"]);
@@ -1227,18 +1363,23 @@ window.designerClient = designerClient;
 function rendreBlocProcedure(donnees) {
   const sections = [];
 
-  if (donnees.duree_garde_a_vue) {
+  if (donnees.gardes_a_vue && donnees.gardes_a_vue.length) {
+    sections.push(rendreChronogrammeGav(donnees.gardes_a_vue));
+  } else if (donnees.duree_garde_a_vue) {
+    // Serveur pas encore à jour : ancien encadré, une valeur absente
+    // s'affichant « — » plutôt qu'en grand « NON TROUVÉ ».
     const d = donnees.duree_garde_a_vue;
+    const valeur = (v) => (v && v !== "NON TROUVÉ" ? v : "—");
     sections.push(`
       <div class="carte">
         <h2>Chronologie de garde à vue</h2>
         <div class="stats-gav">
-          <div class="stat-gav"><div class="valeur-stat">${d.duree_totale_garde_a_vue}</div><div class="libelle-stat">Durée totale</div></div>
-          <div class="stat-gav"><div class="valeur-stat">${d.delai_placement_notification_droits}</div><div class="libelle-stat">Placement → notification des droits</div></div>
-          <div class="stat-gav"><div class="valeur-stat">${d.delai_demande_realisation_examen_medical}</div><div class="libelle-stat">Demande → examen médical</div></div>
-          <div class="stat-gav"><div class="valeur-stat">${d.delai_demande_realisation_entretien_avocat}</div><div class="libelle-stat">Demande → entretien avocat</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${valeur(d.duree_totale_garde_a_vue)}</div><div class="libelle-stat">Durée totale</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${valeur(d.delai_placement_notification_droits)}</div><div class="libelle-stat">Placement → notification des droits</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${valeur(d.delai_demande_realisation_examen_medical)}</div><div class="libelle-stat">Demande → examen médical</div></div>
+          <div class="stat-gav"><div class="valeur-stat">${valeur(d.delai_demande_realisation_entretien_avocat)}</div><div class="libelle-stat">Demande → entretien avocat</div></div>
         </div>
-        <p class="note-resume" style="margin-top:14px;">Délais calculés à partir des horodatages vérifiés du dossier — à recouper avec les textes applicables, jamais une conclusion en soi.</p>
+        <p class="note-resume" style="margin-top:14px;">« — » : acte non retrouvé dans le dossier. Délais calculés à partir des horodatages vérifiés — à recouper avec les textes applicables, jamais une conclusion en soi.</p>
       </div>`);
   }
 

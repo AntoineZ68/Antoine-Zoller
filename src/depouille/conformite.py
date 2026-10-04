@@ -50,27 +50,19 @@ def _evenement_verifie(db: sqlite3.Connection, nature: str) -> sqlite3.Row | Non
     ).fetchone()
 
 
-def _piece_existe(db: sqlite3.Connection, type_piece: str) -> bool:
-    return db.execute("SELECT COUNT(*) FROM pieces WHERE type = ?", (type_piece,)).fetchone()[0] > 0
-
-
-def _duree_heures(db: sqlite3.Connection) -> float | None:
-    from .chrono import _combiner_date_heure
-
-    placement = _evenement_verifie(db, "placement_garde_a_vue")
-    fin = _evenement_verifie(db, "fin_garde_a_vue")
-    if not placement or not fin:
-        return None
-    d1 = _combiner_date_heure(placement["date"], placement["heure"])
-    d2 = _combiner_date_heure(fin["date"], fin["heure"])
-    if d1 is None or d2 is None:
-        return None
-    return (d2 - d1).total_seconds() / 3600
+def _piece_existe(db: sqlite3.Connection, type_piece: str, personne_id: int | None = None) -> bool:
+    if personne_id is None:
+        return db.execute("SELECT COUNT(*) FROM pieces WHERE type = ?", (type_piece,)).fetchone()[0] > 0
+    return db.execute(
+        "SELECT COUNT(*) FROM pieces WHERE type = ? AND personne_principale_id = ?", (type_piece, personne_id)
+    ).fetchone()[0] > 0
 
 
 def _signalement_asymetrie(
     db: sqlite3.Connection, nature_demande: str, nature_realisation: str, titre: str
 ) -> Signalement | None:
+    """Contrôle à l'échelle du dossier, utilisé seulement quand aucune garde
+    à vue n'a été identifiée (sinon, contrôle personne par personne)."""
     demande = _evenement_verifie(db, nature_demande)
     realisation = _evenement_verifie(db, nature_realisation)
     if demande is not None and realisation is None:
@@ -87,96 +79,113 @@ def _signalement_asymetrie(
     return None
 
 
-def detecter_signalements(db: sqlite3.Connection) -> list[Signalement]:
+def _signalements_garde_a_vue(db: sqlite3.Connection, gav: dict, suffixe: str, une_seule: bool) -> list[Signalement]:
+    """Contrôles d'UNE garde à vue, avec ses seuls actes (voir
+    gardes_a_vue.py). Une pièce sans personne identifiée ne vaut pour cette
+    garde à vue que s'il n'y en a qu'une dans le dossier."""
     signalements: list[Signalement] = []
+    placement = gav["placement"]
+    natures = {e["nature"] for e in gav["evenements"]}
+    personne = None if une_seule else gav["personne_id"]
+    reference = {"page_reference": placement["page"], "citation_reference": placement["citation"]}
 
-    placement = _evenement_verifie(db, "placement_garde_a_vue")
-    if placement is not None:
-        fin = _evenement_verifie(db, "fin_garde_a_vue")
-        if fin is None:
-            signalements.append(
-                Signalement(
-                    titre="Fin de garde à vue non identifiée",
-                    description=(
-                        "Un placement en garde à vue a été identifié mais aucun acte de fin "
-                        "de garde à vue n'a été retrouvé dans le dossier : la durée totale "
-                        "n'a pas pu être calculée — à vérifier."
-                    ),
-                    page_reference=placement["page"],
-                    citation_reference=placement["citation"],
-                )
-            )
-        else:
-            duree = _duree_heures(db)
-            if duree is not None:
-                if duree > SEUIL_GAV_PROLONGATION_MAX_H:
-                    signalements.append(
-                        Signalement(
-                            titre=f"Durée de garde à vue de {duree:.1f} h — dépasse 48 h",
-                            description=(
-                                f"La durée calculée ({duree:.1f} h) dépasse le maximum du "
-                                f"régime de droit commun (24 h + 24 h de prolongation = 48 h) "
-                                f"même en tenant compte d'une prolongation. {RAPPEL_REGIME_DEROGATOIRE}"
-                            ),
-                            page_reference=placement["page"],
-                            citation_reference=placement["citation"],
-                        )
-                    )
-                elif duree > SEUIL_GAV_DROIT_COMMUN_H and not _piece_existe(
-                    db, "PV de prolongation de garde à vue"
-                ):
-                    signalements.append(
-                        Signalement(
-                            titre=f"Durée de garde à vue de {duree:.1f} h — aucune prolongation identifiée",
-                            description=(
-                                f"La durée calculée ({duree:.1f} h) dépasse les 24 h du régime "
-                                "de droit commun, et aucune pièce de type \"PV de prolongation "
-                                "de garde à vue\" n'a été identifiée dans le dossier : soit elle "
-                                "est absente, soit elle n'a pas été reconnue par la "
-                                f"classification — à vérifier. {RAPPEL_REGIME_DEROGATOIRE}"
-                            ),
-                            page_reference=placement["page"],
-                            citation_reference=placement["citation"],
-                        )
-                    )
+    if gav["fin"] is None:
+        signalements.append(Signalement(
+            titre=f"Fin de garde à vue non identifiée{suffixe}",
+            description=(
+                "Un placement en garde à vue a été identifié mais aucun acte de fin "
+                "de garde à vue n'a été retrouvé dans le dossier : la durée totale "
+                "n'a pas pu être calculée — à vérifier."
+            ),
+            **reference,
+        ))
+    elif gav["duree_minutes"] is not None:
+        duree = gav["duree_minutes"] / 60
+        prolongation = "prolongation_garde_a_vue" in natures or _piece_existe(
+            db, "PV de prolongation de garde à vue", personne
+        )
+        if duree > SEUIL_GAV_PROLONGATION_MAX_H:
+            signalements.append(Signalement(
+                titre=f"Durée de garde à vue de {duree:.1f} h — dépasse 48 h{suffixe}",
+                description=(
+                    f"La durée calculée ({duree:.1f} h) dépasse le maximum du "
+                    f"régime de droit commun (24 h + 24 h de prolongation = 48 h) "
+                    f"même en tenant compte d'une prolongation. {RAPPEL_REGIME_DEROGATOIRE}"
+                ),
+                **reference,
+            ))
+        elif duree > SEUIL_GAV_DROIT_COMMUN_H and not prolongation:
+            signalements.append(Signalement(
+                titre=f"Durée de garde à vue de {duree:.1f} h — aucune prolongation identifiée{suffixe}",
+                description=(
+                    f"La durée calculée ({duree:.1f} h) dépasse les 24 h du régime "
+                    "de droit commun, et aucune pièce de type \"PV de prolongation "
+                    "de garde à vue\" n'a été identifiée dans le dossier : soit elle "
+                    "est absente, soit elle n'a pas été reconnue par la "
+                    f"classification — à vérifier. {RAPPEL_REGIME_DEROGATOIRE}"
+                ),
+                **reference,
+            ))
 
-        notification = _evenement_verifie(db, "notification_droits")
-        if notification is None:
-            signalements.append(
-                Signalement(
-                    titre="Notification des droits non identifiée",
-                    description=(
-                        "Un placement en garde à vue a été identifié mais aucune notification "
-                        "des droits n'a été retrouvée dans le dossier — à vérifier."
-                    ),
-                    page_reference=placement["page"],
-                    citation_reference=placement["citation"],
-                )
-            )
+    if "notification_droits" not in natures:
+        signalements.append(Signalement(
+            titre=f"Notification des droits non identifiée{suffixe}",
+            description=(
+                "Un placement en garde à vue a été identifié mais aucune notification "
+                "des droits n'a été retrouvée dans le dossier — à vérifier."
+            ),
+            **reference,
+        ))
 
-        if not _piece_existe(db, "PV d'entretien avocat"):
-            signalements.append(
-                Signalement(
-                    titre="Entretien avec l'avocat non identifié",
-                    description=(
-                        "Aucune pièce de type \"PV d'entretien avocat\" n'a été identifiée dans "
-                        "le dossier. Cela peut correspondre à une renonciation expresse de la "
-                        "personne gardée à vue, ou à une pièce absente ou non reconnue — à vérifier."
-                    ),
-                    page_reference=placement["page"],
-                    citation_reference=placement["citation"],
-                )
-            )
+    if not _piece_existe(db, "PV d'entretien avocat", personne):
+        signalements.append(Signalement(
+            titre=f"Entretien avec l'avocat non identifié{suffixe}",
+            description=(
+                "Aucune pièce de type \"PV d'entretien avocat\" n'a été identifiée dans "
+                "le dossier. Cela peut correspondre à une renonciation expresse de la "
+                "personne gardée à vue, ou à une pièce absente ou non reconnue — à vérifier."
+            ),
+            **reference,
+        ))
 
-    for signal in (
-        _signalement_asymetrie(
-            db, "demande_examen_medical", "realisation_examen_medical", "Examen médical demandé mais non réalisé (au dossier)"
-        ),
-        _signalement_asymetrie(
-            db, "demande_entretien_avocat", "realisation_entretien_avocat", "Entretien avocat demandé mais non réalisé (au dossier)"
-        ),
+    for demande, realisation, titre in (
+        ("demande_examen_medical", "realisation_examen_medical", "Examen médical demandé mais non réalisé (au dossier)"),
+        ("demande_entretien_avocat", "realisation_entretien_avocat", "Entretien avocat demandé mais non réalisé (au dossier)"),
     ):
-        if signal is not None:
-            signalements.append(signal)
+        evt = next((e for e in gav["evenements"] if e["nature"] == demande), None)
+        if evt is not None and realisation not in natures:
+            signalements.append(Signalement(
+                titre=f"{titre}{suffixe}",
+                description=(
+                    f"Une demande a été identifiée ({evt['date'] or 'date NON TROUVÉE'} "
+                    f"{evt['heure'] or ''}) mais aucune réalisation correspondante n'a été "
+                    "retrouvée dans le dossier — à vérifier."
+                ),
+                page_reference=evt["page"],
+                citation_reference=evt["citation"],
+            ))
+    return signalements
 
+
+def detecter_signalements(db: sqlite3.Connection) -> list[Signalement]:
+    from .gardes_a_vue import gardes_a_vue
+
+    toutes = gardes_a_vue(db)
+    if not toutes:
+        return [
+            s for s in (
+                _signalement_asymetrie(
+                    db, "demande_examen_medical", "realisation_examen_medical", "Examen médical demandé mais non réalisé (au dossier)"
+                ),
+                _signalement_asymetrie(
+                    db, "demande_entretien_avocat", "realisation_entretien_avocat", "Entretien avocat demandé mais non réalisé (au dossier)"
+                ),
+            ) if s is not None
+        ]
+    une_seule = len(toutes) == 1
+    signalements: list[Signalement] = []
+    for gav in toutes:
+        # Le nom distingue les gardes à vue entre elles ; inutile s'il n'y en a qu'une.
+        suffixe = f" — {gav['nom']}" if not une_seule and gav["nom"] else ""
+        signalements.extend(_signalements_garde_a_vue(db, gav, suffixe, une_seule))
     return signalements

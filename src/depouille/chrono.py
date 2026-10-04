@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.table import Table
@@ -268,53 +268,28 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
     return evenements
 
 
-def _combiner_date_heure(date_str: str | None, heure_str: str | None) -> datetime | None:
-    if not date_str or not heure_str:
-        return None
-    try:
-        j, m, a = date_str.split("/")
-        h, mn = heure_str.split("h")
-        return datetime(int(a), int(m), int(j), int(h), int(mn))
-    except ValueError:
-        return None
-
-
-def _evenement_verifie(db: sqlite3.Connection, nature: str) -> sqlite3.Row | None:
-    return db.execute(
-        "SELECT * FROM evenements_procedure WHERE nature = ? AND statut_verif = 'verifie' ORDER BY id LIMIT 1",
-        (nature,),
-    ).fetchone()
-
-
 def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:
-    """Calcule les délais requis, en minutes ou en heures. NON TROUVÉ si l'un
-    des deux événements manque ou n'a pas été vérifié."""
+    """Délais d'UNE garde à vue : celle du client désigné par l'avocat, à
+    défaut la première du dossier. Les délais de chaque personne, un par
+    garde à vue, sont dans gardes_a_vue.gardes_a_vue — c'est ce que
+    l'interface affiche. NON TROUVÉ si l'un des deux actes manque ou n'a
+    pas été vérifié."""
+    from .gardes_a_vue import gardes_a_vue
 
-    def delai(nature_debut: str, nature_fin: str) -> str:
-        e1, e2 = _evenement_verifie(db, nature_debut), _evenement_verifie(db, nature_fin)
-        d1 = _combiner_date_heure(e1["date"], e1["heure"]) if e1 else None
-        d2 = _combiner_date_heure(e2["date"], e2["heure"]) if e2 else None
-        if d1 is None or d2 is None:
-            return "NON TROUVÉ"
-        delta: timedelta = d2 - d1
-        minutes = delta.total_seconds() / 60
-        return f"{minutes:.0f} min"
+    toutes = gardes_a_vue(db)
+    gav = next((g for g in toutes if g["est_client"]), toutes[0] if toutes else None)
 
-    def duree_heures(nature_debut: str, nature_fin: str) -> str:
-        e1, e2 = _evenement_verifie(db, nature_debut), _evenement_verifie(db, nature_fin)
-        d1 = _combiner_date_heure(e1["date"], e1["heure"]) if e1 else None
-        d2 = _combiner_date_heure(e2["date"], e2["heure"]) if e2 else None
-        if d1 is None or d2 is None:
-            return "NON TROUVÉ"
-        return f"{(d2 - d1).total_seconds() / 3600:.1f} h"
+    def en_minutes(cle: str) -> str:
+        valeur = gav[cle] if gav else None
+        return "NON TROUVÉ" if valeur is None else f"{valeur:.0f} min"
 
+    duree = gav["duree_minutes"] if gav else None
     return {
-        "duree_totale_garde_a_vue": duree_heures("placement_garde_a_vue", "fin_garde_a_vue"),
-        "delai_placement_notification_droits": delai("placement_garde_a_vue", "notification_droits"),
-        "delai_demande_realisation_examen_medical": delai("demande_examen_medical", "realisation_examen_medical"),
-        "delai_demande_realisation_entretien_avocat": delai("demande_entretien_avocat", "realisation_entretien_avocat"),
+        "duree_totale_garde_a_vue": "NON TROUVÉ" if duree is None else f"{duree / 60:.1f} h",
+        "delai_placement_notification_droits": en_minutes("delai_notification_minutes"),
+        "delai_demande_realisation_examen_medical": en_minutes("delai_examen_medical_minutes"),
+        "delai_demande_realisation_entretien_avocat": en_minutes("delai_entretien_avocat_minutes"),
     }
-
 
 # Liste d'exclusion plutôt que d'inclusion : un vrai dossier pénal contient
 # une grande variété de pièces (signalement Art. 40, expertise financière,

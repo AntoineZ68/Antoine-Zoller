@@ -168,7 +168,35 @@ class PositionCitation(BaseModel):
     zones: list[list[float]]
 
 
+class ActeGardeAVue(BaseModel):
+    nature: str
+    date: str | None = None
+    heure: str | None = None
+    page: int
+    citation: str
+    instant: str | None = None  # ISO 8601, pour placer l'acte sur la frise horaire
+
+
+class GardeAVue(BaseModel):
+    """Une garde à vue, calculée avec les seuls actes de sa personne.
+    Durées en minutes, None quand l'un des deux actes manque."""
+
+    nom: str | None = None
+    est_client: bool = False
+    debut: str | None = None
+    fin: str | None = None
+    duree_minutes: int | None = None
+    delai_notification_minutes: int | None = None
+    delai_examen_medical_minutes: int | None = None
+    delai_entretien_avocat_minutes: int | None = None
+    # Actes sans personne identifiée, rattachés parce que c'est la seule
+    # garde à vue du dossier.
+    actes_sans_personne_rattaches: bool = False
+    evenements: list[ActeGardeAVue] = []
+
+
 class DonneesDossier(BaseModel):
+    gardes_a_vue: list[GardeAVue] = []
     resume: str | None = None
     positions: list[PositionCitation] = []
     resume_detaille: list[SectionResume] = []
