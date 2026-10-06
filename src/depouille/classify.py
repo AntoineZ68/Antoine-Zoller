@@ -150,9 +150,12 @@ RE_PERSONNE = re.compile(r"\b([A-ZÀ-Ÿ][a-zà-ÿ]+)\s+([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ
 # MOREAU » non plus.
 _MAJ = "A-ZÀ-ÖØ-Þ"
 _LETTRE = "A-Za-zÀ-ÖØ-öø-ÿ"
+# Particules : « AGNÈS LE ROUX (TÉMOIN) » donnait « Le ROUX », prénom perdu
+# et particule prise pour un prénom (observé, dossier d'essai de 40 pages).
+_PARTICULES = r"(?:LE|LA|DE|DU|DES|DA|DI|DOS|VAN|VON|DER|EL|BEN|AÏT|AIT|MAC|MC)"
 RE_ROLE_TAG = re.compile(
-    rf"(?<![{_LETTRE}])([{_MAJ}][{_LETTRE}]+(?:-[{_MAJ}][{_LETTRE}]+)?)\s+"
-    rf"([{_MAJ}]{{2,}}(?:[-'][{_MAJ}]{{2,}})*)\s*\((MIS EN CAUSE|VICTIME|TÉMOIN)\)"
+    rf"(?<![{_LETTRE}])((?!{_PARTICULES}\s)[{_MAJ}][{_LETTRE}]+(?:-[{_MAJ}][{_LETTRE}]+)?)\s+"
+    rf"((?:{_PARTICULES}\s+)*[{_MAJ}]{{2,}}(?:[-'][{_MAJ}]{{2,}})*)\s*\((MIS EN CAUSE|VICTIME|TÉMOIN)\)"
 )
 ROLE_PAR_TAG = {
     "MIS EN CAUSE": "mis_en_cause",

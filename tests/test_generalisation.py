@@ -666,6 +666,8 @@ def test_enqueteur_ecarte_mais_pas_un_agent_immobilier() -> None:
 @pytest.mark.parametrize("entete, attendu", [
     ("PROCÈS-VERBAL D'AUDITION DE JÉRÔME VASSEUR (TÉMOIN)", ("Jérôme VASSEUR", "témoin")),
     ("AUDITION DE JEAN-MARC DUPONT-MOREAU (VICTIME)", ("Jean-Marc DUPONT-MOREAU", "victime")),
+    ("PROCÈS-VERBAL D'AUDITION DE AGNÈS LE ROUX (TÉMOIN)", ("Agnès LE ROUX", "témoin")),
+    ("AUDITION DE JULIEN DE LA FONTAINE (MIS EN CAUSE)", ("Julien DE LA FONTAINE", "mis_en_cause")),
     ("PROCÈS-VERBAL D'AUDITION DE JULIEN MORVANNEC (MIS EN CAUSE)", ("Julien MORVANNEC", "mis_en_cause")),
 ])
 def test_role_tague_avec_accents_et_noms_composes(entete, attendu) -> None:

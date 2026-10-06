@@ -1154,7 +1154,484 @@ def generer_pasteur(dossier: Path) -> VeriteDossier:
     )
 
 
-DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur)
+# --- Dossier 3 : faux conseiller bancaire (escroquerie) ------------------------
+
+PARQUET_ARMORINE = "2033/00119"
+OPJ_ARMORINE = "lieutenant Hugo LEBRETON, officier de police judiciaire à la brigade financière de Kerlan"
+APJ_ARMORINE = "brigadier Chloé MAUGER, agent de police judiciaire"
+
+
+def _pieces_armorine() -> list[dict]:
+    return [
+        piece(
+            "PROCÈS-VERBAL DE SYNTHÈSE",
+            "Brigade financière de Kerlan. Le 10/02/2033, le lieutenant Hugo LEBRETON, officier de "
+            "police judiciaire, dresse la synthèse de l'enquête ouverte le 16/01/2033 sur plainte "
+            "d'Hélène ROUSSET.",
+            "Entre le 14/01/2033 et le 15/01/2033, Hélène ROUSSET, âgée de 84 ans, a été contactée "
+            "par un homme se présentant comme conseiller de la Banque Armorine, qui l'a convaincue "
+            "d'effectuer des virements vers un compte présenté comme sécurisé. Son préjudice est "
+            "évalué à 38 400 euros. Une seconde victime, Gaëlle PRIGENT, a déposé plainte le "
+            "20/01/2033 pour un préjudice de 12 750 euros.",
+            "Les fonds ont été virés sur un compte ouvert au nom de Lorène VIDAL, puis retirés en "
+            "espèces. L'analyse téléphonique a permis d'identifier Sofiane AMRANI comme l'auteur des "
+            "appels et Mehdi CARON comme l'auteur des retraits.",
+            "Sofiane AMRANI, placé en garde à vue le 03/02/2033, a été présenté au juge "
+            "d'instruction le 04/02/2033 et mis en examen.",
+        ),
+        audition(
+            "Hélène ROUSSET", "VICTIME", "16/01/2033", "10h00", "11h45", OPJ_ARMORINE,
+            [
+                ("Vous déposez plainte. Que s'est-il passé ?",
+                 "Le 14/01/2033, vers 10 heures, un monsieur m'a téléphoné en disant qu'il était de la "
+                 "Banque Armorine, service des fraudes. Il connaissait mon nom et le numéro de ma carte."),
+                ("Que vous a-t-il dit ?",
+                 "Que des pirates essayaient de vider mon compte et qu'il fallait mettre mon argent à "
+                 "l'abri sur un compte sécurisé de la banque."),
+                ("Quel numéro vous appelait ?",
+                 "Le numéro affiché était le 07 81 22 45 63. Il m'a dit que c'était sa ligne directe."),
+                ("Combien de virements avez-vous effectués ?",
+                 "Trois, le 14 et le 15. Il restait au téléphone avec moi pendant que je les faisais "
+                 "sur l'ordinateur."),
+                ("Vers quel compte ?",
+                 "Il m'a dicté le numéro, je l'ai noté sur un papier que je vous remets : FR76 3000 4000 "
+                 "1200 0012 3456 789."),
+                ("À combien s'élève votre perte ?",
+                 "En tout, 38 400 euros. Ce sont les économies de toute ma vie."),
+                ("Pouvez-vous décrire la voix ?",
+                 "Un homme jeune, très poli, sans accent particulier. Il m'appelait madame ROUSSET."),
+                ("Quand avez-vous compris ?",
+                 "Le 16 au matin, quand ma conseillère, Mme Agnès LE ROUX, m'a appelée parce que mon "
+                 "compte était à découvert."),
+                ("Souhaitez-vous vous constituer partie civile ?",
+                 "Oui, je veux récupérer mon argent."),
+            ],
+        ),
+        piece(
+            "RELEVÉ DE COMPTE — BANQUE ARMORINE",
+            "Titulaire : Mme Hélène ROUSSET. Compte courant numéro 0045 2287 914. Période du "
+            "01/01/2033 au 16/01/2033.",
+            "14/01/2033 — virement émis vers FR76 3000 4000 1200 0012 3456 789, bénéficiaire "
+            "L. VIDAL : 12 800,00 euros.",
+            "14/01/2033 — virement émis vers FR76 3000 4000 1200 0012 3456 789, bénéficiaire "
+            "L. VIDAL : 12 800,00 euros.",
+            "15/01/2033 — virement émis vers FR76 3000 4000 1200 0012 3456 789, bénéficiaire "
+            "L. VIDAL : 11 300,00 euros.",
+            "Total des virements émis sur la période : 36 900,00 euros. Solde au 16/01/2033 : "
+            "moins 412,35 euros.",
+            scan=True,
+        ),
+        piece(
+            "CERTIFICAT MÉDICAL",
+            "Je soussigné, Docteur Yves KERGOAT, médecin traitant, certifie avoir examiné ce jour "
+            "17/01/2033 à 09h30 Mme Hélène ROUSSET, âgée de 84 ans.",
+            "L'intéressée présente des troubles cognitifs légers, diagnostiqués en 2031, qui "
+            "altèrent sa capacité à apprécier les situations nouvelles. Elle vit seule.",
+            "Elle présente depuis les faits un état anxieux réactionnel.",
+            scan=True,
+        ),
+        audition(
+            "Sandrine ROUSSET", "TÉMOIN", "17/01/2033", "16h00", "16h40", APJ_ARMORINE,
+            [
+                ("Vous êtes la fille d'Hélène ROUSSET. Comment allait votre mère avant les faits ?",
+                 "Elle vit seule et se débrouille, mais elle oublie des choses et elle fait confiance "
+                 "à tout le monde au téléphone."),
+                ("Vous a-t-elle parlé de ces appels ?",
+                 "Non. Le faux conseiller lui avait dit de n'en parler à personne, pas même à sa "
+                 "famille, pour ne pas gêner l'enquête de la banque."),
+                ("Quel est l'état de votre mère depuis ?",
+                 "Elle ne dort plus, elle a honte. Elle ne répond plus au téléphone."),
+            ],
+        ),
+        audition(
+            "Agnès LE ROUX", "TÉMOIN", "17/01/2033", "14h00", "14h30", APJ_ARMORINE,
+            [
+                ("Vous êtes la conseillère d'Hélène ROUSSET. Qu'avez-vous constaté ?",
+                 "Le 16/01/2033, une alerte automatique m'a signalé trois virements inhabituels "
+                 "vers une banque en ligne. J'ai appelé Mme ROUSSET immédiatement."),
+                ("La banque appelle-t-elle ses clients pour déplacer leurs fonds ?",
+                 "Jamais. Aucun conseiller ne demande à un client de virer son argent sur un autre "
+                 "compte."),
+                ("Avez-vous pu bloquer les fonds ?",
+                 "Nous avons demandé le rappel des virements le 16/01/2033, mais les fonds avaient "
+                 "déjà été retirés."),
+            ],
+        ),
+        audition(
+            "Gaëlle PRIGENT", "VICTIME", "20/01/2033", "09h30", "10h40", APJ_ARMORINE,
+            [
+                ("Que s'est-il passé ?",
+                 "Le 18/01/2033 dans l'après-midi, un faux conseiller de la Banque Armorine m'a "
+                 "appelée. J'ai fait deux virements, de 6 500 euros et de 6 250 euros."),
+                ("Quel numéro vous a appelée ?",
+                 "Le 07 81 22 54 63, je l'ai encore dans mon journal d'appels."),
+                ("Vers quel compte ?",
+                 "Le même nom de bénéficiaire, L. VIDAL. L'IBAN se terminait par 3465 789."),
+                ("À combien s'élève votre préjudice ?",
+                 "12 750 euros."),
+                ("Comment l'appelant s'est-il présenté ?",
+                 "Il a dit s'appeler Thomas, du service de sécurité de la Banque Armorine. Il "
+                 "connaissait mon adresse et les quatre derniers chiffres de ma carte."),
+                ("Combien de temps a duré l'appel ?",
+                 "Plus d'une heure. Il me rassurait tout le temps, il disait que la police était au "
+                 "courant."),
+                ("Avez-vous reçu un SMS ou un courriel ?",
+                 "Oui, un SMS avec un code que je lui ai lu, il disait que c'était pour valider la "
+                 "sécurisation."),
+                ("Quand avez-vous compris la supercherie ?",
+                 "Le lendemain, en appelant moi-même mon agence. Ils n'avaient jamais entendu parler "
+                 "de ce Thomas."),
+                ("Avez-vous d'autres éléments à fournir ?",
+                 "Je vous remets la capture de mon journal d'appels et mes relevés de compte."),
+            ],
+        ),
+        piece(
+            "RÉQUISITION JUDICIAIRE À ÉTABLISSEMENT BANCAIRE",
+            "Le 17/01/2033, nous, lieutenant Hugo LEBRETON, requérons la société Néovia Banque de "
+            "nous communiquer l'identité du titulaire du compte FR76 3000 4000 1200 0012 3456 789 et "
+            "ses relevés depuis son ouverture.",
+            "Réponse le 19/01/2033 : compte ouvert en ligne le 02/12/2032 au nom de Lorène VIDAL, née "
+            "le 11/04/2004, demeurant 8 rue des Ajoncs à Kerlan.",
+        ),
+        piece(
+            "RELEVÉ DE COMPTE — NÉOVIA BANQUE",
+            "Titulaire : Mme Lorène VIDAL. Compte FR76 3000 4000 1200 0012 3456 789. Période du "
+            "02/12/2032 au 23/01/2033.",
+            "02/12/2032 — ouverture du compte, versement initial de 10,00 euros.",
+            "14/01/2033 — virement reçu de Mme Hélène ROUSSET : 12 800,00 euros.",
+            "14/01/2033 — virement reçu de Mme Hélène ROUSSET : 12 800,00 euros.",
+            "15/01/2033 — virement reçu de Mme Hélène ROUSSET : 11 300,00 euros.",
+            "18/01/2033 — virement reçu de Mme Gaëlle PRIGENT : 6 500,00 euros.",
+            "18/01/2033 — virement reçu de Mme Gaëlle PRIGENT : 6 250,00 euros.",
+            "14/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "14/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "15/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "15/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "16/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "16/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "17/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "17/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "18/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "18/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "19/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "19/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "20/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "20/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "21/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "21/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,400 euros.".replace(",", " "),
+            "22/01/2033 — retrait d'espèces au distributeur Néovia rue de Brest à Kerlan : 1 000,00 euros.",
+            "22/01/2033 — achat de cartes prépayées Paysafe, point de vente tabac du Port : 2,200 euros.".replace(",", " "),
+            "Solde au 23/01/2033 : 84,12 euros.",
+        ),
+        piece(
+            "RÉQUISITION JUDICIAIRE À ÉMETTEUR DE CARTES PRÉPAYÉES",
+            "Le 25/01/2033, nous, lieutenant Hugo LEBRETON, requérons la société Paysafe de nous "
+            "communiquer l'utilisation des codes des cartes prépayées achetées au tabac du Port à "
+            "Kerlan entre le 14/01/2033 et le 22/01/2033.",
+            "Réponse le 30/01/2033 : les codes ont été utilisés sur des sites de paris en ligne et "
+            "sur une plateforme d'échange de cryptomonnaies, depuis une adresse IP attribuée à une "
+            "box internet installée au 31 boulevard de la Mer à Kerlan.",
+        ),
+        piece(
+            "RAPPORT D'ANALYSE DES COMPTES",
+            "Le 24/01/2033, nous, brigadier Chloé MAUGER, procédons à l'analyse des relevés du compte "
+            "de Lorène VIDAL communiqués par Néovia Banque.",
+            "Crédits : 12 800 euros le 14/01/2033 à 10h52, 12 800 euros le 14/01/2033 à 11h18, "
+            "11 300 euros le 15/01/2033 à 09h41, 6 500 euros et 6 250 euros le 18/01/2033, tous en "
+            "provenance des comptes des deux victimes.",
+            "Débits : retraits d'espèces de 1 000 euros, montant maximal autorisé, effectués "
+            "quotidiennement du 14/01/2033 au 22/01/2033 dans des distributeurs de Kerlan, et "
+            "achat de cartes prépayées pour 21 400 euros.",
+            "Le solde du compte au 23/01/2033 est de 84,12 euros.",
+        ),
+        piece(
+            "RÉQUISITION JUDICIAIRE À OPÉRATEUR DE TÉLÉPHONIE",
+            "Le 18/01/2033, nous, lieutenant Hugo LEBRETON, requérons la société Nérée Mobile de nous "
+            "communiquer l'identité du titulaire et les fadettes de la ligne 07 81 22 45 63.",
+            "Réponse le 21/01/2033 : ligne prépayée activée le 05/01/2033 sans identité vérifiée. "
+            "Appel sortant le 14/01/2033 à 10h47 vers la ligne fixe d'Hélène ROUSSET, d'une durée de "
+            "52 minutes.",
+            scan=True,
+        ),
+        piece(
+            "PROCÈS-VERBAL D'ANALYSE TÉLÉPHONIQUE",
+            "Le 27/01/2033, nous, brigadier Chloé MAUGER, procédons à l'analyse des fadettes de la "
+            "ligne 07 81 22 45 63.",
+            "La ligne a borné du 14/01/2033 au 18/01/2033 sur un relais couvrant le 31 boulevard de "
+            "la Mer à Kerlan, domicile de Sofiane AMRANI.",
+            "Le téléphone utilisé porte un numéro IMEI également associé, en décembre 2032, à une "
+            "carte SIM ouverte au nom de Sofiane AMRANI.",
+            "La ligne a échangé 41 appels avec la ligne 06 27 83 15 90, attribuée à Mehdi CARON.",
+        ),
+        piece(
+            "PROCÈS-VERBAL D'EXPLOITATION DE VIDÉOPROTECTION BANCAIRE",
+            "Le 28/01/2033, nous, brigadier Chloé MAUGER, exploitons les images des distributeurs de "
+            "la Banque Néovia rue de Brest à Kerlan.",
+            "Les retraits des 14/01/2033, 16/01/2033 et 19/01/2033 sont effectués par un homme "
+            "portant une casquette grise et une doudoune noire, dont la morphologie correspond à "
+            "celle de Mehdi CARON. Les retraits du 15/01/2033 sont effectués par une jeune femme "
+            "aux cheveux longs.",
+        ),
+        piece(
+            "PROCÈS-VERBAL DE NOTIFICATION DE PLACEMENT EN GARDE À VUE",
+            "Le 03/02/2033 à 10h20, nous, lieutenant Hugo LEBRETON, officier de police judiciaire, "
+            "notifions à Sofiane AMRANI, né le 22/09/1999 à Kerlan, demeurant 31 boulevard de la Mer "
+            "à Kerlan, son placement en garde à vue pour des faits d'escroquerie, mesure prenant "
+            "effet à compter du 03/02/2033 à 09h45, heure de son appréhension.",
+            "Interpellation effectuée le 03/02/2033 à 09h45, 31 boulevard de la Mer à Kerlan.",
+        ),
+        piece(
+            "PROCÈS-VERBAL D'INTERPELLATION",
+            "Le 03/02/2033 à 09h30, nous, brigadier Chloé MAUGER, agent de police judiciaire, "
+            "procédons à l'interpellation de Sofiane AMRANI à la sortie de son domicile, 31 "
+            "boulevard de la Mer à Kerlan.",
+            "Un téléphone portable est trouvé dans la poche de son blouson.",
+            scan=True,
+        ),
+        piece(
+            "PROCÈS-VERBAL DE NOTIFICATION DES DROITS",
+            "Le 03/02/2033 à 10h25, nous notifions à Sofiane AMRANI ses droits attachés à la mesure "
+            "de garde à vue : droit de faire prévenir un proche, droit d'être examiné par un "
+            "médecin, droit d'être assisté par un avocat, droit de se taire.",
+            "Sofiane AMRANI demande l'assistance de Maître Clément AUBRY, avocat au barreau de Kerlan.",
+        ),
+        piece(
+            "PROCÈS-VERBAL DE PERQUISITION ET DE SAISIE",
+            "Le 03/02/2033 de 10h40 à 11h50, perquisition au domicile de Sofiane AMRANI, 31 "
+            "boulevard de la Mer à Kerlan, en présence de l'intéressé.",
+            "Sont saisis : deux téléphones portables, dont un dont l'IMEI correspond à celui de la "
+            "ligne 07 81 22 45 63, un carnet comportant des noms de personnes âgées et des numéros "
+            "de téléphone, une somme de 6 200 euros en espèces et quatorze cartes prépayées.",
+        ),
+        piece(
+            "PROCÈS-VERBAL D'ENTRETIEN AVEC L'AVOCAT",
+            "Sofiane AMRANI, placé en garde à vue, a demandé l'assistance de son avocat.",
+            "Demande d'entretien formulée le 03/02/2033 à 10h26.",
+            "Entretien avec Maître Clément AUBRY, avocat choisi, réalisé le 03/02/2033 de 12h30 à 13h00.",
+        ),
+        audition(
+            "Sofiane AMRANI", "MIS EN CAUSE", "03/02/2033", "13h15", "15h30", OPJ_ARMORINE,
+            [
+                ("Vous êtes assisté de Maître Clément AUBRY. Quelle est votre situation ?",
+                 "Je suis vendeur dans une boutique de téléphonie, en contrat à durée déterminée."),
+                ("Utilisez-vous la ligne 07 81 22 45 63 ?",
+                 "Non. Ce téléphone, on me l'a prêté. Je ne sais pas qui avait la puce avant."),
+                ("Le 14/01/2033 à 10h47, cette ligne a appelé Hélène ROUSSET pendant 52 minutes. "
+                 "Étiez-vous l'appelant ?",
+                 "Non, je ne connais pas cette dame."),
+                ("Comment expliquez-vous le carnet de noms de personnes âgées saisi chez vous ?",
+                 "Ce sont des clients de la boutique, pour des relances commerciales."),
+                ("Et les 6 200 euros en espèces ?",
+                 "C'est de l'argent gagné en revendant des téléphones d'occasion."),
+                ("Connaissez-vous Lorène VIDAL ?",
+                 "Non, ce nom ne me dit rien."),
+                ("Connaissez-vous Mehdi CARON ?",
+                 "C'est un ami. On joue au football ensemble."),
+                ("Votre ligne a échangé 41 appels avec la sienne. Pourquoi ?",
+                 "On s'organise pour le foot, on s'appelle souvent."),
+                ("La ligne 07 81 22 45 63 a borné chez vous du 14/01/2033 au 18/01/2033. Comment "
+                 "l'expliquez-vous ?",
+                 "Le téléphone était chez moi, mais d'autres personnes viennent chez moi."),
+                ("Quelles personnes ?",
+                 "Des amis. Je ne veux pas donner de noms."),
+                ("Les codes de cartes prépayées ont été utilisés depuis votre box internet. Qu'en "
+                 "dites-vous ?",
+                 "Je joue en ligne, comme tout le monde. Je ne sais pas d'où viennent ces cartes."),
+                ("Avez-vous des dettes ?",
+                 "Un peu, à cause des paris. Je rembourse petit à petit."),
+                ("Que contiennent les quatorze cartes prépayées saisies chez vous ?",
+                 "Je ne sais pas, je ne les ai pas encore utilisées."),
+                ("Avez-vous déjà été condamné ?",
+                 "Oui, en 2030, pour une histoire de vente sur internet. J'ai eu du sursis."),
+            ],
+        ),
+        piece(
+            "PROCÈS-VERBAL DE PROLONGATION DE GARDE À VUE",
+            "Le 04/02/2033 à 09h20, M. Yannick DROUET, vice-procureur de la République de Kerlan, "
+            "autorise la prolongation de la garde à vue de Sofiane AMRANI pour une durée de "
+            "vingt-quatre heures.",
+        ),
+        audition(
+            "Sofiane AMRANI", "MIS EN CAUSE", "04/02/2033", "10h00", "11h20", OPJ_ARMORINE,
+            [
+                ("Vous êtes assisté de Maître Clément AUBRY. Mehdi CARON déclare que vous lui donniez "
+                 "les cartes bancaires de Lorène VIDAL pour retirer l'argent. Qu'en dites-vous ?",
+                 "D'accord. J'ai passé des appels, oui. Mais c'est quelqu'un d'autre qui me donnait les "
+                 "listes de noms et qui prenait la plus grosse part."),
+                ("Combien de personnes avez-vous appelées ?",
+                 "Une dizaine. Seulement deux ont fait des virements."),
+                ("Qui est cette autre personne ?",
+                 "Je ne donnerai pas son nom, j'ai peur pour ma famille."),
+                ("Combien avez-vous perçu ?",
+                 "Environ 8 000 euros en tout."),
+            ],
+        ),
+        piece(
+            "PROCÈS-VERBAL DE FIN DE GARDE À VUE",
+            "Le 4 février 2033 à 18h30, il est mis fin à la garde à vue de Sofiane AMRANI, qui est "
+            "conduit devant le juge d'instruction du tribunal judiciaire de Kerlan.",
+        ),
+        piece(
+            "PROCÈS-VERBAL DE NOTIFICATION DE PLACEMENT EN GARDE À VUE",
+            "Le 03/02/2033 à 11h00, nous, brigadier Chloé MAUGER, agent de police judiciaire, sous "
+            "le contrôle du lieutenant Hugo LEBRETON, notifions à Mehdi CARON, né le 07/06/2001 à "
+            "Kerlan, son placement en garde à vue pour des faits de blanchiment.",
+            "Interpellation effectuée le 03/02/2033 à 10h50, sur son lieu de travail.",
+        ),
+        audition(
+            "Mehdi CARON", "MIS EN CAUSE", "03/02/2033", "16h00", "17h45", APJ_ARMORINE,
+            [
+                ("Vous avez renoncé à l'assistance d'un avocat. Avez-vous effectué des retraits avec "
+                 "la carte de Lorène VIDAL ?",
+                 "Oui. Sofiane me donnait la carte et le code, je retirais 1 000 euros par jour et je "
+                 "lui rendais tout. Il me donnait 50 euros à chaque fois."),
+                ("Saviez-vous d'où venait l'argent ?",
+                 "Il disait que c'était de l'argent de la revente de téléphones."),
+                ("Qui est Lorène VIDAL ?",
+                 "C'est la copine de mon cousin. Elle avait ouvert le compte pour Sofiane contre 300 euros."),
+                ("Qui effectuait les retraits du 15/01/2033 ?",
+                 "Lorène, ce jour-là je travaillais."),
+                ("Qui passait les appels aux victimes ?",
+                 "Sofiane. Je l'ai entendu une fois, il disait qu'il était de la banque."),
+            ],
+        ),
+        piece(
+            "PROCÈS-VERBAL DE FIN DE GARDE À VUE",
+            "Le 03/02/2033 à 22h40, il est mis fin à la garde à vue de Mehdi CARON, qui est remis en "
+            "liberté et convoqué devant le juge d'instruction.",
+        ),
+        audition(
+            "Lorène VIDAL", "MIS EN CAUSE", "05/02/2033", "09h00", "10h30", APJ_ARMORINE,
+            [
+                ("Vous êtes entendue librement. Avez-vous ouvert un compte chez Néovia Banque le "
+                 "02/12/2032 ?",
+                 "Oui. Un ami de mon copain, Sofiane, m'a proposé 300 euros pour ouvrir un compte en "
+                 "ligne et lui donner la carte."),
+                ("Saviez-vous à quoi servirait ce compte ?",
+                 "Il disait que c'était pour recevoir des paiements de clients à l'étranger. Je n'ai "
+                 "pas posé de questions."),
+                ("Avez-vous effectué des retraits le 15/01/2033 ?",
+                 "Oui, une fois, Sofiane m'a demandé de retirer 1 000 euros. Je lui ai tout donné."),
+                ("Vous a-t-il remis d'autres sommes ?",
+                 "Seulement les 300 euros du début."),
+            ],
+            libre=True,
+        ),
+        piece(
+            "CORRESPONDANCE SAISIE — MESSAGES SMS",
+            "Extraction du téléphone saisi chez Sofiane AMRANI, placé sous scellé numéro 1.",
+            "Message du 14/01/2033 à 11h25 envoyé au 06 27 83 15 90 : « La vieille a envoyé deux "
+            "fois. Retire demain matin. »",
+            "Message du 15/01/2033 à 09h50 envoyé au 06 27 83 15 90 : « Troisième passé. Lorène "
+            "s'occupe du retrait aujourd'hui. »",
+            "Message du 18/01/2033 à 16h12 reçu d'un numéro masqué : « La liste de la semaine "
+            "arrive. Garde ta part, envoie le reste par carte prépayée. »",
+            scan=True,
+        ),
+        piece(
+            "PROCÈS-VERBAL DE TRANSCRIPTION DU CARNET SAISI",
+            "Le 04/02/2033, nous, brigadier Chloé MAUGER, transcrivons le carnet placé sous scellé "
+            "numéro 3, saisi au domicile de Sofiane AMRANI.",
+            "Le carnet comporte 38 lignes, chacune avec un nom, un prénom, un numéro de téléphone fixe "
+            "et parfois une année de naissance, toutes antérieures à 1950.",
+            "La ligne 12 porte : « ROUSSET Hélène — 1949 — Armorine — OK 3 vir. ». La ligne 27 porte : "
+            "« PRIGENT Gaëlle — Armorine — OK 2 ».",
+            "Huit autres lignes portent la mention « rappeler », trois la mention « méfiante ».",
+            "Aucune des personnes mentionnées n'est cliente de la boutique de téléphonie où travaille "
+            "Sofiane AMRANI, d'après le registre fourni par son employeur.",
+        ),
+        piece(
+            "PROCÈS-VERBAL DE CONFRONTATION",
+            "Le 04/02/2033 de 14h00 à 14h50, nous, lieutenant Hugo LEBRETON, procédons à la "
+            "confrontation de Sofiane AMRANI, assisté de Maître Clément AUBRY, et de Mehdi CARON.",
+            "Question à Mehdi CARON : Maintenez-vous que Sofiane AMRANI vous remettait la carte ?",
+            "Réponse de Mehdi CARON : Oui. Il me donnait la carte et le code, et je lui rendais l'argent "
+            "le soir même.",
+            "Question à Sofiane AMRANI : Qu'avez-vous à répondre ?",
+            "Réponse de Sofiane AMRANI : C'est vrai pour la carte. Mais Mehdi savait d'où venait "
+            "l'argent, il a lu mes messages.",
+            "Question à Mehdi CARON : Saviez-vous que l'argent provenait de personnes âgées ?",
+            "Réponse de Mehdi CARON : Non, je ne l'ai compris qu'en garde à vue.",
+            "Chacun maintient ses déclarations.",
+        ),
+        piece(
+            "PROCÈS-VERBAL D'INTERROGATOIRE DE PREMIÈRE COMPARUTION",
+            "Le 05/02/2033 à 14h00, devant nous, Mme Bérénice FAURE, juge d'instruction au tribunal "
+            "judiciaire de Kerlan, assistée de Mme Laure PICHON, greffière, comparaît Sofiane AMRANI, "
+            "assisté de Maître Clément AUBRY.",
+            "Nous lui faisons connaître les faits dont nous sommes saisie et l'informons qu'il peut "
+            "se taire, faire des déclarations ou être interrogé.",
+            "Sofiane AMRANI déclare : « Je reconnais avoir passé les appels à Mme ROUSSET et à Mme "
+            "PRIGENT. Je regrette. Je n'étais pas le chef. »",
+            "Nous mettons en examen Sofiane AMRANI des chefs d'escroquerie au préjudice de "
+            "personnes vulnérables et de blanchiment, et le plaçons sous contrôle judiciaire.",
+        ),
+        piece(
+            "ORDONNANCE DE PLACEMENT SOUS CONTRÔLE JUDICIAIRE",
+            "Le 05/02/2033, Mme Bérénice FAURE, juge d'instruction, ordonne le placement sous "
+            "contrôle judiciaire de Sofiane AMRANI, avec les obligations suivantes : se présenter "
+            "chaque semaine au commissariat de Kerlan, ne pas entrer en contact avec Hélène ROUSSET, "
+            "Gaëlle PRIGENT, Mehdi CARON et Lorène VIDAL, verser un cautionnement de 5 000 euros.",
+        ),
+        piece(
+            "PROCÈS-VERBAL D'AUDITION DE PARTIE CIVILE — CONSTITUTION",
+            "Le 06/02/2033, Mme Gaëlle PRIGENT déclare se constituer partie civile et sollicite le "
+            "remboursement de 12 750 euros ainsi que 2 000 euros au titre du préjudice moral.",
+            "Le 06/02/2033, Mme Hélène ROUSSET, représentée par sa fille Sandrine ROUSSET, déclare se "
+            "constituer partie civile et sollicite le remboursement de 38 400 euros.",
+        ),
+        piece(
+            "ENQUÊTE DE PERSONNALITÉ — SOFIANE AMRANI",
+            "Né le 22/09/1999 à Kerlan, célibataire, vit seul au 31 boulevard de la Mer. Titulaire "
+            "d'un BTS commercial, vendeur en téléphonie depuis 2022.",
+            "Il déclare des dettes de jeux en ligne d'environ 15 000 euros.",
+        ),
+        piece(
+            "EXTRAIT DE CASIER JUDICIAIRE — BULLETIN N°1",
+            "AMRANI Sofiane, né le 22/09/1999 à Kerlan.",
+            "Condamnation du 03/05/2030, tribunal correctionnel de Kerlan : escroquerie, 8 mois "
+            "d'emprisonnement avec sursis.",
+            scan=True,
+        ),
+        piece(
+            "EXTRAIT DE CASIER JUDICIAIRE — BULLETIN N°1",
+            "CARON Mehdi, né le 07/06/2001 à Kerlan.",
+            "Néant.",
+        ),
+    ]
+
+
+def generer_armorine(dossier: Path) -> VeriteDossier:
+    chemin = dossier / "dossier_armorine.pdf"
+    nb, scans = ecrire_dossier(_pieces_armorine(), chemin, PARQUET_ARMORINE)
+    return VeriteDossier(
+        chemin_pdf=chemin, nb_pages=nb, pages_scan=scans,
+        contradictions_par_regles=(
+            ("Interpellation de Sofiane AMRANI", "09h30", "09h45"),
+            ("Téléphone", "07 81 22 45 63", "07 81 22 54 63"),
+        ),
+        contradictions_modele=(
+            ("38 400", "36 900", "prejudice", "montant"),
+        ),
+        durees_gav={
+            "Sofiane AMRANI": minutes_entre("03/02/2033 09h45", "04/02/2033 18h30"),
+            "Mehdi CARON": minutes_entre("03/02/2033 11h00", "03/02/2033 22h40"),
+        },
+        mis_en_cause=("Sofiane AMRANI", "Mehdi CARON", "Lorène VIDAL"),
+        jamais_mis_en_cause=(
+            "Hugo LEBRETON", "Chloé MAUGER", "Yannick DROUET", "Bérénice FAURE", "Laure PICHON",
+            "Clément AUBRY", "Hélène ROUSSET", "Gaëlle PRIGENT", "Agnès LE ROUX", "Yves KERGOAT",
+            "Sandrine ROUSSET",
+        ),
+        questions=(
+            QuestionAttendue("À quelle heure Sofiane AMRANI a-t-il été interpellé ?", heures=((9, 30), (9, 45))),
+            QuestionAttendue("Quel montant Hélène ROUSSET a-t-elle perdu ?", mots=("38 400", "36 900")),
+            QuestionAttendue("Qui effectuait les retraits d'espèces ?", mots=("CARON", "VIDAL")),
+        ),
+    )
+
+
+DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur, generer_armorine)
 
 
 if __name__ == "__main__":
