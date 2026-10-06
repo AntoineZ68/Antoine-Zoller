@@ -24,7 +24,9 @@ import sqlite3
 import unicodedata
 
 from .config import Config
-from .garde_fous import RE_QUALIFICATION, avec_noms_completes, noms_identifies, problemes_redaction
+from .garde_fous import (
+    RE_QUALIFICATION, avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues,
+)
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
 from .verification import verifier_citation
 
@@ -64,8 +66,9 @@ PROMPT_SYSTEME = (
     "agir, légalité d'un acte), ni d'appréciation sur la culpabilité, la solidité des "
     "charges ou la stratégie de défense : si la question le demande, rapporte seulement "
     "les faits datés et sourcés qui s'y rapportent, sans conclure. "
-    "Si les pages divergent sur un point (heure, date, couleur, description d'une "
-    "personne), donne chaque version avec sa page et cite chacune, sans trancher. "
+    "Si les pages divergent sur un point (heure, date, montant, couleur, description "
+    "d'une personne), donne chaque version avec sa page et cite chacune, sans trancher ; "
+    "pour un montant, compare ce que dit la personne et ce que montrent les relevés. "
     "Réponse courte : quelques phrases au plus, en français. "
     "Réponds uniquement en JSON : "
     "{\"reponse\": \"...\", \"citations\": [{\"page\": N, \"citation\": \"...\"}]}."
@@ -137,9 +140,13 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
         "L'avocat n'a pas désigné son client : si la question parle de « mon client », "
         "réponds {\"reponse\": null, \"citations\": []}.\n\n"
     )
+    from .contradictions import discordances_connues  # import ici : évite un cycle au chargement
+
+    discordances = discordances_connues(db)
     reponse_modele = obtenir_provider(config).appeler(
         systeme=PROMPT_SYSTEME,
-        prompt=f"{contexte_client}Question de l'avocat : {question}\n\nPages du dossier :\n{texte}",
+        prompt=f"{contexte_client}Question de l'avocat : {question}{bloc_discordances(discordances)}"
+        f"\n\nPages du dossier :\n{texte}",
         modele=config.modele_analyse,
     )
     try:
@@ -178,4 +185,14 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
     )
     if problemes_redaction(texte_reponse, reference):
         return {"statut": "passages", "reponse": MESSAGE_PASSAGES, "citations": citations_verifiees}
+    # Une réponse qui ne garde qu'une version d'une discordance établie par
+    # les règles (« interpellé à 09h45 » quand une autre pièce dit 09h30)
+    # est complétée ici, de façon déterministe — observé sur deux dossiers
+    # d'essai de 40 pages malgré la consigne.
+    for libelle, versions in discordances:
+        if versions_tues(texte_reponse, [(libelle, versions)]):
+            texte_reponse += (
+                f" Attention : les pièces ne concordent pas sur ce point ({libelle} : "
+                f"{' ou '.join(versions)}) — voir l'onglet des contradictions."
+            )
     return {"statut": "sourcee", "reponse": texte_reponse, "citations": citations_verifiees}

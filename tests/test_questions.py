@@ -169,3 +169,14 @@ def test_nom_complete_par_une_personne_identifiee(monkeypatch, db) -> None:
         "citations": [{"page": 2, "citation": "René décrit un break blanc"}],
     })
     assert questions.repondre_question(db, Config(offline=False), "Qui a vu le break ?")["statut"] == "sourcee"
+
+
+def test_version_unique_d_une_discordance_completee(monkeypatch, db) -> None:
+    monkeypatch.setattr("depouille.contradictions.discordances_connues", lambda db: [("Départ de Mme SERMET", ["13h30", "14h10"])])
+    _modele(monkeypatch, {
+        "reponse": "Mme SERMET a quitté son domicile de Biviers à 13h30.",
+        "citations": [{"page": 1, "citation": "déclare avoir quitté son domicile de Biviers à 13h30"}],
+    })
+    r = questions.repondre_question(db, Config(offline=False), "Quand est-elle partie ?")
+    assert r["statut"] == "sourcee"
+    assert "13h30 ou 14h10" in r["reponse"]
