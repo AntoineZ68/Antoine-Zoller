@@ -83,7 +83,12 @@ def _mots_presents(mots: tuple[str, ...], texte: str) -> list[str]:
     """Mots attendus présents dans un texte, sans tenir compte des accents,
     de la casse ni des espaces dans les nombres (« 1 200 » = « 1200 »)."""
     texte = _compacter(texte)
-    return [m for m in mots if re.search(r"(?<!\w)" + re.escape(_compacter(m)) + r"(?!\w)", texte)]
+    # Un mot attendu vaut ses accords (« blanc » : blanche, blancs) ; un
+    # nombre reste exact (« 8 » ne vaut pas « 80 »).
+    return [
+        m for m in mots
+        if re.search(r"(?<!\w)" + re.escape(_compacter(m)) + (r"\w*" if m.isalpha() else r"(?!\w)"), texte)
+    ]
 
 
 # --- Mesure des appels au modèle --------------------------------------------

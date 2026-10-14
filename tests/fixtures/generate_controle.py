@@ -41,7 +41,7 @@ def _verite(chemin: Path, nb_pages: int, pages_scan: list[int]) -> VeriteDossier
             # Les deux heures d'interpellation : une réponse qui n'en donne
             # qu'une cache à l'avocat une discordance du dossier.
             QuestionAttendue("À quelle heure Julien MORVANNEC a-t-il été interpellé ?", heures=((7, 50), (8, 5))),
-            QuestionAttendue("Quel véhicule a été vu devant le domicile, et de quelle couleur ?", mots=("grise", "blanche")),
+            QuestionAttendue("Quel véhicule a été vu devant le domicile, et de quelle couleur ?", mots=("gris", "blanc")),
             QuestionAttendue("Que déclare Julien MORVANNEC sur son emploi du temps ?", mots=("22", "23")),
         ),
     )
