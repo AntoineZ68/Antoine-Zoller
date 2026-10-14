@@ -135,3 +135,15 @@ def test_elements_de_fin_de_dossier_jamais_coupes_en_silence() -> None:
     assert len(gardes) == 50
     assert pages[0] <= 4 and pages[-1] >= 190, "répartis du début à la fin du dossier"
     assert "50 élément(s) sur 200" in console.export_text()
+
+
+def test_numero_d_element_en_plein_texte_remplace_par_sa_page() -> None:
+    """Observé : « gris selon F9 » — le 9 passait pour un nombre inventé et
+    toutes les discordances d'un passage étaient écartées."""
+    from depouille.resume_detaille import sans_references
+
+    elements = {"F9": {"page": 5}, "F10": {"page": 6}}
+    assert sans_references("Blanc selon F10, gris selon F9 (F9, F10).", elements) == (
+        "Blanc selon la pièce de la page 6, gris selon la pièce de la page 5."
+    )
+    assert sans_references("Cote D0003.", elements) == "Cote D0003."

@@ -148,18 +148,29 @@ RE_GROUPE_DE_REFERENCES = re.compile(
 )
 
 
+RE_REFERENCE_ISOLEE = re.compile(r"\b[FPD]\d+\b")
+
+
 def sans_references(texte: str, elements: dict[str, dict]) -> str:
     """Retire les numéros d'éléments entre parenthèses ou crochets
     (« (F6) », « [D3, D7] ») que le modèle recopie parfois : ils ne disent
     rien à l'avocat — les sources sont affichées à côté — et leurs chiffres
     passaient pour des nombres inventés (observé : des contradictions exactes
-    écartées). Seuls les groupes faits de numéros existants sont retirés :
-    une cote « (D0003) » reste. Un numéro employé comme un mot (« selon
-    D3 ») n'est pas retiré : la phrase serait bancale, elle sera écartée."""
-    def remplacer(m: re.Match) -> str:
+    écartées). Un numéro employé comme un mot (« gris selon F9 ») devient
+    « la pièce de la page 5 » : exact, lisible, et la discordance n'est
+    plus perdue (observé : 0 contradiction du modèle sur 6 proposées, sur
+    un passage du banc). Seuls les numéros existants sont touchés : une
+    cote « (D0003) » reste."""
+    def remplacer_groupe(m: re.Match) -> str:
         return "" if all(r in elements for r in re.findall(r"[FPD]\d+", m.group(0))) else m.group(0)
 
-    return re.sub(r"\s{2,}", " ", RE_GROUPE_DE_REFERENCES.sub(remplacer, texte)).strip()
+    def remplacer_isole(m: re.Match) -> str:
+        element = elements.get(m.group(0))
+        return f"la pièce de la page {element['page']}" if element else m.group(0)
+
+    texte = RE_GROUPE_DE_REFERENCES.sub(remplacer_groupe, texte)
+    texte = RE_REFERENCE_ISOLEE.sub(remplacer_isole, texte)
+    return re.sub(r"\s{2,}", " ", texte).strip()
 
 
 def phrase_retenue(

@@ -367,12 +367,12 @@ def stabilite(resultats: list[Resultat], nom: str) -> list[str]:
     comptes: dict[tuple[str, str], list[bool]] = {}
     for r in resultats:
         for famille, controles in (("sécurité", r.securite), ("qualité", r.qualite)):
-            for nom, ok, _ in controles:
-                comptes.setdefault((famille, nom), []).append(ok)
+            for controle, ok, _ in controles:
+                comptes.setdefault((famille, controle), []).append(ok)
     lignes = [f"## Stabilité — {nom} — {len(resultats)} passages", "", "| Contrôle | Type | Réussite |", "|---|---|---|"]
-    for (famille, nom), oks in comptes.items():
+    for (famille, controle), oks in comptes.items():
         marque = "OK " if all(oks) else ("ÉCHEC" if famille == "sécurité" else "KO ")
-        lignes.append(f"| {marque} {nom} | {famille} | {sum(oks)}/{len(oks)} |")
+        lignes.append(f"| {marque} {controle} | {famille} | {sum(oks)}/{len(oks)} |")
     return lignes + [""]
 
 
