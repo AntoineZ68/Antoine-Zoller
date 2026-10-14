@@ -236,7 +236,7 @@ DELAIS_ORPHELIN = {
 MESSAGE_ORPHELIN = (
     "Traitement interrompu : le serveur d'analyse s'est arrêté en cours de route "
     "(redémarrage, mise en veille ou mémoire insuffisante), sans pouvoir le signaler. "
-    "Aucun résultat partiel n'a été conservé. Supprimez ce dossier et renvoyez-le."
+    "Aucun résultat partiel n'a été conservé : relancez le traitement."
 )
 
 
@@ -676,6 +676,102 @@ def supprimer_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_c
         pass
 
     supabase.table("dossiers").delete().eq("id", dossier_id).execute()
+
+
+@app.post("/api/dossiers/{dossier_id}/relancer", response_model=schemas.DossierResume)
+def relancer_dossier(
+    dossier_id: str,
+    background_tasks: BackgroundTasks,
+    contexte: tuple[Client, str] = Depends(_contexte_utilisateur),
+) -> dict:
+    """Relance le traitement d'un dossier en erreur à partir des PDF déjà
+    transmis : l'avocat n'a ni à supprimer le dossier ni à renvoyer ses
+    fichiers (un dossier de 150 pages, sur une connexion de cabinet)."""
+    supabase, utilisateur_id = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)  # vérifie l'appartenance via la RLS
+    _cloturer_orphelins(supabase, [dossier])
+    if dossier["statut"] != "erreur":
+        raise HTTPException(status_code=409, detail="Seul un dossier dont le traitement a échoué peut être relancé.")
+
+    prefixe = dossier.get("fichier_source_path") or f"{utilisateur_id}/{dossier_id}/"
+    service = client_service()
+    bucket = service.storage.from_("dossiers-source")
+    repertoire_local = Path(tempfile.mkdtemp(prefix="depouille_relance_"))
+    chemins_locaux: list[Path] = []
+    try:
+        for chemin_storage in sorted(_lister_fichiers_recursif(bucket, prefixe)):
+            chemin_local = repertoire_local / _nom_disponible(repertoire_local, Path(chemin_storage).name)
+            chemin_local.write_bytes(bucket.download(chemin_storage))
+            chemins_locaux.append(chemin_local)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(repertoire_local, ignore_errors=True)
+        raise HTTPException(status_code=502, detail="Les fichiers du dossier n'ont pas pu être relus. Réessayez dans un instant.") from exc
+    if not chemins_locaux:
+        shutil.rmtree(repertoire_local, ignore_errors=True)
+        raise HTTPException(
+            status_code=409,
+            detail="Les fichiers de ce dossier ne sont plus disponibles : supprimez-le et renvoyez-le.",
+        )
+
+    # Les étapes de l'essai précédent, « erreur » comprise, ne doivent pas
+    # rester affichées pendant le nouveau traitement. Écriture réservée au
+    # backend (pas de policy d'écriture utilisateur sur cette table).
+    service.table("traitement_etapes").delete().eq("dossier_id", dossier_id).execute()
+    champs = {"statut": "en_attente", "etape_courante": None, "message_erreur": None}
+    # Condition sur l'ancien statut : deux clics rapprochés ne lancent pas
+    # deux traitements.
+    resultat = supabase.table("dossiers").update(champs).eq("id", dossier_id).eq("statut", "erreur").execute()
+    if not resultat.data:
+        shutil.rmtree(repertoire_local, ignore_errors=True)
+        raise HTTPException(status_code=409, detail="Ce dossier est déjà en cours de traitement.")
+
+    background_tasks.add_task(_traiter_puis_nettoyer, dossier_id, chemins_locaux, repertoire_local, False)
+    return resultat.data[0]
+
+
+def _nom_fournisseur_ia() -> str:
+    fournisseur = (os.environ.get("LLM_PROVIDER") or "anthropic").strip().lower()
+    return {"mistral": "Mistral AI", "anthropic": "Anthropic", "offline": "aucun (mode hors ligne)"}.get(fournisseur, fournisseur)
+
+
+@app.get("/api/infos", response_model=schemas.Infos)
+def infos() -> dict:
+    """Public : ne dit rien d'un dossier ni d'un utilisateur."""
+    return {
+        "fournisseur_ia": _nom_fournisseur_ia(),
+        "limite_pages": LIMITE_PAGES,
+        "limite_mo_par_fichier": LIMITE_MO_PAR_FICHIER,
+        "email_contact": (os.environ.get("EMAIL_CONTACT") or "").strip() or None,
+    }
+
+
+@app.post("/api/dossiers/{dossier_id}/retours", status_code=201)
+def signaler_probleme(
+    dossier_id: str,
+    retour: schemas.Retour,
+    contexte: tuple[Client, str] = Depends(_contexte_utilisateur),
+) -> dict:
+    """Un avocat du pilote signale une erreur (un fait mal daté, une personne
+    oubliée, un écran qui ne répond pas). Écrit sous son identité : la RLS de
+    la table `retours` (migration 0005) n'accepte que ses propres retours,
+    sur ses propres dossiers."""
+    supabase, utilisateur_id = contexte
+    dossier = _dossier_ou_404(supabase, dossier_id)  # vérifie l'appartenance via la RLS
+    try:
+        supabase.table("retours").insert({
+            "dossier_id": dossier_id,
+            "owner_id": utilisateur_id,
+            "message": retour.message.strip(),
+            "contexte": retour.contexte,
+            "statut_dossier": dossier.get("statut"),
+        }).execute()
+    except Exception as exc:  # noqa: BLE001 — table absente (migration 0005 non appliquée), réseau…
+        print(f"[retours] signalement non enregistré pour {dossier_id} : {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="Votre signalement n'a pas pu être enregistré. Réessayez dans un instant.",
+        ) from exc
+    return {"ok": True}
 
 
 @app.get("/api/dossiers/{dossier_id}/documents", response_model=list[str])

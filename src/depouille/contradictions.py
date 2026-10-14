@@ -38,7 +38,9 @@ from dataclasses import dataclass, field
 from rich.console import Console
 
 from .config import Config
-from .garde_fous import RE_JUGEMENT, avec_noms_completes, contient_qualification, elements_absents, noms_identifies
+from .garde_fous import (
+    RE_JUGEMENT, _version_citee, avec_noms_completes, contient_qualification, elements_absents, noms_identifies,
+)
 from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, obtenir_provider
 from .recoupements import occurrences_identifiants
 from .resume_detaille import _elements, sans_references
@@ -383,6 +385,19 @@ def _meme_discordance(sources: list[dict], autres: list[dict]) -> bool:
     return sum(any(_meme_passage(s, a) for a in autres) for s in sources) >= 2
 
 
+def _meme_ecart(sources: list[dict], texte: str, regle: list[dict], versions: list[str]) -> bool:
+    """Mêmes pages, un passage en commun, et les mêmes versions : la règle
+    a établi « 06h20 ou 06h10 », le modèle redit « 6h20 selon le PV, 6h10
+    selon la notification » en citant, pour la seconde pièce, une autre
+    phrase de la même page (observé sur un dossier d'essai : la discordance
+    affichée deux fois)."""
+    if not versions or {s["page"] for s in sources} != {r["page"] for r in regle}:
+        return False
+    if not any(_meme_passage(s, r) for s in sources for r in regle):
+        return False
+    return all(_version_citee(v, texte) for v in versions)
+
+
 def toutes_les_contradictions(db: sqlite3.Connection) -> list[Contradiction]:
     """Règles fixes d'abord, puis propositions du modèle (table absente sur
     un dossier traité avant cette fonction : règles seules)."""
@@ -390,10 +405,17 @@ def toutes_les_contradictions(db: sqlite3.Connection) -> list[Contradiction]:
     # Le modèle peut retrouver une discordance déjà établie par les règles
     # (deux heures d'interpellation) : la même ne s'affiche pas deux fois.
     deja = [c.sources for c in resultats]
+    versions_par_regle = []
+    for c in resultats:
+        _, _, versions = c.titre.rpartition(" : ")
+        versions_par_regle.append((c.sources, versions.split(" ou ") if " ou " in versions else []))
     try:
         for ligne in db.execute("SELECT * FROM contradictions ORDER BY ordre"):
             sources = json.loads(ligne["sources_json"])
             if any(_meme_discordance(sources, d) for d in deja):
+                continue
+            texte = f"{ligne['titre']} {ligne['description']}"
+            if any(_meme_ecart(sources, texte, regle, versions) for regle, versions in versions_par_regle):
                 continue
             deja.append(sources)
             resultats.append(Contradiction(

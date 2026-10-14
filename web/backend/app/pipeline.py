@@ -32,6 +32,30 @@ from depouille.ingest import lancer_ingestion
 
 from .supabase_client import client_service
 
+# Ce que l'avocat lit quand le traitement échoue : l'étape en cause, en mots
+# simples, et quoi faire. La trace technique complète part dans les journaux
+# du serveur — affichée telle quelle, elle n'apprenait rien à l'avocat
+# (« Traceback (most recent call last): … »).
+ETAPES_LISIBLES = {
+    "ingest": "la lecture des PDF",
+    "classify": "le classement des pièces",
+    "index": "la construction de l'index",
+    "chrono": "l'établissement de la chronologie",
+    "decl": "l'extraction des déclarations",
+    "build": "la préparation des documents de travail",
+    "envoi": "l'enregistrement des résultats",
+}
+
+
+def message_pour_l_avocat(exc: BaseException, etape: str | None) -> str:
+    moment = f"pendant {ETAPES_LISIBLES[etape]}" if etape in ETAPES_LISIBLES else "pendant le traitement"
+    if isinstance(exc, MemoryError):
+        cause = "le dossier a dépassé la mémoire disponible sur le serveur. Essayez de l'envoyer en plusieurs tomes."
+    else:
+        cause = "relancez le traitement ; si l'échec se reproduit, signalez-le avec le bouton « Signaler un problème »."
+    detail = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:200]
+    return f"Le traitement s'est arrêté {moment} : {cause}\n\nDétail technique : {type(exc).__name__} — {detail}"
+
 NOMS_LIVRABLES = (
     "00_dossier_surligne.pdf",
     "01_index.xlsx",
@@ -231,12 +255,13 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
         )
 
         battement = _Battement(dossier_id)
+        etape_en_cours: str | None = None
         try:
             _maj_dossier(supabase, dossier_id, statut="en_cours")
             battement.demarrer()
 
             for nom_etape, fonction in etapes_pipeline:
-                battement.etape = nom_etape
+                battement.etape = etape_en_cours = nom_etape
                 _maj_dossier(supabase, dossier_id, etape_courante=nom_etape)
                 _maj_etape(
                     supabase, dossier_id, nom_etape,
@@ -259,17 +284,19 @@ def traiter_dossier(dossier_id: str, chemins_pdf_locaux: list[Path], offline: bo
                     tokens_in=tokens_in, tokens_out=tokens_out, cout_usd=cout,
                 )
 
+            etape_en_cours = "envoi"
             _televerser_resultats(supabase, dossier_id, affaire_dir)
 
             nb_pages = db.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
             _maj_dossier(supabase, dossier_id, statut="termine", etape_courante=None, nb_pages=nb_pages)
 
         except Exception as exc:  # noqa: BLE001
+            print(f"[pipeline] échec du traitement de {dossier_id} :\n{traceback.format_exc()}")
             try:
                 _maj_dossier(
                     supabase, dossier_id,
                     statut="erreur",
-                    message_erreur=(str(exc) + "\n" + traceback.format_exc())[-1000:],
+                    message_erreur=message_pour_l_avocat(exc, etape_en_cours),
                 )
             except Exception as exc_signalement:  # noqa: BLE001 — au pire ce
                 # dossier reste bloqué "en cours" (récupérable via le bouton

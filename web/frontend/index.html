@@ -393,6 +393,27 @@
   .entete-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   #bouton-supprimer-dossier { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
   #bouton-supprimer-dossier:hover { border-color: var(--erreur); color: var(--erreur); }
+  #bouton-signaler { border-color: var(--bordure); color: var(--texte-att); font-size: 12px; padding: 7px 12px; }
+  .message-erreur-traitement { white-space: pre-line; }
+  .actions-erreur { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .mention-confidentialite {
+    margin: 14px 0 0; padding: 12px 14px; border-radius: var(--rayon-sm); background: var(--carte-creuse);
+    color: var(--texte-att); font-size: 12.5px; line-height: 1.5;
+  }
+  .mention-confidentialite strong { color: var(--texte); font-weight: 600; }
+  #dialogue-signalement {
+    width: min(520px, calc(100vw - 32px)); border: 1px solid var(--bordure-douce); border-radius: var(--rayon);
+    background: var(--carte); color: var(--texte); padding: 24px 26px; box-shadow: var(--ombre);
+  }
+  #dialogue-signalement::backdrop { background: rgba(22,18,13,0.35); }
+  #dialogue-signalement h2 { margin: 0 0 8px; font-size: 20px; }
+  #champ-signalement {
+    width: 100%; margin-top: 10px; padding: 11px 14px; background: var(--carte); border: 1px solid var(--bordure);
+    border-radius: var(--rayon-sm); color: var(--texte); font-family: inherit; font-size: 14px; resize: vertical;
+  }
+  #champ-signalement:focus { outline: none; border-color: var(--encre); box-shadow: 0 0 0 3px rgba(22,18,13,0.05); }
+  .actions-dialogue { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+  .confirmation { color: var(--succes); font-size: 13px; margin-top: 10px; }
 
   .barre-onglets {
     display: flex; gap: 4px; background: var(--fond-barre); border: 1px solid var(--bordure-douce);
@@ -588,7 +609,14 @@
           <input type="file" id="champ-fichier" accept="application/pdf" multiple required />
           <p class="vide" style="margin: 8px 0 0;">Un dossier pénal arrive souvent en plusieurs PDF distincts —
           sélectionne-les tous d'un coup (Ctrl ou Maj + clic).</p>
-          <p class="vide" style="margin: 6px 0 0;">Pour l'instant : jusqu'à 150 pages par dossier et 50 Mo par fichier.</p>
+          <p class="vide" style="margin: 6px 0 0;" id="limites-envoi">Pour l'instant : jusqu'à 150 pages par dossier et 50 Mo par fichier.</p>
+          <p class="mention-confidentialite" id="mention-confidentialite">
+            <strong>Confidentialité.</strong> Vos PDF sont conservés dans un espace de stockage privé rattaché à votre
+            compte — aucun autre utilisateur n'y a accès — jusqu'à ce que vous supprimiez le dossier (« Supprimer »
+            efface aussi les documents générés). Pour l'analyse, le texte des pièces est transmis au modèle
+            d'intelligence artificielle de <span id="fournisseur-ia">notre prestataire</span>.
+            Version pilote : n'envoyez que des dossiers que vous êtes autorisé à confier à un tel prestataire.
+          </p>
           <button type="submit" id="bouton-envoi" class="bouton-primaire">Envoyer</button>
           <div class="erreur" id="erreur-envoi" hidden></div>
         </form>
@@ -631,6 +659,24 @@
    </aside>
   </div>
 </div>
+
+<!-- Hors de #vue-dossier, réécrite toutes les 6 s pendant un traitement :
+     un signalement en cours de saisie n'est jamais effacé. -->
+<dialog id="dialogue-signalement">
+  <form id="form-signalement">
+    <h2>Signaler un problème</h2>
+    <p class="vide" style="margin:0;">Un fait mal daté, une personne oubliée, une citation introuvable, un écran
+    qui ne répond pas… Décrivez ce que vous avez constaté, avec la page ou la cote si possible. Quelques mots
+    suffisent : inutile de recopier la pièce.</p>
+    <textarea id="champ-signalement" rows="6" maxlength="4000" required></textarea>
+    <div class="erreur" id="erreur-signalement" hidden></div>
+    <p class="confirmation" id="confirmation-signalement" hidden>Merci : votre signalement est enregistré.</p>
+    <div class="actions-dialogue">
+      <button type="button" onclick="fermerSignalement()">Fermer</button>
+      <button type="submit" class="bouton-primaire" id="bouton-signalement">Envoyer</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 // --- Réglages : valeurs publiques par conception (clé "anon" et adresses de service),
@@ -1191,7 +1237,7 @@ function rendreListeLaterale() {
   listeDossiersEl.innerHTML = dossiers.map((d) => `
     <button type="button" class="item-dossier ${d.id === dossierOuvertId ? 'selectionne' : ''}"
             onclick="ouvrirDossier('${d.id}')">
-      <span class="nom-item">${d.nom}</span>
+      <span class="nom-item">${echapperHtml(d.nom)}</span>
       <span class="ligne-meta">
         <span class="ref-item">${d.reference || ''}</span>
         <span class="pastille pastille-${d.statut}" title="${LIBELLES_STATUT[d.statut] || d.statut}"></span>
@@ -1628,7 +1674,14 @@ async function rendreDetailDossier(dossier) {
 
   let corps;
   if (dossier.statut === "erreur") {
-    corps = `<div class="carte"><p class="erreur">${dossier.message_erreur || "Une erreur est survenue pendant le traitement."}</p></div>`;
+    corps = `
+      <div class="carte">
+        <p class="erreur message-erreur-traitement" style="margin-top:0;">${echapperHtml(dossier.message_erreur || "Une erreur est survenue pendant le traitement.")}</p>
+        <div class="actions-erreur">
+          <button type="button" class="bouton-primaire" onclick="relancerDossier('${dossier.id}', this)">Relancer le traitement</button>
+          <button type="button" onclick="ouvrirSignalement('${dossier.id}')">Signaler un problème</button>
+        </div>
+      </div>`;
   } else if (dossier.statut === "termine") {
     let donnees = {
       resume: null, personnes: [], chronologie_faits: [], chronologie_procedure: [],
@@ -1717,7 +1770,7 @@ async function rendreDetailDossier(dossier) {
           ${documentsTransmis.length
             ? `<div class="liste-documents-transmis">
                 ${documentsTransmis.map((nom) =>
-                  `<button type="button" onclick="voirDocumentTransmis('${dossier.id}','${nom.replace(/'/g, "\\'")}', this)">${ICONE_DOCUMENT}<span>${nom}</span></button>`
+                  `<button type="button" onclick="voirDocumentTransmis('${dossier.id}','${nom.replace(/'/g, "\\'")}', this)">${ICONE_DOCUMENT}<span>${echapperHtml(nom)}</span></button>`
                 ).join("")}
               </div>`
             : `<p class="vide">Aucun document source retrouvé pour ce dossier.</p>`}
@@ -1771,11 +1824,12 @@ async function rendreDetailDossier(dossier) {
   vueDossier.innerHTML = `
     <div class="entete-detail">
       <div>
-        <h2>${dossier.nom}</h2>
-        ${dossier.reference ? `<div class="ref-detail">${dossier.reference}</div>` : ""}
+        <h2>${echapperHtml(dossier.nom)}</h2>
+        ${dossier.reference ? `<div class="ref-detail">${echapperHtml(dossier.reference)}</div>` : ""}
       </div>
       <div class="entete-actions">
         ${badge}
+        <button type="button" id="bouton-signaler" onclick="ouvrirSignalement('${dossier.id}')" title="Signaler une erreur de l'outil sur ce dossier">Signaler un problème</button>
         <button type="button" id="bouton-supprimer-dossier" onclick="supprimerDossier('${dossier.id}', this)">Supprimer</button>
       </div>
     </div>
@@ -1805,6 +1859,90 @@ async function supprimerDossier(id, bouton) {
   }
 }
 window.supprimerDossier = supprimerDossier;
+
+async function relancerDossier(id, bouton) {
+  bouton.disabled = true;
+  bouton.textContent = "Relance…";
+  try {
+    await appelApi(`/api/dossiers/${id}/relancer`, { method: "POST" });
+    cacheDonnees.delete(id);
+    await rafraichirListe();
+    ouvrirDossier(id);
+    demarrerSuiviAutomatique();
+  } catch (erreur) {
+    alert("Relance impossible : " + erreur.message);
+    bouton.disabled = false;
+    bouton.textContent = "Relancer le traitement";
+  }
+}
+window.relancerDossier = relancerDossier;
+
+// --- Signaler un problème : ce que voit l'avocat du pilote, consigné pour
+// être corrigé (table « retours », voir la migration 0005).
+let infosServeur = null;
+const dialogueSignalement = document.getElementById("dialogue-signalement");
+const champSignalement = document.getElementById("champ-signalement");
+const erreurSignalement = document.getElementById("erreur-signalement");
+const confirmationSignalement = document.getElementById("confirmation-signalement");
+const boutonSignalement = document.getElementById("bouton-signalement");
+let dossierSignale = null;
+
+function ouvrirSignalement(id) {
+  dossierSignale = id;
+  erreurSignalement.hidden = true;
+  confirmationSignalement.hidden = true;
+  boutonSignalement.disabled = false;
+  if (typeof dialogueSignalement.showModal === "function") dialogueSignalement.showModal();
+  else dialogueSignalement.setAttribute("open", "");
+  champSignalement.focus();
+}
+window.ouvrirSignalement = ouvrirSignalement;
+
+function fermerSignalement() {
+  if (typeof dialogueSignalement.close === "function") dialogueSignalement.close();
+  else dialogueSignalement.removeAttribute("open");
+}
+window.fermerSignalement = fermerSignalement;
+
+document.getElementById("form-signalement").addEventListener("submit", async (evenement) => {
+  evenement.preventDefault();
+  const message = champSignalement.value.trim();
+  if (message.length < 3 || !dossierSignale) return;
+  erreurSignalement.hidden = true;
+  boutonSignalement.disabled = true;
+  const onglet = ONGLETS_DOSSIER.find(([id]) => id === ongletDossierActif);
+  try {
+    await appelApi(`/api/dossiers/${dossierSignale}/retours`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, contexte: onglet ? onglet[1] : null }),
+    });
+    champSignalement.value = "";
+    confirmationSignalement.hidden = false;
+  } catch (erreur) {
+    const contact = infosServeur && infosServeur.email_contact;
+    erreurSignalement.innerHTML = echapperHtml(erreur.message) + (contact
+      ? ` Vous pouvez aussi écrire à <a href="mailto:${encodeURIComponent(contact).replace(/%40/g, "@")}?subject=${encodeURIComponent("Lytis — signalement")}&body=${encodeURIComponent(message)}">${echapperHtml(contact)}</a>.`
+      : "");
+    erreurSignalement.hidden = false;
+    boutonSignalement.disabled = false;
+  }
+});
+
+// Fournisseur d'IA et limites réellement en vigueur côté serveur (réglables
+// sans toucher à l'interface) : la mention de confidentialité nomme le bon
+// prestataire, et le contrôle de taille à l'envoi suit la vraie limite.
+async function chargerInfosServeur() {
+  try {
+    const reponse = await fetch(API_BASE + "/api/infos");
+    if (!reponse.ok) return;
+    infosServeur = await reponse.json();
+    document.getElementById("fournisseur-ia").textContent = infosServeur.fournisseur_ia;
+    document.getElementById("limites-envoi").textContent =
+      `Pour l'instant : jusqu'à ${infosServeur.limite_pages} pages par dossier et ${infosServeur.limite_mo_par_fichier} Mo par fichier.`;
+  } catch { /* hors ligne ou serveur en veille : les textes par défaut restent */ }
+}
+chargerInfosServeur();
 
 async function ouvrirDossier(id) {
   if (id !== dossierOuvertId) {
@@ -1884,9 +2022,10 @@ formEnvoi.addEventListener("submit", async (evenement) => {
   try {
     // Refus immédiat d'un fichier trop lourd, plutôt qu'après de longues
     // minutes d'envoi (le serveur vérifie aussi, ainsi que le nombre de pages).
-    const tropLourd = [...document.getElementById("champ-fichier").files].find((f) => f.size > 50 * 1024 * 1024);
+    const limiteMo = (infosServeur && infosServeur.limite_mo_par_fichier) || 50;
+    const tropLourd = [...document.getElementById("champ-fichier").files].find((f) => f.size > limiteMo * 1024 * 1024);
     if (tropLourd) {
-      throw new Error(`« ${tropLourd.name} » fait ${Math.round(tropLourd.size / 1048576)} Mo : la limite est de 50 Mo par fichier pour l'instant. Découpez-le en plusieurs PDF, ou réduisez sa taille (« Réduire la taille du fichier » dans Acrobat ou Aperçu).`);
+      throw new Error(`« ${tropLourd.name} » fait ${Math.round(tropLourd.size / 1048576)} Mo : la limite est de ${limiteMo} Mo par fichier pour l'instant. Découpez-le en plusieurs PDF, ou réduisez sa taille (« Réduire la taille du fichier » dans Acrobat ou Aperçu).`);
     }
     const donnees = new FormData();
     donnees.append("nom", document.getElementById("champ-nom").value);

@@ -92,7 +92,7 @@ def test_orphelin_passe_en_erreur_avec_un_message_actionnable(monkeypatch) -> No
     main._cloturer_orphelins(_FauxSupabase(journal), [dossier])
 
     assert dossier["statut"] == "erreur"
-    assert "renvoyez" in dossier["message_erreur"]
+    assert "relancez" in dossier["message_erreur"]
     maj_dossier = next(e for e in journal if e[0] == "dossiers")
     assert ("statut", "en_cours") in maj_dossier[2], "ne jamais écraser un dossier qui vient de se terminer"
     maj_etape = next(e for e in journal if e[0] == "traitement_etapes")

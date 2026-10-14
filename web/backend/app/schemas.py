@@ -261,3 +261,18 @@ class ReponseClient(BaseModel):
 PhraseResume.model_rebuild()
 SectionResume.model_rebuild()
 DonneesDossier.model_rebuild()
+
+
+class Infos(BaseModel):
+    """Ce que l'interface affiche avant l'envoi d'un dossier : qui analyse
+    le texte, et les limites en vigueur (réglables côté serveur)."""
+    fournisseur_ia: str
+    limite_pages: int
+    limite_mo_par_fichier: int
+    email_contact: str | None = None
+
+
+class Retour(BaseModel):
+    message: str = Field(min_length=3, max_length=4000)
+    # Onglet ouvert au moment du signalement (« Chronologie », « Questions »…).
+    contexte: str | None = Field(default=None, max_length=200)

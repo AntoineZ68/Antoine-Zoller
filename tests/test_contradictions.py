@@ -329,3 +329,23 @@ def test_titre_et_description_ne_se_collent_pas() -> None:
     }, elements)
     assert c is not None
     assert c.contexte == ["« Mon scooter immatriculé FT-318-QA. »", "« Un scooter immatriculé FT-381-QA. »"]
+
+
+def test_meme_ecart_redit_par_le_modele_avec_une_autre_phrase_affiche_une_fois() -> None:
+    """Observé sur un dossier d'essai : la règle établit « 06h20 ou 06h10 »,
+    le modèle redit « 6h20 selon le PV, 6h10 selon la notification » en
+    citant, page 7, une autre phrase que la règle."""
+    from depouille.contradictions import _meme_ecart
+
+    regle = [
+        {"page": 6, "citation": "à six heures vingt, Procédons à l'interpellation du nommé LEROY Kevin"},
+        {"page": 7, "citation": "Interpellation effectuée le 04/03/2033 à 06h10."},
+    ]
+    modele = [
+        {"page": 6, "citation": "Procédons à l'interpellation du nommé LEROY Kevin"},
+        {"page": 7, "citation": "la mesure prenant effet à compter du 04/03/2033 à 06 heures 10"},
+    ]
+    texte = "Heure de l'interpellation : 6h20 selon le procès-verbal, 6h10 selon la notification."
+    assert _meme_ecart(modele, texte, regle, ["06h20", "06h10"])
+    assert not _meme_ecart(modele, "Couleur du véhicule : noire ou blanche.", regle, ["06h20", "06h10"])
+    assert not _meme_ecart([modele[0], {"page": 9, "citation": "x"}], texte, regle, ["06h20", "06h10"])

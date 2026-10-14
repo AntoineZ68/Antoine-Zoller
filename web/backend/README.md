@@ -19,8 +19,13 @@ dossier, où en est son traitement. Voir le commentaire en tête de
    région UE/EEE (Frankfurt `eu-central-1`, Ireland `eu-west-1`, etc.) —
    n'importe laquelle convient pour la résidence des données, seul le fait
    de rester dans l'UE/EEE compte.
-2. Dans l'éditeur SQL du projet, exécuter le contenu de
-   `supabase/migrations/0001_init.sql`.
+2. Dans l'éditeur SQL du projet, exécuter dans l'ordre le contenu de
+   chaque fichier de `supabase/migrations/` (`0001_init.sql`, puis
+   `0002…`, jusqu'à `0005_retours.sql`). Sur un projet déjà en service,
+   n'exécuter que les fichiers pas encore appliqués — `0005_retours.sql`
+   crée la table des signalements des avocats (bouton « Signaler un
+   problème ») ; sans elle, le bouton répond que le signalement n'a pas pu
+   être enregistré.
 3. Dans Storage, créer deux buckets **privés** :
    - `dossiers-source` (les PDF uploadés par les avocats)
    - `dossiers-resultats` (le fichier SQLite + les livrables générés)
@@ -56,6 +61,14 @@ uvicorn app.main:app --reload
   étape du pipeline.
 - `GET /api/dossiers/{id}/livrables/{nom_fichier}` — URL signée temporaire
   pour télécharger un livrable généré.
+- `POST /api/dossiers/{id}/relancer` — relance le traitement d'un dossier
+  en erreur à partir des PDF déjà transmis (rien à renvoyer).
+- `POST /api/dossiers/{id}/retours` (JSON : `message`, `contexte`
+  optionnel) — enregistre un signalement de l'avocat dans la table
+  `retours`, consultable dans l'éditeur de tables de Supabase.
+- `GET /api/infos` — public : fournisseur d'IA, limites de pages et de
+  taille, e-mail de contact (`EMAIL_CONTACT`). Sert à la mention de
+  confidentialité du formulaire d'envoi.
 
 Toutes les routes `/api/dossiers*` attendent un en-tête
 `Authorization: Bearer <jeton Supabase Auth de l'avocat>`.
