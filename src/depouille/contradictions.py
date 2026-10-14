@@ -57,7 +57,10 @@ ACTES_UNIQUES = {
 # d'être signalée. Une adresse ou un IBAN se comparent trop mal ainsi.
 TYPES_IDENTIFIANTS_PROCHES = ("Plaque d'immatriculation", "Téléphone")
 
-MAX_PROPOSITIONS_MODELE = 8
+# 12 et non 8 : un dossier de 40 pages compte plus de 8 discordances, et le
+# modèle n'en retenait pas les mêmes d'un passage à l'autre (ITT 5 ou 8
+# jours présente une fois sur deux). La relecture écarte le bruit ajouté.
+MAX_PROPOSITIONS_MODELE = 12
 
 # « Couleur du scooter : noir selon le PV, non précisée par la témoin » :
 # qu'une pièce se taise n'est pas une discordance (observé, proposé deux
@@ -214,6 +217,9 @@ PROMPT = (
     "passages qui ne concordent pas d'une pièce à l'autre. Tu disposes UNIQUEMENT "
     "d'éléments déjà extraits du dossier, chacun précédé de son numéro entre crochets "
     "(F = fait, P = acte de procédure, D = déclaration) et de sa page. "
+"« [pièce du …] » est la date de la pièce qui rapporte un fait, pas celle de "
+    "l'événement : deux pièces de dates différentes qui rapportent un même événement ne "
+    "se contredisent pas (une synthèse du 26/09 qui raconte un appel du 01/09). "
     "Relève au plus " + str(MAX_PROPOSITIONS_MODELE) + " discordances CONCRÈTES entre "
     "éléments de pages différentes portant sur le même fait : heure, date, lieu, "
     "véhicule, couleur, description d'une personne, présence de quelqu'un, montant, "
@@ -312,6 +318,9 @@ PROMPT_RELECTURE = (
     "\"contradiction_reelle\": true|false, \"motif\": \"...\"}. "
     "fidele : le titre et la description n'attribuent à aucun passage une information qu'il ne "
     "contient pas (personne, date, chiffre, lieu rattachés au bon passage). "
+"« [pièce du …] » est la date de la pièce qui rapporte un fait, pas celle de "
+    "l'événement : deux pièces de dates différentes qui rapportent un même événement ne "
+    "se contredisent pas (une synthèse du 26/09 qui raconte un appel du 01/09). "
     "contradiction_reelle : les passages donnent sur un même point des versions qui s'excluent "
     "— pas un silence, pas un écart d'approximation, pas deux choses distinctes, pas des "
     "versions qui concordent en réalité."
