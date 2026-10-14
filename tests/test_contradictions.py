@@ -311,3 +311,21 @@ def test_discordance_de_la_regle_repetee_par_le_modele_affichee_une_fois(tmp_pat
     autre = [{"page": 2, "citation": "Le numéro affiché était le 07 81 22 45 63."}, {"page": 9, "citation": "x"}]
     assert _meme_discordance(modele, regle)
     assert not _meme_discordance(autre, regle)
+
+
+def test_titre_et_description_ne_se_collent_pas() -> None:
+    """Observé : « …selon le PV de découverte La victime déclare… » —
+    « La » passait pour un nom propre, la plaque transposée était écartée."""
+    from depouille.contradictions import proposition_retenue
+
+    elements = {
+        "D5": {"page": 2, "citation": "Mon scooter immatriculé FT-318-QA.", "ligne": "« Mon scooter immatriculé FT-318-QA. »"},
+        "F50": {"page": 10, "citation": "Un scooter immatriculé FT-381-QA.", "ligne": "« Un scooter immatriculé FT-381-QA. »"},
+    }
+    c = proposition_retenue({
+        "titre": "Immatriculation du scooter : FT-318-QA selon la victime, FT-381-QA selon le PV de découverte",
+        "description": "La victime donne FT-318-QA ; le PV de découverte relève FT-381-QA.",
+        "sources": ["D5", "F50"],
+    }, elements)
+    assert c is not None
+    assert c.contexte == ["« Mon scooter immatriculé FT-318-QA. »", "« Un scooter immatriculé FT-381-QA. »"]

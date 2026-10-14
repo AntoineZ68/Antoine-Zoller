@@ -16,7 +16,9 @@ URL_API = "https://api.mistral.ai/v1/chat/completions"
 # Retry-After si l'API l'indique. Sans cela, un appel refusé est perdu :
 # mesuré sur le banc d'essai, 7 appels d'analyse sur 22 refusés (429), et
 # avec eux le résumé et les quatre réponses aux questions.
-TENTATIVES_MAX = 6
+# 8 et non 6 : la relecture des contradictions ajoute des appels menés de
+# front, et un appel sur 159 épuisait encore les 6 tentatives (observé).
+TENTATIVES_MAX = 8
 CODES_TEMPORAIRES = {429, 500, 502, 503, 504}
 ATTENTE_MAX_S = 60.0
 # Connexion, puis lecture : un résumé détaillé de Mistral Large dépasse

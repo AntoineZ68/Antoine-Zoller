@@ -77,6 +77,9 @@ class Contradiction:
     description: str
     sources: list[dict] = field(default_factory=list)  # {libelle, page, citation}
     origine: str = "regle"  # "regle" ou "modele"
+    # Lignes complètes des éléments cités (sujet de la question compris),
+    # pour la relecture seulement — jamais enregistrées ni affichées.
+    contexte: list[str] = field(default_factory=list, repr=False)
 
 
 def _libelle_piece(type_piece: str | None, cote: str | None) -> str:
@@ -242,7 +245,10 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list
         return None
     if len({elements[s]["page"] for s in sources}) < 2:
         return None
-    texte = f"{titre} {description}"
+    # Séparés par un point : collés, « …selon le PV de découverte La victime
+    # déclare… » faisait de « La » un nom propre inconnu, et écartait quatre
+    # discordances exactes sur un dossier d'essai (plaque, sac, heure…).
+    texte = f"{titre}. {description}"
     if contient_qualification(texte) or RE_JUGEMENT.search(texte):
         return None
     if RE_ABSENCE_N_EST_PAS_CONTRADICTION.search(texte):
@@ -256,6 +262,7 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list
         description=description,
         sources=[{"libelle": elements[s].get("libelle", ""), "page": elements[s]["page"], "citation": elements[s]["citation"]} for s in sources],
         origine="modele",
+        contexte=[elements[s]["ligne"] for s in sources],
     )
 
 
@@ -300,8 +307,8 @@ def generer_contradictions(db: sqlite3.Connection, config: Config, console: Cons
 
 PROMPT_RELECTURE = (
     "Tu relis une discordance proposée entre des passages d'un dossier de procédure pénale "
-    "française, avant qu'elle soit montrée à un avocat. Tu ne disposes que des citations "
-    "exactes des passages. Réponds uniquement en JSON : {\"fidele\": true|false, "
+    "française, avant qu'elle soit montrée à un avocat. Tu ne disposes que des passages "
+    "cités, chacun avec son sujet et sa citation exacte entre « ». Réponds uniquement en JSON : {\"fidele\": true|false, "
     "\"contradiction_reelle\": true|false, \"motif\": \"...\"}. "
     "fidele : le titre et la description n'attribuent à aucun passage une information qu'il ne "
     "contient pas (personne, date, chiffre, lieu rattachés au bon passage). "
@@ -325,7 +332,11 @@ def relire(contradictions: list[Contradiction], config: Config, console: Console
     provider = obtenir_provider(config)
 
     def verifier(c: Contradiction) -> bool:
-        passages = "\n".join(f"- p. {s['page']} : « {s['citation']} »" for s in c.sources)
+        # La ligne de l'élément porte le sujet de la question : « Kevin. »
+        # seul ne dit pas qu'il répond à « qui a donné les coups de pied ».
+        passages = "\n".join(
+            f"- {ligne}" for ligne in c.contexte
+        ) if c.contexte else "\n".join(f"- p. {s['page']} : « {s['citation']} »" for s in c.sources)
         reponse = provider.appeler(
             systeme=PROMPT_RELECTURE,
             prompt=f"Titre : {c.titre}\nDescription : {c.description}\nPassages :\n{passages}",

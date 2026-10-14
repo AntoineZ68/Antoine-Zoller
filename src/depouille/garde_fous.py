@@ -89,7 +89,7 @@ APPROXIMATIONS = frozenset({
     "cinquantaine", "soixantaine", "centaine", "millier",
 })
 
-# Pas « coups » ni « blessures » : ils décrivent un fait (« des coups de
+# Pas « coups », « blessures » ni « agression » : ils décrivent un fait (« des coups de
 # pied »), et les exiger poussait le modèle vers « actes répréhensibles »,
 # un jugement (observé, dossier de 40 pages).
 # Nature des faits et stade de la procédure : un résumé qui écrit
@@ -98,7 +98,7 @@ APPROXIMATIONS = frozenset({
 # minuscules).
 TERMES_A_SOURCER = tuple(re.compile(m) for m in (
     r"violen\w*", r"\bvols?\b", r"\bviols?\b", r"meurtr\w*", r"assassin\w*", r"homicid\w*",
-    r"agress\w*", r"menac\w*", r"escroq\w*",
+    r"menac\w*", r"escroq\w*",
     r"abus de confiance", r"trafic\w*", r"stupefiant\w*", r"recel\w*", r"extorsion\w*",
     r"sequestr\w*", r"harcel\w*", r"degradation\w*", r"incendi\w*", r"outrage\w*",
     r"rebellion\w*", r"\barmes?\b", r"blanchi\w*", r"malfaiteurs", r"cambriol\w*",
