@@ -39,7 +39,7 @@ from rich.console import Console
 
 from .config import Config
 from .garde_fous import RE_JUGEMENT, avec_noms_completes, contient_qualification, elements_absents, noms_identifies
-from .llm import ErreurModeOffline, extraire_json, obtenir_provider
+from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, obtenir_provider
 from .recoupements import occurrences_identifiants
 from .resume_detaille import _elements, sans_references
 
@@ -218,7 +218,9 @@ PROMPT = (
     "pour une différence de point de vue sans détail vérifiable, ni quand l'un des "
     "éléments ne dit rien du point (« non précisé » n'est pas une contradiction), ni "
     "pour un simple écart d'approximation (« 23h05 » et « vers 23 heures »), ni entre "
-    "deux choses distinctes (une enveloppe et une somme saisie). "
+    "deux choses distinctes (une enveloppe et une somme saisie), ni quand les éléments "
+    "concordent en réalité (« une jeune femme » selon la vidéo et « Lorène » selon un "
+    "témoin disent la même chose) : les deux versions doivent s'exclure. "
     "Titre court et factuel (ex. « Couleur du véhicule : blanc selon le témoin, gris "
     "selon le PV de surveillance »), description en une ou deux phrases neutres. "
     "N'écris aucun nom, lieu, date ou chiffre qui ne figure pas dans les éléments cités. "
@@ -281,14 +283,82 @@ def generer_contradictions(db: sqlite3.Connection, config: Config, console: Cons
 
     noms = noms_identifies(db)
     retenues = [c for c in (proposition_retenue(p, elements, noms) for p in (propositions if isinstance(propositions, list) else [])) if c]
-    for ordre, c in enumerate(retenues[:MAX_PROPOSITIONS_MODELE], 1):
+    nb_avant_relecture = len(retenues)
+    retenues = relire(retenues[:MAX_PROPOSITIONS_MODELE], config, console)
+    for ordre, c in enumerate(retenues, 1):
         db.execute(
             "INSERT INTO contradictions (ordre, domaine, titre, description, sources_json) VALUES (?, ?, ?, ?, ?)",
             (ordre, c.domaine, c.titre, c.description, json.dumps(c.sources, ensure_ascii=False)),
         )
     db.commit()
-    console.print(f"  [build] contradictions : {len(retenues)}/{len(propositions) if isinstance(propositions, list) else 0} proposition(s) retenue(s).")
+    console.print(
+        f"  [build] contradictions : {len(retenues)}/{len(propositions) if isinstance(propositions, list) else 0} "
+        f"proposition(s) retenue(s), dont {nb_avant_relecture - len(retenues)} écartée(s) à la relecture."
+    )
     return len(retenues)
+
+
+PROMPT_RELECTURE = (
+    "Tu relis une discordance proposée entre des passages d'un dossier de procédure pénale "
+    "française, avant qu'elle soit montrée à un avocat. Tu ne disposes que des citations "
+    "exactes des passages. Réponds uniquement en JSON : {\"fidele\": true|false, "
+    "\"contradiction_reelle\": true|false, \"motif\": \"...\"}. "
+    "fidele : le titre et la description n'attribuent à aucun passage une information qu'il ne "
+    "contient pas (personne, date, chiffre, lieu rattachés au bon passage). "
+    "contradiction_reelle : les passages donnent sur un même point des versions qui s'excluent "
+    "— pas un silence, pas un écart d'approximation, pas deux choses distinctes, pas des "
+    "versions qui concordent en réalité."
+)
+
+
+def relire(contradictions: list[Contradiction], config: Config, console: Console) -> list[Contradiction]:
+    """Second appel au modèle, une discordance à la fois, avec ses seules
+    citations : les garde-fous déterministes vérifient que chaque élément
+    figure dans les sources, pas qu'il est rattaché au BON passage.
+    Observé dans l'appli : « Auteur des retraits le 15/01 : Mehdi CARON
+    selon la vidéoprotection » — la vidéo attribue ces retraits à « une
+    jeune femme », Mehdi CARON n'y figure que pour d'autres jours. Une
+    discordance non confirmée (ou dont la relecture échoue) n'est pas
+    montrée : une fausse contradiction égare l'avocat plus qu'une absente."""
+    if not contradictions:
+        return []
+    provider = obtenir_provider(config)
+
+    def verifier(c: Contradiction) -> bool:
+        passages = "\n".join(f"- p. {s['page']} : « {s['citation']} »" for s in c.sources)
+        reponse = provider.appeler(
+            systeme=PROMPT_RELECTURE,
+            prompt=f"Titre : {c.titre}\nDescription : {c.description}\nPassages :\n{passages}",
+            modele=config.modele_analyse,
+        )
+        avis = extraire_json(reponse.texte)
+        return isinstance(avis, dict) and avis.get("fidele") is True and avis.get("contradiction_reelle") is True
+
+    gardees = []
+    for c, avis in zip(contradictions, executer_en_parallele(verifier, contradictions)):
+        if avis is True:
+            gardees.append(c)
+        elif isinstance(avis, Exception):
+            console.print(f"  [build] relecture impossible, discordance non montrée : {c.titre} ({avis}).")
+    return gardees
+
+
+def _meme_passage(a: dict, b: dict) -> bool:
+    """Même page, et l'une des citations contient l'autre : la règle cite
+    « Réponse : Le numéro affiché était le 07 81 22 45 63 », le modèle
+    « Le numéro affiché était le 07 81 22 45 63 » — c'est le même passage."""
+    if a["page"] != b["page"]:
+        return False
+    ca, cb = (re.sub(r"\s+", " ", c["citation"]).strip().lower() for c in (a, b))
+    return ca in cb or cb in ca
+
+
+def _meme_discordance(sources: list[dict], autres: list[dict]) -> bool:
+    """Deux passages au moins en commun : la même discordance, ne
+    s'affichant qu'une fois (observé dans l'appli : le téléphone transposé,
+    établi par la règle, répété par le modèle avec des citations découpées
+    autrement)."""
+    return sum(any(_meme_passage(s, a) for a in autres) for s in sources) >= 2
 
 
 def toutes_les_contradictions(db: sqlite3.Connection) -> list[Contradiction]:
@@ -297,14 +367,13 @@ def toutes_les_contradictions(db: sqlite3.Connection) -> list[Contradiction]:
     resultats = contradictions_par_regles(db)
     # Le modèle peut retrouver une discordance déjà établie par les règles
     # (deux heures d'interpellation) : la même ne s'affiche pas deux fois.
-    deja = [{(src["page"], src["citation"]) for src in c.sources} for c in resultats]
+    deja = [c.sources for c in resultats]
     try:
         for ligne in db.execute("SELECT * FROM contradictions ORDER BY ordre"):
             sources = json.loads(ligne["sources_json"])
-            cles = {(src["page"], src["citation"]) for src in sources}
-            if any(len(cles & d) >= 2 for d in deja):
+            if any(_meme_discordance(sources, d) for d in deja):
                 continue
-            deja.append(cles)
+            deja.append(sources)
             resultats.append(Contradiction(
                 domaine=ligne["domaine"], titre=ligne["titre"], description=ligne["description"],
                 sources=sources, origine="modele",

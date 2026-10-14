@@ -323,6 +323,12 @@ RE_DATE_BOITE_ACTE = re.compile(
 )
 
 
+RE_OUVERTURE_LE_DATE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\b")
+# L'heure de l'acte, juste après sa date : « , audition débutée à 13h15 »,
+# « de 10h40 à 11h50 » — dans la même phrase, à quelques mots.
+RE_HEURE_SUIVANT_OUVERTURE = re.compile(rf"[^.;\n]{{0,40}}?\b(?:à|de)\s+({FRAGMENT_HEURE})", re.IGNORECASE)
+
+
 def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Match | None]:
     """Comme detecter_date_heure_acte ci-dessous, mais renvoie aussi le
     Match ayant permis la détection — sa position sert à construire une
@@ -356,6 +362,19 @@ def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Matc
     # voyait tous ses faits datés du "14 septembre 2026 à 17h35" d'un fait
     # divers raconté plus loin dans le corps du texte).
     m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+([^.,;\n]{{1,40}})", texte, re.IGNORECASE)
+    # Mais jamais une formule « Le [date] à [heure] » trouvée APRÈS la
+    # véritable ouverture de l'acte : « Le 03/02/2033, audition débutée à
+    # 13h15 » (virgule, heure plus loin) n'y répondait pas, et toute
+    # l'audition prenait la date d'un « Le 14/01/2033 à 10h47, cette ligne a
+    # appelé… » cité dans une QUESTION de l'enquêteur — ses déclarations
+    # remontaient en tête de la chronologie, datées d'un mois trop tôt
+    # (observé dans l'appli, dossier d'essai de 40 pages). « Le » en
+    # majuscule : « né le … », « déposée le … » ne sont jamais l'ouverture.
+    m_ouverture = RE_OUVERTURE_LE_DATE.search(texte)
+    if m_ouverture and (m is None or m_ouverture.start() < m.start()):
+        suite = RE_HEURE_SUIVANT_OUVERTURE.match(texte, m_ouverture.end())
+        heure = normaliser_heure(suite.group(1)) if suite else None
+        return normaliser_date(m_ouverture.group(1)), heure, m_ouverture
     if m:
         return normaliser_date(m.group(1)), _normaliser_heure_libre(m.group(2)), m
 

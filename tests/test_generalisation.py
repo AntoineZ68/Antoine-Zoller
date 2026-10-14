@@ -725,3 +725,18 @@ def test_titre_retire_du_nom_rendu_par_le_modele(nom, attendu) -> None:
     from depouille.classify import sans_titre
 
     assert sans_titre(nom) == attendu
+
+
+@pytest.mark.parametrize("texte, attendu", [
+    ("Le 03/02/2033, audition débutée à 13h15.\nQuestion : Le 14/01/2033 à 10h47, cette ligne a appelé "
+     "Hélène ROUSSET. Étiez-vous l'appelant ?", ("03/02/2033", "13h15")),
+    ("Le 03/02/2033 de 10h40 à 11h50, perquisition au domicile.", ("03/02/2033", "10h40")),
+    ("Notifions à X, né le 12/03/1990. Le 03/02/2033 à 10h20, nous notifions.", ("03/02/2033", "10h20")),
+])
+def test_date_de_l_acte_jamais_celle_d_une_question(texte, attendu) -> None:
+    """Observé dans l'appli : une audition « Le 03/02/2033, audition débutée
+    à 13h15 » prenait la date d'un « Le 14/01/2033 à 10h47 » cité dans une
+    question ; ses déclarations remontaient en tête de la chronologie."""
+    from depouille.regex_patterns import detecter_date_heure_acte
+
+    assert detecter_date_heure_acte(texte) == attendu

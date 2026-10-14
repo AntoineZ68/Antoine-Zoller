@@ -197,6 +197,8 @@ def test_generation_stocke_seulement_les_propositions_retenues(monkeypatch, db) 
 
     class Provider:
         def appeler(self, systeme, prompt, modele):
+            if systeme == module.PROMPT_RELECTURE:
+                return ReponseLLM(texte='{"fidele": true, "contradiction_reelle": true}', tokens_in=1, tokens_out=1)
             assert "[D1]" in prompt and "[F2]" in prompt
             return ReponseLLM(texte=json.dumps(reponse), tokens_in=1, tokens_out=1)
 
@@ -204,6 +206,32 @@ def test_generation_stocke_seulement_les_propositions_retenues(monkeypatch, db) 
     assert generer_contradictions(db, Config(offline=False), Console(quiet=True)) == 1
     [c] = toutes_les_contradictions(db)
     assert c.titre == "Couleur du véhicule : blanc ou gris" and c.origine == "modele"
+
+
+def test_discordance_infirmee_a_la_relecture_non_montree(monkeypatch, db) -> None:
+    """Observé dans l'appli : « Mehdi CARON selon la vidéoprotection » pour
+    des retraits que la vidéo attribue à une jeune femme. La relecture, qui
+    ne voit que les citations, l'écarte ; une relecture en échec aussi."""
+    _dossier_pour_le_modele(db)
+    reponse = {"contradictions": [
+        {"titre": "Couleur du véhicule : blanc ou gris", "description": "Un break de couleur blanche ; une Skoda Octavia gris métallisé.",
+         "domaine": "fond", "sources": ["D1", "F2"]},
+    ]}
+    avis = {"valeur": '{"fidele": false, "contradiction_reelle": true, "motif": "détail prêté au mauvais passage"}'}
+
+    class Provider:
+        def appeler(self, systeme, prompt, modele):
+            if systeme == module.PROMPT_RELECTURE:
+                if avis["valeur"] is None:
+                    raise RuntimeError("réseau")
+                assert "Passages :" in prompt and "[D1]" not in prompt, "la relecture ne voit que les citations"
+                return ReponseLLM(texte=avis["valeur"], tokens_in=1, tokens_out=1)
+            return ReponseLLM(texte=json.dumps(reponse), tokens_in=1, tokens_out=1)
+
+    monkeypatch.setattr(module, "obtenir_provider", lambda config: Provider())
+    assert generer_contradictions(db, Config(offline=False), Console(quiet=True)) == 0
+    avis["valeur"] = None
+    assert generer_contradictions(db, Config(offline=False), Console(quiet=True)) == 0
 
 
 def test_hors_ligne_aucun_appel(db) -> None:
@@ -265,3 +293,21 @@ def test_silence_d_une_piece_n_est_pas_une_contradiction() -> None:
         "description": "Le PV décrit un scooter de couleur noire ; la témoin ne précise pas sa couleur.",
         "sources": ["F1", "D1"],
     }, elements) is None
+
+
+def test_discordance_de_la_regle_repetee_par_le_modele_affichee_une_fois(tmp_path) -> None:
+    """Observé dans l'appli : le téléphone transposé, établi par la règle,
+    réapparaissait proposé par le modèle, ses citations découpées autrement."""
+    from depouille.contradictions import _meme_discordance
+
+    regle = [
+        {"page": 2, "citation": "Réponse : Le numéro affiché était le 07 81 22 45 63."},
+        {"page": 8, "citation": "Réponse : Le 07 81 22 54 63, je l'ai encore dans mon journal d'appels."},
+    ]
+    modele = [
+        {"page": 2, "citation": "Le numéro affiché était le 07 81 22 45 63."},
+        {"page": 8, "citation": "Le 07 81 22 54 63, je l'ai encore dans mon journal d'appels."},
+    ]
+    autre = [{"page": 2, "citation": "Le numéro affiché était le 07 81 22 45 63."}, {"page": 9, "citation": "x"}]
+    assert _meme_discordance(modele, regle)
+    assert not _meme_discordance(autre, regle)
