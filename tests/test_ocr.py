@@ -311,3 +311,36 @@ def test_calque_d_un_scan_penche_reste_sur_les_mots(tmp_path) -> None:
         png = doc[0].get_pixmap(dpi=300, clip=zone + (-4, -4, 4, 4)).tobytes("png")
     lu = subprocess.run(["tesseract", "stdin", "stdout", "-l", "fra", "--psm", "7"], input=png, capture_output=True)
     assert "papillaire" in lu.stdout.decode()
+
+
+def test_lecture_plausible_distingue_page_a_l_endroit_et_page_couchee() -> None:
+    """Mesuré sur des scans de PV : 25 à 37 % de petits mots sur une page à
+    l'endroit, 5 à 18 % sur une page couchée lue telle quelle."""
+    endroit = (
+        "Nous, Sylvie RENARD, Capitaine de police, nous transportons à la pharmacie du Centre. "
+        "Constatons que la porte de service présente des traces de pesée sur la serrure."
+    )
+    couchee = "ae Ft ii ee eS rn mi Ss oe ao BE aa ng po ee Tl si ue ri Mo ne"
+    assert ingest._lecture_plausible(endroit) >= ingest.PART_PETITS_MOTS_MIN
+    assert ingest._lecture_plausible(couchee) < ingest.PART_PETITS_MOTS_MIN
+    assert ingest._lecture_plausible("D12") is None, "trop peu de mots pour juger"
+
+
+def test_orientation_verifiee_seulement_si_la_lecture_est_douteuse(monkeypatch) -> None:
+    """La détection d'orientation coûte plus que la lecture elle-même : une
+    page lue correctement ne la déclenche pas."""
+    tampon = BytesIO()
+    Image.new("L", (200, 280), 255).save(tampon, "PNG")
+    appels: list = []
+    monkeypatch.setattr(ingest, "_orientation", lambda png: appels.append(1) or 90)
+    lectures = iter([
+        "Nous constatons que la porte de la pharmacie est ouverte et que le coffre est vide.",
+        "Je ne sais pas qui est entré dans la pharmacie, je dormais chez moi cette nuit-là.",
+    ])
+    monkeypatch.setattr(ingest, "_tesseract", lambda png: (_calque_factice(), next(lectures)))
+    assert ingest._reconnaitre_page(tampon.getvalue())[2] == 0
+    assert appels == []
+
+    lectures = iter(["ae Ft ii ee eS rn mi Ss oe ao BE aa ng po", "Je ne sais pas qui est entré dans la pharmacie cette nuit-là."])
+    _, texte, rotation = ingest._reconnaitre_page(tampon.getvalue())
+    assert appels == [1] and rotation == 90 and texte.startswith("Je ne sais pas")

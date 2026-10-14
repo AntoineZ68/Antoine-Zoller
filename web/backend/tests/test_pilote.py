@@ -188,3 +188,28 @@ def test_infos_publiques(monkeypatch) -> None:
         "fournisseur_ia": "Mistral AI", "limite_pages": main.LIMITE_PAGES,
         "limite_mo_par_fichier": main.LIMITE_MO_PAR_FICHIER, "email_contact": None,
     }
+
+
+def test_serveur_garde_eveille_pendant_un_traitement(monkeypatch) -> None:
+    """Render endort une instance gratuite après 15 min sans requête : le
+    traitement s'appelle lui-même par son adresse publique."""
+    import urllib.request
+
+    from app import pipeline
+
+    appels: list = []
+
+    class _Reponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: appels.append(url) or _Reponse())
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    pipeline.garder_eveille()
+    assert appels == [], "hors de Render, rien"
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://lytis.onrender.com/")
+    pipeline.garder_eveille()
+    assert appels == ["https://lytis.onrender.com/health"]

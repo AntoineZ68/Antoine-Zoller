@@ -310,23 +310,38 @@ def _tourner_calque(calque: bytes, angle: float) -> bytes:
         return doc.tobytes()
 
 
-def _reconnaitre_page(png: bytes) -> tuple[bytes, str, int]:
-    """Calque de texte de la page, son texte dans l'ordre de lecture, et la
-    rotation (multiple de 90°) appliquée à l'image avant reconnaissance — à
-    défaire en posant le calque, voir _poser_calques. Un léger biais est
-    corrigé ici même : image redressée pour Tesseract, calque tourné en sens
-    inverse pour rester aligné sur le scan."""
+# Petits mots du français courant : sur une page lue à l'endroit, ils font
+# 25 à 37 % des mots reconnus ; sur une page couchée ou à l'envers, lue
+# telle quelle, 5 à 18 % (mesuré sur des scans de PV). En dessous du seuil,
+# ou avec trop peu de mots pour en juger, l'orientation est vérifiée.
+PETITS_MOTS = frozenset(
+    "le la les de des du un une et en au aux que qui ne pas pour par sur dans est il elle "
+    "nous vous je se son sa ses ce cette avec été mais ou où plus qu".split()
+)
+PART_PETITS_MOTS_MIN = 0.22
+MOTS_MIN_POUR_JUGER = 10
+
+
+def _lecture_plausible(texte: str) -> float | None:
+    """Part des petits mots courants parmi les mots reconnus, ou None si la
+    page en compte trop peu pour en juger."""
+    mots = [m.lower() for m in re.findall(r"[A-Za-zÀ-ÿ]{2,}", texte)]
+    if len(mots) < MOTS_MIN_POUR_JUGER:
+        return None
+    return sum(m in PETITS_MOTS for m in mots) / len(mots)
+
+
+def _lire_image(image, png: bytes | None = None) -> tuple[bytes, str]:
+    """Reconnaît une image (`png` : la même, déjà encodée), après en avoir
+    corrigé le léger biais : image redressée pour Tesseract, calque tourné
+    en sens inverse pour rester aligné sur le scan."""
     from io import BytesIO
 
     from PIL import Image
 
-    rotation = _orientation(png)
-    image = Image.open(BytesIO(png))
-    if rotation:
-        image = image.rotate(-rotation, expand=True)
     angle = _biais(image)
     redresser = abs(angle) >= BIAIS_MIN_DEGRES
-    if rotation or redresser:
+    if redresser or png is None:
         if redresser:
             image = image.rotate(angle, fillcolor=255, resample=Image.BICUBIC)
         tampon = BytesIO()
@@ -335,7 +350,35 @@ def _reconnaitre_page(png: bytes) -> tuple[bytes, str, int]:
     calque, texte = _tesseract(png)
     if redresser:
         calque = _tourner_calque(calque, -angle)
-    return calque, texte, rotation
+    return calque, texte
+
+
+def _reconnaitre_page(png: bytes) -> tuple[bytes, str, int]:
+    """Calque de texte de la page, son texte dans l'ordre de lecture, et la
+    rotation (multiple de 90°) appliquée à l'image avant reconnaissance — à
+    défaire en posant le calque, voir _poser_calques.
+
+    La page est d'abord lue telle quelle : la détection d'orientation coûte
+    à elle seule plus que la lecture (1,45 s contre 0,87 s par page,
+    mesuré), pour des pages presque toutes à l'endroit. Elle n'est lancée
+    que si le texte lu n'a pas l'allure du français (page couchée, à
+    l'envers) ; la lecture tournée n'est gardée que si elle est meilleure."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    image = Image.open(BytesIO(png))
+    calque, texte = _lire_image(image, png)
+    part = _lecture_plausible(texte)
+    if part is not None and part >= PART_PETITS_MOTS_MIN:
+        return calque, texte, 0
+    rotation = _orientation(png)
+    if not rotation:
+        return calque, texte, 0
+    calque_tourne, texte_tourne = _lire_image(image.rotate(-rotation, expand=True))
+    if (_lecture_plausible(texte_tourne) or 0) > (part or 0):
+        return calque_tourne, texte_tourne, rotation
+    return calque, texte, 0
 
 
 def _rendre_page(doc: "pymupdf.Document", numero: int) -> bytes:

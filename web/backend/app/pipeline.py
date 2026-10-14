@@ -138,11 +138,39 @@ class _Battement:
         # Client distinct de celui du traitement : les deux fils écrivent en
         # parallèle.
         supabase = client_service()
+        battements = 0
         while not self._arret.wait(INTERVALLE_BATTEMENT_S):
+            battements += 1
             try:
                 supabase.table("dossiers").update({"etape_courante": self.etape}).eq("id", self.dossier_id).execute()
             except Exception as exc:  # noqa: BLE001 — un battement manqué n'est pas grave, le suivant rattrapera
                 print(f"[pipeline] battement manqué pour {self.dossier_id} : {exc}")
+            if battements % BATTEMENTS_PAR_REVEIL == 0:
+                garder_eveille()
+
+
+# Une instance gratuite de Render s'endort après 15 minutes sans requête
+# entrante — un traitement en tâche de fond n'en est pas une. L'avocat qui
+# ferme l'onglet pendant la lecture d'un dossier scanné (plus d'une heure
+# sur une fraction de processeur) voyait son traitement tué en silence.
+# Tant qu'un traitement tourne, le serveur s'appelle lui-même par son
+# adresse publique (RENDER_EXTERNAL_URL, fournie par Render) toutes les
+# cinq minutes. Ailleurs (variable absente), rien n'est fait.
+BATTEMENTS_PAR_REVEIL = 10
+
+
+def garder_eveille() -> None:
+    import os
+    import urllib.request
+
+    adresse = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    if not adresse:
+        return
+    try:
+        with urllib.request.urlopen(f"{adresse}/health", timeout=10):
+            pass
+    except Exception as exc:  # noqa: BLE001 — au pire l'instance s'endort, comme avant
+        print(f"[pipeline] réveil de l'instance manqué : {exc}")
 
 
 def _rappel_progression_ocr(supabase, dossier_id: str) -> Callable[[int, int, str], None]:
