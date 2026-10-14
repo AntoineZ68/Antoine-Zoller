@@ -67,6 +67,14 @@ def _texte_page(page: pdfplumber.page.Page) -> str:
 PAGES_PAR_OUVERTURE = 100
 
 
+def _fusionner(texte_natif: str, texte_ocr: str) -> str:
+    """Page reconnue : le peu de texte natif qu'elle portait (moins de 50
+    caractères, typiquement la cote « D12 » apposée numériquement, que le
+    rendu pour l'OCR retire — voir _rendre_page) précède le texte reconnu."""
+    natif = texte_natif.strip()
+    return f"{natif}\n{texte_ocr}" if natif else texte_ocr
+
+
 def _extraire_textes_natifs(chemin_pdf: Path, numeros: set[int] | None = None) -> list[str]:
     """Libère chaque page après l'avoir lue, et rouvre le fichier par blocs
     (voir PAGES_PAR_OUVERTURE) : sans quoi la mémoire croît avec la taille
@@ -191,25 +199,143 @@ DPI_OCR = 300
 DELAI_TESSERACT_PAR_PAGE_S = 900
 
 
-def _tesseract_texte_seul(png: bytes) -> bytes:
-    """Reconnaît une page rendue en image et renvoie son calque de texte
-    invisible, sous forme d'un PDF d'une page SANS image (textonly_pdf) :
-    chaque mot y est placé à l'endroit exact où il figure sur le scan.
+def _tesseract(png: bytes) -> tuple[bytes, str]:
+    """Reconnaît une page rendue en image, en un seul passage, et renvoie :
+    - son calque de texte invisible, PDF d'une page SANS image
+      (textonly_pdf), chaque mot placé à l'endroit exact du scan — pour le
+      surlignage ;
+    - son texte dans l'ordre de lecture établi par Tesseract — pour
+      l'analyse. Relu depuis le calque, un scan penché de 2° voyait deux
+      lignes voisines entremêlées (« L R ' E a N n AR d D eu… ») : texte
+      de la page perdu (observé, dossier d'essai).
 
     Un seul fil par appel (OMP_THREAD_LIMIT=1) : le parallélisme se fait
     entre pages, bien plus efficace que le multi-fil interne de Tesseract
     sur une page isolée."""
-    resultat = subprocess.run(
-        ["tesseract", "stdin", "stdout", "-l", "fra", "--dpi", str(DPI_OCR), "-c", "textonly_pdf=1", "pdf"],
-        input=png,
-        capture_output=True,
-        timeout=DELAI_TESSERACT_PAR_PAGE_S,
-        env={**os.environ, "OMP_THREAD_LIMIT": "1"},
-        check=True,
-    )
-    if not resultat.stdout.startswith(b"%PDF"):
-        raise subprocess.SubprocessError("Tesseract n'a pas produit de calque de texte.")
-    return resultat.stdout
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="ocr_") as dossier:
+        base = Path(dossier) / "page"
+        subprocess.run(
+            ["tesseract", "stdin", str(base), "-l", "fra", "--dpi", str(DPI_OCR), "-c", "textonly_pdf=1", "pdf", "txt"],
+            input=png,
+            capture_output=True,
+            timeout=DELAI_TESSERACT_PAR_PAGE_S,
+            env={**os.environ, "OMP_THREAD_LIMIT": "1"},
+            check=True,
+        )
+        chemin_pdf, chemin_txt = base.with_suffix(".pdf"), base.with_suffix(".txt")
+        calque = chemin_pdf.read_bytes() if chemin_pdf.exists() else b""
+        if not calque.startswith(b"%PDF"):
+            raise subprocess.SubprocessError("Tesseract n'a pas produit de calque de texte.")
+        texte = chemin_txt.read_text(encoding="utf-8", errors="replace") if chemin_txt.exists() else ""
+    return calque, texte
+
+
+# Confiance minimale de la détection d'orientation de Tesseract (OSD) pour
+# retourner une page : en dessous, une page presque vide ou très dégradée
+# serait tournée au hasard.
+CONFIANCE_ORIENTATION_MIN = 2.0
+
+
+def _orientation(png: bytes) -> int:
+    """Degrés, dans le sens horaire, dont tourner l'image pour que le texte
+    soit droit : 0, 90, 180 ou 270. Une page numérisée couchée, sans
+    indication de rotation dans le PDF, donnait un OCR inutilisable
+    (observé : témoignage d'une riveraine entièrement perdu). Toute erreur
+    de détection (page sans texte, Tesseract en échec) vaut 0 : la page est
+    reconnue telle quelle, comme avant."""
+    try:
+        resultat = subprocess.run(
+            ["tesseract", "stdin", "stdout", "--psm", "0", "-l", "osd"],
+            input=png,
+            capture_output=True,
+            timeout=DELAI_TESSERACT_PAR_PAGE_S,
+            env={**os.environ, "OMP_THREAD_LIMIT": "1"},
+        )
+    except (subprocess.SubprocessError, OSError):
+        return 0
+    sortie = resultat.stdout.decode(errors="replace")
+    rotation = re.search(r"Rotate:\s*(\d+)", sortie)
+    confiance = re.search(r"Orientation confidence:\s*([\d.]+)", sortie)
+    if not rotation or not confiance or float(confiance.group(1)) < CONFIANCE_ORIENTATION_MIN:
+        return 0
+    return int(rotation.group(1)) % 360
+
+
+# Biais en deçà duquel une page n'est pas redressée (degrés) : Tesseract
+# l'absorbe seul. Au-delà, sur un scan penché de 1,8°, il entremêlait la fin
+# d'une ligne et le début de la suivante (« donnant sur pesée. la ruelle »).
+BIAIS_MIN_DEGRES = 0.5
+BIAIS_MAX_DEGRES = 6
+
+
+def _biais(image) -> float:
+    """Angle (degrés, sens trigonométrique) dont tourner l'image pour que
+    ses lignes soient horizontales : celui qui rend le profil de projection
+    horizontal le plus contrasté. Sur une vignette au 1/5 : ≈ 0,25 s."""
+    from PIL import Image
+
+    vignette = image.convert("L").resize((max(1, image.width // 5), max(1, image.height // 5)))
+
+    def contraste(angle: float) -> int:
+        tournee = vignette.rotate(angle, fillcolor=255, resample=Image.BILINEAR).point(lambda v: 1 if v < 160 else 0)
+        largeur, hauteur = tournee.size
+        octets = tournee.tobytes()
+        lignes = [sum(octets[y * largeur:(y + 1) * largeur]) for y in range(hauteur)]
+        return sum((b - a) ** 2 for a, b in zip(lignes, lignes[1:]))
+
+    # À contraste égal (page blanche), l'angle le plus proche de zéro.
+    grossier = max(range(-BIAIS_MAX_DEGRES, BIAIS_MAX_DEGRES + 1), key=lambda a: (contraste(a), -abs(a)))
+    return max((grossier + d / 4 for d in range(-4, 5)), key=lambda a: (contraste(a), -abs(a)))
+
+
+def _tourner_calque(calque: bytes, angle: float) -> bytes:
+    """Tourne le contenu du calque de `angle` degrés (sens trigonométrique)
+    autour du centre de la page : le texte reconnu sur l'image redressée
+    retombe sur les mots tels qu'ils sont, penchés, sur le scan."""
+    import math
+
+    with pymupdf.open("pdf", calque) as doc:
+        page = doc[0]
+        xrefs = page.get_contents()
+        contenu = b"\n".join(doc.xref_stream(x) for x in xrefs)
+        cx, cy = page.mediabox.width / 2, page.mediabox.height / 2
+        t = math.radians(angle)
+        a, b, c, d = math.cos(t), math.sin(t), -math.sin(t), math.cos(t)
+        e, f = cx - a * cx - c * cy, cy - b * cx - d * cy
+        doc.update_stream(xrefs[0], f"q {a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.4f} {f:.4f} cm\n".encode() + contenu + b"\nQ")
+        for xref in xrefs[1:]:
+            doc.update_stream(xref, b"")
+        return doc.tobytes()
+
+
+def _reconnaitre_page(png: bytes) -> tuple[bytes, str, int]:
+    """Calque de texte de la page, son texte dans l'ordre de lecture, et la
+    rotation (multiple de 90°) appliquée à l'image avant reconnaissance — à
+    défaire en posant le calque, voir _poser_calques. Un léger biais est
+    corrigé ici même : image redressée pour Tesseract, calque tourné en sens
+    inverse pour rester aligné sur le scan."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    rotation = _orientation(png)
+    image = Image.open(BytesIO(png))
+    if rotation:
+        image = image.rotate(-rotation, expand=True)
+    angle = _biais(image)
+    redresser = abs(angle) >= BIAIS_MIN_DEGRES
+    if rotation or redresser:
+        if redresser:
+            image = image.rotate(angle, fillcolor=255, resample=Image.BICUBIC)
+        tampon = BytesIO()
+        image.save(tampon, "PNG")
+        png = tampon.getvalue()
+    calque, texte = _tesseract(png)
+    if redresser:
+        calque = _tourner_calque(calque, -angle)
+    return calque, texte, rotation
 
 
 def _rendre_page(doc: "pymupdf.Document", numero: int) -> bytes:
@@ -294,14 +420,20 @@ def _pages_a_reconnaitre(chemin_pdf: Path, textes_natifs: list[str]) -> list[int
     return pages
 
 
-def _ocr_si_necessaire(
+def _ocr_si_necessaire(*args, **kwargs) -> Path:
+    """Comme _ocr_avec_textes, sans les textes : le PDF à relire."""
+    resultat = _ocr_avec_textes(*args, **kwargs)
+    return resultat[0] if isinstance(resultat, tuple) else resultat
+
+
+def _ocr_avec_textes(
     chemin_pdf: Path,
     textes_natifs: list[str],
     dossier_travail: Path,
     console: Console,
     progression: Callable[[int, int, str], None] | None = None,
     pages_a_ocr: list[int] | None = None,
-) -> Path:
+) -> tuple[Path, dict[int, str]]:
     """Reconnaît les pages numérisées, page par page, en parallèle, et pose
     sur chacune son calque de texte invisible — par-dessus la page
     d'origine, dont les images ne sont jamais réencodées.
@@ -320,7 +452,7 @@ def _ocr_si_necessaire(
     if pages_a_ocr is None:
         pages_a_ocr = _pages_a_reconnaitre(chemin_pdf, textes_natifs)
     if not pages_a_ocr:
-        return chemin_pdf
+        return chemin_pdf, {}
     if shutil.which("tesseract") is None:
         raise RuntimeError(
             f"{len(pages_a_ocr)} page(s) numérisée(s) à reconnaître dans {chemin_pdf.name}, "
@@ -338,6 +470,8 @@ def _ocr_si_necessaire(
         progression(0, total, chemin_pdf.name)
 
     calques: dict[int, bytes] = {}
+    textes: dict[int, str] = {}
+    rotations: dict[int, int] = {}
     echecs: list[int] = []
     faites = 0
     pas = _intervalle_rappels(total)
@@ -348,7 +482,7 @@ def _ocr_si_necessaire(
         for futur in termines:
             numero = en_cours.pop(futur)
             try:
-                calques[numero] = futur.result()
+                calques[numero], textes[numero], rotations[numero] = futur.result()
             except subprocess.SubprocessError as exc:
                 echecs.append(numero)
                 console.print(f"  [OCR] page {numero} ({chemin_pdf.name}) non reconnue : {type(exc).__name__}")
@@ -367,7 +501,7 @@ def _ocr_si_necessaire(
         for numero in pages_a_ocr:
             while len(en_cours) >= 2 * travailleurs:
                 recolter(en_cours)
-            en_cours[executeur.submit(_tesseract_texte_seul, _rendre_page(doc, numero))] = numero
+            en_cours[executeur.submit(_reconnaitre_page, _rendre_page(doc, numero))] = numero
         while en_cours:
             recolter(en_cours)
 
@@ -376,14 +510,20 @@ def _ocr_si_necessaire(
             f"  [OCR] {len(echecs)} page(s) non reconnue(s) ({chemin_pdf.name}), laissées sans texte : "
             f"{_plage_pages(echecs)}"
         )
+    redressees = sorted(n for n, r in rotations.items() if r)
+    if redressees:
+        console.print(f"  [OCR] {len(redressees)} page(s) numérisée(s) dans le mauvais sens, redressée(s) : {_plage_pages(redressees)}")
 
     dossier_travail.mkdir(parents=True, exist_ok=True)
     chemin_ocr = dossier_travail / f"ocr_{chemin_pdf.stem}.pdf"
-    _poser_calques(chemin_pdf, calques, chemin_ocr, dossier_travail)
-    return chemin_ocr
+    _poser_calques(chemin_pdf, calques, chemin_ocr, dossier_travail, rotations)
+    return chemin_ocr, textes
 
 
-def _poser_calques(chemin_pdf: Path, calques: dict[int, bytes], sortie: Path, dossier_travail: Path) -> None:
+def _poser_calques(
+    chemin_pdf: Path, calques: dict[int, bytes], sortie: Path, dossier_travail: Path,
+    rotations: dict[int, int] | None = None,
+) -> None:
     """Chaque calque produit par Tesseract embarque sa propre copie de la
     même police invisible. Posés tels quels, 100 calques donnent 100 polices
     que pdfplumber analyse une à une à la relecture : mesuré, 1,4 Go de
@@ -405,7 +545,14 @@ def _poser_calques(chemin_pdf: Path, calques: dict[int, bytes], sortie: Path, do
             page = doc[numero - 1]
             # Le calque est dans le sens d'affichage ; show_pdf_page attend
             # le repère non tourné de la page.
-            page.show_pdf_page(page.rect * page.derotation_matrix, reunis, index, overlay=True, rotate=page.rotation)
+            # Une image redressée avant reconnaissance (page couchée) : le
+            # calque est tourné d'autant en sens inverse pour retomber sur
+            # le texte tel qu'il apparaît sur la page.
+            correction = (rotations or {}).get(numero, 0)
+            page.show_pdf_page(
+                page.rect * page.derotation_matrix, reunis, index, overlay=True,
+                rotate=(page.rotation + correction) % 360,
+            )
         doc.save(temporaire, garbage=1, deflate=True)
     temporaire.replace(sortie)
     chemin_calques.unlink()
@@ -453,16 +600,18 @@ def lancer_ingestion(
         textes_natifs = _extraire_textes_natifs(chemin_local)
         a_reconnaitre = _pages_a_reconnaitre(chemin_local, textes_natifs)
         reconnues = set(a_reconnaitre)
-        chemin_effectif = _ocr_si_necessaire(
+        chemin_effectif, textes_ocr = _ocr_avec_textes(
             chemin_local, textes_natifs, dossier_travail, console, progression, a_reconnaitre
         )
 
         if chemin_effectif != chemin_local:
-            # Seules les pages reconnues ont changé : relire les 2 000 pages
-            # d'un gros dossier pour en retrouver 1 990 identiques coûterait
-            # plusieurs minutes pour rien.
-            relus = _extraire_textes_natifs(chemin_effectif, reconnues)
-            textes_finaux = [relus[i] if (i + 1) in reconnues else t for i, t in enumerate(textes_natifs)]
+            # Seules les pages reconnues ont changé. Leur texte est celui que
+            # Tesseract rend dans l'ordre de lecture ; le texte natif de la
+            # page (une cote tamponnée en numérique) est ajouté en tête.
+            textes_finaux = [
+                _fusionner(t, textes_ocr.get(i + 1, "")) if (i + 1) in reconnues else t
+                for i, t in enumerate(textes_natifs)
+            ]
         else:
             textes_finaux = textes_natifs
 

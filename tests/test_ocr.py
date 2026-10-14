@@ -112,7 +112,7 @@ def test_page_tournee_reste_alignee(tmp_path) -> None:
 def test_images_du_dossier_jamais_reencodees(monkeypatch, tmp_path) -> None:
     """Le PDF montré à l'avocat doit rester la pièce reçue : l'ancien moteur
     (conversion PDF/A) réencodait les images. Le calque se pose par-dessus."""
-    monkeypatch.setattr(ingest, "_tesseract_texte_seul", lambda png: _calque_factice())
+    monkeypatch.setattr(ingest, "_tesseract", lambda png: (_calque_factice(), "texte reconnu"))
     source = tmp_path / "dossier.pdf"
     with pymupdf.open() as doc:
         _page_scannee(doc)
@@ -131,7 +131,7 @@ def test_ocr_signale_son_avancement(monkeypatch, tmp_path) -> None:
     """Sur un petit serveur, un gros dossier se compte en dizaines de
     minutes : sans progression, rien ne distingue un traitement lent d'une
     panne."""
-    monkeypatch.setattr(ingest, "_tesseract_texte_seul", lambda png: _calque_factice())
+    monkeypatch.setattr(ingest, "_tesseract", lambda png: (_calque_factice(), "texte reconnu"))
     source = _dossier_vierge(tmp_path / "dossier.pdf", 14)
     # 12 pages sans texte sur 14 (les pages 3 et 9 portent déjà du texte).
     textes = ["" if n not in (3, 9) else "x" * 200 for n in range(1, 15)]
@@ -165,9 +165,9 @@ def test_page_en_echec_laissee_sans_texte_sans_tout_faire_echouer(monkeypatch, t
         appels["n"] += 1
         if appels["n"] == 2:
             raise subprocess.TimeoutExpired("tesseract", ingest.DELAI_TESSERACT_PAR_PAGE_S)
-        return _calque_factice()
+        return _calque_factice(), "texte reconnu"
 
-    monkeypatch.setattr(ingest, "_tesseract_texte_seul", tesseract)
+    monkeypatch.setattr(ingest, "_tesseract", tesseract)
     source = _dossier_vierge(tmp_path / "dossier.pdf", 3)
     monkeypatch.setattr(ingest, "_travailleurs_ocr", lambda: 1)  # ordre des appels déterministe
     sortie = _ocr_si_necessaire(source, ["", "", ""], tmp_path / "work", Console(quiet=True))
@@ -189,10 +189,13 @@ def test_delai_tesseract_releve_pour_les_petits_serveurs(monkeypatch) -> None:
 
     def faux_run(commande, **options):
         vus.update(options, commande=commande)
-        return subprocess.CompletedProcess(commande, 0, stdout=b"%PDF-1.5 ...")
+        base = Path(commande[2])
+        base.with_suffix(".pdf").write_bytes(b"%PDF-1.5 ...")
+        base.with_suffix(".txt").write_text("texte")
+        return subprocess.CompletedProcess(commande, 0)
 
     monkeypatch.setattr(ingest.subprocess, "run", faux_run)
-    ingest._tesseract_texte_seul(b"png")
+    assert ingest._tesseract(b"png") == (b"%PDF-1.5 ...", "texte")
     assert vus["timeout"] > 180
     assert vus["env"]["OMP_THREAD_LIMIT"] == "1", "le parallélisme se fait entre pages"
     assert "fra" in vus["commande"]
@@ -251,3 +254,60 @@ def test_pdf_deja_reconnu_en_amont_pas_relu(tmp_path) -> None:
     natifs = _extraire_textes_natifs(source)
     assert ingest.SEUIL_OCR_CARACTERES <= len("".join(natifs[0].split())) < ingest.SEUIL_OCR_PAGE_IMAGE
     assert ingest._pages_a_reconnaitre(source, natifs) == []
+
+
+@reel
+def test_scan_penche_lu_dans_l_ordre(tmp_path) -> None:
+    """Scan penché de 2°, flou, taché : pdfplumber entremêlait deux lignes
+    voisines caractère par caractère (« L R ' E a N n AR d D eu… ») et le
+    texte de la page était perdu. Lu dans l'ordre du calque, il est intact."""
+    from tests.fixtures.dossiers_complexes import _page_scan
+
+    source = tmp_path / "dossier.pdf"
+    phrase = "Constatons que la porte de service donnant sur la ruelle présente des traces de pesée."
+    with pymupdf.open() as doc, pymupdf.open("pdf", _page_scan(["## PROCÈS-VERBAL", phrase], "pied", "D3", "degrade")) as scan:
+        doc.insert_pdf(scan)
+        doc.save(source)
+    _, textes = ingest._ocr_avec_textes(source, [""], tmp_path / "work", Console(quiet=True))
+    texte = " ".join(textes[1].split())
+    assert "porte de service donnant sur la ruelle" in texte
+
+
+@reel
+def test_page_couchee_redressee_avant_reconnaissance(tmp_path) -> None:
+    """Page numérisée couchée, sans indication de rotation dans le PDF :
+    Tesseract la lisait telle quelle, le texte était inutilisable."""
+    from tests.fixtures.dossiers_complexes import _page_scan
+
+    source = tmp_path / "dossier.pdf"
+    with pymupdf.open() as doc, pymupdf.open("pdf", _page_scan(
+        ["## PROCÈS-VERBAL D'AUDITION DE TÉMOIN", "Personne entendue : MOUNIER Gisèle, riveraine.",
+         "Vers deux heures et demie, le bruit m'a réveillée. J'ai vu deux hommes dans la ruelle."],
+        "pied", "D14", "tourne",
+    )) as scan:
+        doc.insert_pdf(scan)
+        doc.save(source)
+    _, textes = ingest._ocr_avec_textes(source, [""], tmp_path / "work", Console(quiet=True))
+    texte = " ".join(textes[1].split())
+    assert "MOUNIER Gisèle" in texte and "deux hommes dans la ruelle" in texte
+
+
+@reel
+def test_calque_d_un_scan_penche_reste_sur_les_mots(tmp_path) -> None:
+    """L'image est redressée pour Tesseract, le calque tourné en sens
+    inverse : là où l'outil situe un mot (surlignage), l'image le montre."""
+    from tests.fixtures.dossiers_complexes import _page_scan
+
+    source = tmp_path / "dossier.pdf"
+    with pymupdf.open() as doc, pymupdf.open("pdf", _page_scan(
+        ["## PROCÈS-VERBAL DE CONSTATATIONS", "Relevons sur la porte du coffre une trace papillaire."],
+        "pied", "D3", "degrade",
+    )) as scan:
+        doc.insert_pdf(scan)
+        doc.save(source)
+    sortie = _ocr_si_necessaire(source, [""], tmp_path / "work", Console(quiet=True))
+    with pymupdf.open(sortie) as doc:
+        [zone] = doc[0].search_for("papillaire")[:1]
+        png = doc[0].get_pixmap(dpi=300, clip=zone + (-4, -4, 4, 4)).tobytes("png")
+    lu = subprocess.run(["tesseract", "stdin", "stdout", "-l", "fra", "--psm", "7"], input=png, capture_output=True)
+    assert "papillaire" in lu.stdout.decode()

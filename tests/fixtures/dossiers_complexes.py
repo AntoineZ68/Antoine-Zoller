@@ -111,7 +111,28 @@ def _page_texte(lignes: list[str], pied: str, cote: str) -> bytes:
     return tampon.getvalue()
 
 
-def _page_scan(lignes: list[str], pied: str, cote: str) -> bytes:
+def _degrader(img: Image.Image, mode: str) -> Image.Image:
+    """Scan réaliste : légèrement de travers, flou, basse résolution, taches
+    — ou page entière numérisée dans le mauvais sens (« tourne »), sans
+    indication de rotation dans le PDF."""
+    import random
+
+    from PIL import ImageFilter
+
+    alea = random.Random(len(mode))
+    if mode == "tourne":
+        return img.rotate(90, expand=True, fillcolor="white")
+    largeur, hauteur = img.size
+    img = img.resize((largeur // 2, hauteur // 2)).resize((largeur, hauteur))
+    img = img.rotate(1.8, expand=False, fillcolor="white").filter(ImageFilter.GaussianBlur(1.1))
+    dessin = ImageDraw.Draw(img)
+    for _ in range(900):
+        x, y = alea.randrange(largeur), alea.randrange(hauteur)
+        dessin.point((x, y), fill=(alea.randrange(60, 160),) * 3)
+    return img
+
+
+def _page_scan(lignes: list[str], pied: str, cote: str, mode: str = "propre") -> bytes:
     largeur_px, hauteur_px = 1654, 2339
     img = Image.new("RGB", (largeur_px, hauteur_px), "white")
     dessin = ImageDraw.Draw(img)
@@ -126,6 +147,8 @@ def _page_scan(lignes: list[str], pied: str, cote: str) -> bytes:
             y += 40
         y += 12
     dessin.text((110, hauteur_px - 100), pied, fill="black", font=base._police(20))
+    if mode != "propre":
+        img = _degrader(img, mode)
     return base._page_image_vers_pdf(img)
 
 
@@ -141,7 +164,8 @@ def ecrire_dossier(pieces: list[dict], chemin: Path, parquet: str) -> tuple[int,
             pied = f"N° PARQUET {parquet} — Cote D{numero:04d} — Page {numero}"
             if piece.get("scan"):
                 scans.append(numero)
-                octets = _page_scan(lignes, pied, cote)
+                mode = piece["scan"] if isinstance(piece["scan"], str) else "propre"
+                octets = _page_scan(lignes, pied, cote, mode)
             else:
                 octets = _page_texte(lignes, pied, cote)
             ecrivain.add_page(PdfReader(BytesIO(octets)).pages[0])
@@ -151,7 +175,7 @@ def ecrire_dossier(pieces: list[dict], chemin: Path, parquet: str) -> tuple[int,
     return numero, scans
 
 
-def piece(titre: str, *paragraphes: str, scan: bool = False) -> dict:
+def piece(titre: str, *paragraphes: str, scan: bool | str = False) -> dict:
     return {"scan": scan, "lignes": [f"## {titre}", *paragraphes]}
 
 
@@ -1631,7 +1655,245 @@ def generer_armorine(dossier: Path) -> VeriteDossier:
     )
 
 
-DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur, generer_armorine)
+# --- Dossier 4 : « réaliste » — rédigé comme un vrai commissariat ---------------
+#
+# Les trois dossiers précédents sont rédigés proprement : « Le 03/02/2033 à
+# 10h20 », « PROCÈS-VERBAL D'AUDITION DE X (MIS EN CAUSE) », « Question : ».
+# Les vrais PV s'écrivent autrement — c'est ce dossier qui le vérifie :
+# bandeau de service, ouverture « L'an deux mille trente-trois, le quatre
+# mars, à six heures trente », heures en lettres, « Personne entendue :
+# NOM Prénom », « QUESTION : / REPONSE : » en capitales sans accent, rôle
+# jamais écrit dans l'en-tête, « au nommé LEROY Kevin », plainte titrée
+# « DÉPÔT DE PLAINTE », scans de travers, flous, et une page numérisée dans
+# le mauvais sens.
+
+PARQUET_VALMONT = "2033/00451"
+BANDEAU_VALMONT = "POLICE NATIONALE — DDSP — COMMISSARIAT DE POLICE DE VALMONT"
+
+
+def pv_reel(titre: str, ouverture: str, *corps: str, scan: bool | str = False) -> dict:
+    return {"scan": scan, "lignes": [BANDEAU_VALMONT, f"## {titre}", f"Procédure n° {PARQUET_VALMONT}", ouverture, *corps]}
+
+
+def audition_reelle(titre: str, ouverture: str, identite: str, qr: list[tuple[str, str]], scan: bool | str = False) -> dict:
+    lignes = [identite]
+    for q, r in qr:
+        lignes += [f"QUESTION : {q}", f"REPONSE : {r}"]
+    lignes.append("Après lecture faite par elle-même, la personne entendue persiste et signe avec nous le présent.")
+    return pv_reel(titre, ouverture, *lignes, scan=scan)
+
+
+OUVERTURE_RENARD = (
+    "Nous, Sylvie RENARD, Capitaine de police, Officier de police judiciaire en résidence à Valmont, "
+    "étant au service,"
+)
+
+
+def _pieces_valmont() -> list[dict]:
+    return [
+        pv_reel(
+            "RAPPORT DE SYNTHÈSE",
+            "L'an deux mille trente-trois, le six mars, " + OPJ_SYNTHESE_VALMONT,
+            "Dans la nuit du 1er au 2 mars 2033, la pharmacie du Centre, 4 place de la Halle à Valmont, "
+            "a fait l'objet d'un cambriolage par effraction de la porte arrière. Le préjudice déclaré "
+            "s'élève à 4 350 euros en numéraire, outre des médicaments.",
+            "L'exploitation de la vidéoprotection et la découverte d'une trace papillaire ont conduit à "
+            "l'interpellation de LEROY Kevin le 4 mars 2033. BOUZID Samir, dont le véhicule a été "
+            "aperçu à proximité, a été entendu librement.",
+            "LEROY Kevin reconnaît sa présence sur les lieux et conteste avoir pénétré dans l'officine. "
+            "BOUZID Samir déclare avoir prêté son véhicule.",
+        ),
+        audition_reelle(
+            "PROCÈS-VERBAL DE DÉPÔT DE PLAINTE",
+            "L'an deux mille trente-trois, le deux mars, à huit heures quarante, " + OUVERTURE_RENARD,
+            "Personne entendue : BLANCHARD Hélène, née le 12/06/1979 à Valmont, pharmacienne titulaire.",
+            [
+                ("Pour quels faits déposez-vous plainte ?",
+                 "Ce matin à sept heures trente, en ouvrant la pharmacie, j'ai trouvé la porte arrière "
+                 "forcée. Le tiroir-caisse et le coffre de l'arrière-boutique ont été vidés."),
+                ("Quel est votre préjudice ?",
+                 "Il y avait 3 450 euros en espèces dans le coffre, le fond de caisse compris. Il manque "
+                 "aussi des boîtes de médicaments, je ferai l'inventaire."),
+                ("À quelle heure avez-vous quitté l'officine la veille ?",
+                 "À dix-neuf heures quinze, après la fermeture. Tout était fermé à clé."),
+                ("Avez-vous des soupçons ?",
+                 "Un jeune homme est venu plusieurs fois cette semaine demander des produits sans "
+                 "ordonnance. Il regardait vers l'arrière-boutique."),
+            ],
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL DE TRANSPORT ET CONSTATATIONS",
+            "L'an deux mille trente-trois, le deux mars, à neuf heures dix, " + OUVERTURE_RENARD,
+            "Nous transportons à la pharmacie du Centre, 4 place de la Halle à Valmont.",
+            "Constatons que la porte de service donnant sur la ruelle présente des traces de pesée à "
+            "hauteur de la serrure. Le coffre de l'arrière-boutique est ouvert, sans trace "
+            "d'effraction, la clé étant restée dans un tiroir du bureau.",
+            "Relevons sur la porte du coffre une trace papillaire, révélée et transmise au service "
+            "régional d'identité judiciaire.",
+            scan="degrade",
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL D'EXPLOITATION DE VIDÉOPROTECTION",
+            "L'an deux mille trente-trois, le trois mars, à quatorze heures, Nous, Bruno FAVIER, "
+            "Brigadier de police, Agent de police judiciaire,",
+            "Exploitons les enregistrements de la caméra municipale n° 7 orientée vers la ruelle.",
+            "À deux heures quatorze, un individu vêtu d'un sweat à capuche gris s'approche de la porte "
+            "de service. Il en ressort à deux heures trente-sept, un sac à dos à la main.",
+            "À deux heures quarante, un véhicule Peugeot 208 de couleur noire, immatriculé EK-724-RB, "
+            "démarre de l'angle de la rue des Tanneurs.",
+            scan="degrade",
+        ),
+        pv_reel(
+            "RAPPORT D'EXPERTISE — IDENTIFICATION PAPILLAIRE",
+            "Service régional d'identité judiciaire. Le 3 mars 2033, l'expert Paul VERNIER, technicien "
+            "en identification criminelle,",
+            "Conclut que la trace papillaire relevée sur la porte du coffre présente quatorze points "
+            "de concordance avec l'empreinte de l'index droit de LEROY Kevin, né le 20/11/2010, "
+            "enregistrée au fichier automatisé des empreintes digitales.",
+            scan="degrade",
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL D'INTERPELLATION",
+            "L'an deux mille trente-trois, le quatre mars, à six heures vingt, Nous, Bruno FAVIER, "
+            "Brigadier de police, Agent de police judiciaire,",
+            "Procédons à l'interpellation du nommé LEROY Kevin à son domicile, 9 impasse des Lilas à "
+            "Valmont. Un sweat à capuche gris est découvert sur une chaise de la chambre.",
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL DE NOTIFICATION DE PLACEMENT EN GARDE À VUE",
+            "L'an deux mille trente-trois, le quatre mars, à six heures trente, " + OUVERTURE_RENARD,
+            "Notifions au nommé LEROY Kevin, né le 20/11/2010 à Valmont, son placement en garde à vue, "
+            "la mesure prenant effet à compter du 04/03/2033 à 06 heures 10, heure de son "
+            "appréhension, pour des faits de vol par effraction.",
+            "Interpellation effectuée le 04/03/2033 à 06h10, 9 impasse des Lilas à Valmont.",
+            "Avis est donné à Madame la Procureure de la République à six heures quarante-cinq.",
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL DE NOTIFICATION DES DROITS",
+            "L'an deux mille trente-trois, le quatre mars, à six heures trente-cinq, " + OUVERTURE_RENARD,
+            "Notifions à l'intéressé, LEROY Kevin, les droits attachés à la mesure de garde à vue.",
+            "L'intéressé déclare vouloir être assisté par Maître Lucie GERMAIN, avocate au barreau de "
+            "Valmont, et ne pas souhaiter d'examen médical.",
+        ),
+        audition_reelle(
+            "PROCÈS-VERBAL D'AUDITION DE PERSONNE GARDÉE À VUE",
+            "L'an deux mille trente-trois, le quatre mars, à dix heures cinq, " + OUVERTURE_RENARD,
+            "Personne entendue : LEROY Kevin, assisté de Maître Lucie GERMAIN.",
+            [
+                ("Où vous trouviez-vous dans la nuit du 1er au 2 mars 2033 ?",
+                 "Chez moi, je dormais. Je me suis couché vers minuit."),
+                ("Votre empreinte a été relevée sur la porte du coffre de la pharmacie. Comment "
+                 "l'expliquez-vous ?",
+                 "Je suis allé à la pharmacie plusieurs fois cette semaine, j'ai pu toucher des choses."),
+                ("Le coffre se trouve dans l'arrière-boutique, interdite au public. Y êtes-vous entré ?",
+                 "Non, jamais."),
+                ("Un sweat à capuche gris a été découvert chez vous. Le portiez-vous cette nuit-là ?",
+                 "C'est mon sweat, je le porte souvent. Mais je n'étais pas dehors."),
+                ("Connaissez-vous BOUZID Samir ?",
+                 "C'est un ami. Il me prête sa voiture de temps en temps."),
+                ("Lui avez-vous emprunté sa voiture le 1er mars 2033 ?",
+                 "Non, pas ce jour-là."),
+            ],
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL DE PROLONGATION DE GARDE À VUE",
+            "Le 5 mars 2033 à 5 heures 50, Madame Anne-Sophie DELORME, Procureure de la République près le "
+            "tribunal judiciaire de Valmont,",
+            "Autorise la prolongation pour vingt-quatre heures de la garde à vue de LEROY Kevin, après "
+            "présentation de l'intéressé par visioconférence.",
+        ),
+        audition_reelle(
+            "PROCÈS-VERBAL D'AUDITION DE PERSONNE GARDÉE À VUE",
+            "L'an deux mille trente-trois, le cinq mars, à neuf heures, " + OUVERTURE_RENARD,
+            "Personne entendue : LEROY Kevin, assisté de Maître Lucie GERMAIN.",
+            [
+                ("On vous présente les images de la caméra n° 7. Reconnaissez-vous l'individu ?",
+                 "Oui, c'est moi. J'étais dans la ruelle, mais je ne suis pas entré."),
+                ("Que faisiez-vous dans la ruelle à deux heures du matin ?",
+                 "J'attendais Samir, il devait me ramener. Quelqu'un d'autre est entré dans la pharmacie, "
+                 "je ne dirai pas qui."),
+                ("Comment votre empreinte se trouve-t-elle sur le coffre ?",
+                 "Je ne sais pas."),
+                ("Qui conduisait la Peugeot 208 noire ?",
+                 "Samir. Il était au volant."),
+            ],
+        ),
+        pv_reel(
+            "PROCÈS-VERBAL DE FIN DE GARDE À VUE",
+            "L'an deux mille trente-trois, le cinq mars, à quatorze heures vingt, " + OUVERTURE_RENARD,
+            "Disons mettre fin à la mesure de garde à vue de LEROY Kevin, qui est conduit au tribunal "
+            "judiciaire en vue de sa présentation au parquet.",
+        ),
+        audition_reelle(
+            "PROCÈS-VERBAL D'AUDITION LIBRE",
+            "L'an deux mille trente-trois, le cinq mars, à quinze heures trente, " + OUVERTURE_RENARD,
+            "Personne entendue : BOUZID Samir, né le 02/02/2009 à Valmont, informé de son droit de quitter "
+            "les locaux à tout moment.",
+            [
+                ("Êtes-vous propriétaire d'une Peugeot 208 noire immatriculée EK-724-RB ?",
+                 "Oui."),
+                ("Où se trouvait votre véhicule dans la nuit du 1er au 2 mars 2033 ?",
+                 "Je l'avais prêté à Kevin LEROY le 1er mars au soir. Il me l'a rendu le lendemain midi."),
+                ("Conduisiez-vous ce véhicule à deux heures quarante, rue des Tanneurs ?",
+                 "Non. J'étais chez ma copine toute la nuit, elle peut le confirmer."),
+                ("Kevin LEROY affirme que vous étiez au volant. Qu'en dites-vous ?",
+                 "C'est faux. Il essaie de me faire porter le chapeau."),
+            ],
+        ),
+        audition_reelle(
+            "PROCÈS-VERBAL D'AUDITION DE TÉMOIN",
+            "L'an deux mille trente-trois, le trois mars, à onze heures, " + OUVERTURE_RENARD,
+            "Personne entendue : MOUNIER Gisèle, riveraine, demeurant 6 ruelle des Halles à Valmont.",
+            [
+                ("Qu'avez-vous constaté dans la nuit du 1er au 2 mars 2033 ?",
+                 "Vers deux heures et demie, le bruit m'a réveillée. J'ai vu deux hommes dans la ruelle, "
+                 "l'un portait un sweat gris à capuche, l'autre une veste claire."),
+                ("Avez-vous vu un véhicule ?",
+                 "Une petite voiture blanche est partie en vitesse vers la rue des Tanneurs."),
+            ],
+            scan="tourne",
+        ),
+        pv_reel(
+            "EXTRAIT DU CASIER JUDICIAIRE NATIONAL — BULLETIN N° 1",
+            "Relevé le 4 mars 2033.",
+            "LEROY Kevin, né le 20/11/2010 à Valmont : condamnation du 14/09/2031 par le tribunal pour "
+            "enfants de Valmont, vol aggravé, mesure éducative judiciaire.",
+            scan="degrade",
+        ),
+    ]
+
+
+OPJ_SYNTHESE_VALMONT = (
+    "Nous, Sylvie RENARD, Capitaine de police, Officier de police judiciaire, rendons compte de la "
+    "procédure suivie à l'encontre de LEROY Kevin et de BOUZID Samir."
+)
+
+
+def generer_valmont(dossier: Path) -> VeriteDossier:
+    chemin = dossier / "dossier_valmont.pdf"
+    nb, scans = ecrire_dossier(_pieces_valmont(), chemin, PARQUET_VALMONT)
+    return VeriteDossier(
+        chemin_pdf=chemin, nb_pages=nb, pages_scan=scans,
+        contradictions_par_regles=(("Interpellation", "06h10", "06h20"),),
+        contradictions_modele=(
+            ("3 450", "4 350", "prejudice", "montant"),
+            ("noire", "blanche", "vehicule", "couleur"),
+        ),
+        durees_gav={"Kevin LEROY": minutes_entre("04/03/2033 06h10", "05/03/2033 14h20")},
+        mis_en_cause=("Kevin LEROY", "Samir BOUZID"),
+        jamais_mis_en_cause=(
+            "Sylvie RENARD", "Bruno FAVIER", "Anne-Sophie DELORME", "Lucie GERMAIN", "Paul VERNIER",
+            "Hélène BLANCHARD", "Gisèle MOUNIER",
+        ),
+        questions=(
+            QuestionAttendue("À quelle heure Kevin LEROY a-t-il été interpellé ?", heures=((6, 10), (6, 20))),
+            QuestionAttendue("Quel montant a été dérobé à la pharmacie ?", mots=("3 450", "4 350")),
+            QuestionAttendue("Qui conduisait la Peugeot 208 selon les personnes entendues ?", mots=("LEROY", "BOUZID")),
+        ),
+    )
+
+
+DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur, generer_armorine, generer_valmont)
 
 
 if __name__ == "__main__":
