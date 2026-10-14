@@ -323,6 +323,16 @@ RE_DATE_BOITE_ACTE = re.compile(
 )
 
 
+# « LEROY Kevin, né le 20/11/2010 à Valmont » : une date de naissance n'est
+# jamais celle de l'acte. Le casier d'un dossier d'essai était daté du jour
+# de naissance de l'intéressé, faute d'autre « le [date] » reconnu.
+RE_AVANT_DATE_NAISSANCE = re.compile(r"(?:\bn[ée]e?s?|naissance\s*:?)\s*$", re.IGNORECASE)
+
+
+def _date_de_naissance(texte: str, debut: int) -> bool:
+    return bool(RE_AVANT_DATE_NAISSANCE.search(texte[max(0, debut - 20) : debut]))
+
+
 RE_OUVERTURE_LE_DATE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\b")
 # L'heure de l'acte, juste après sa date : « , audition débutée à 13h15 »,
 # « de 10h40 à 11h50 » — dans la même phrase, à quelques mots.
@@ -361,7 +371,11 @@ def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Matc
     # rapport de synthèse ouvrant sur "Le 15 septembre 2026 à 14 heures 00"
     # voyait tous ses faits datés du "14 septembre 2026 à 17h35" d'un fait
     # divers raconté plus loin dans le corps du texte).
-    m = re.search(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+([^.,;\n]{{1,40}})", texte, re.IGNORECASE)
+    m = next(
+        (c for c in re.finditer(rf"\bLe\s+{FRAGMENT_DATE}\s+à\s+([^.,;\n]{{1,40}})", texte, re.IGNORECASE)
+         if not _date_de_naissance(texte, c.start())),
+        None,
+    )
     # Mais jamais une formule « Le [date] à [heure] » trouvée APRÈS la
     # véritable ouverture de l'acte : « Le 03/02/2033, audition débutée à
     # 13h15 » (virgule, heure plus loin) n'y répondait pas, et toute
@@ -405,7 +419,7 @@ def detecter_date_acte(texte: str) -> str | None:
     jamais une date incidente (ex. une date de naissance mentionnée dans le
     corps du texte) : à défaut de ce motif précis, NON TROUVÉ plutôt qu'une
     approximation."""
-    m = RE_DATE_ACTE.search(texte)
+    m = next((c for c in RE_DATE_ACTE.finditer(texte) if not _date_de_naissance(texte, c.start())), None)
     if not m:
         return None
     return normaliser_date(m.group(1))

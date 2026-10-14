@@ -275,9 +275,14 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
                 f"Contradiction attendue : {' / '.join(morceaux)}",
                 any(all(m in t for m in morceaux) for t in titres), "",
             ))
+        # « LEROY Kevin » et « Kevin LEROY » : même personne, autre ordre.
+        def cle(nom: str) -> frozenset[str]:
+            return frozenset(_sans_accents(nom).split())
+
         mis_en_cause = {r[0] for r in db.execute("SELECT nom FROM personnes WHERE role = 'mis_en_cause'")}
-        manquants = [n for n in verite.mis_en_cause if n not in mis_en_cause]
-        a_tort = [n for n in verite.jamais_mis_en_cause if n in mis_en_cause]
+        cles_mec = {cle(n) for n in mis_en_cause}
+        manquants = [n for n in verite.mis_en_cause if cle(n) not in cles_mec]
+        a_tort = [n for n in verite.jamais_mis_en_cause if cle(n) in cles_mec]
         resultat.qualite.append((
             "Rôles : les mis en cause identifiés, et eux seuls",
             not manquants and not a_tort,
@@ -285,9 +290,9 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
             + (f" — manquant : {', '.join(manquants)}" if manquants else "")
             + (f" — à tort : {', '.join(a_tort)}" if a_tort else ""),
         ))
-        gav_par_nom = {g["nom"]: g["duree_minutes"] for g in gardes_a_vue(db)}
+        gav_par_nom = {cle(g["nom"] or ""): g["duree_minutes"] for g in gardes_a_vue(db)}
         for nom, attendue in verite.durees_gav.items():
-            calculee = gav_par_nom.get(nom)
+            calculee = gav_par_nom.get(cle(nom))
             resultat.qualite.append((
                 f"Durée de garde à vue de {nom} : {formater_duree(attendue)}", calculee == attendue,
                 f"calculée : {formater_duree(calculee)}",
@@ -301,10 +306,10 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
                     f"{len(par_modele)} contradiction(s) du modèle retenue(s)",
                 ))
             resume = db.execute("SELECT texte FROM resume_affaire").fetchone()
-            noms = [n.split()[-1] for n in verite.mis_en_cause]
+            noms = [max(n.split(), key=lambda m: m.isupper()) for n in verite.mis_en_cause]
             resultat.qualite.append((
                 "Résumé produit et nommant un mis en cause",
-                bool(resume and any(n in resume[0] for n in noms)), (resume[0][:300] if resume else "aucun résumé"),
+                bool(resume and any(n.upper() in resume[0].upper() for n in noms)), (resume[0][:300] if resume else "aucun résumé"),
             ))
     if not config.offline:
         discordances = discordances_connues(db)

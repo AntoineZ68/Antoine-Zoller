@@ -687,6 +687,9 @@ def test_role_tague_avec_accents_et_noms_composes(entete, attendu) -> None:
     ("ORDONNANCE D'AUTORISATION D'INTERCEPTION — RÉQUISITION", "Ordonnance du juge des libertés et de la détention"),
     ("BRIGADE DE RECHERCHES DE PORT-BRÉVAL\nPROCÈS-VERBAL D'AUDITION", "PV d'audition"),
     ("SERVICE D'IDENTIFICATION JUDICIAIRE\nPROCÈS-VERBAL DE CONSTATATIONS", "PV de constatations"),
+    ("PROCÈS-VERBAL DE DÉPÔT DE PLAINTE", "PV de plainte"),
+    ("PROCES-VERBAL D'AUDITION DE PLAIGNANTE", "PV de plainte"),
+    ("SERVICE DES PLAINTES\nPROCÈS-VERBAL D'AUDITION DE TÉMOIN", "PV d'audition"),
 ])
 def test_pieces_courantes_classees(entete, attendu) -> None:
     """Dix pièces « Non identifié » sur deux dossiers d'essai de 40 pages ;
@@ -732,6 +735,11 @@ def test_titre_retire_du_nom_rendu_par_le_modele(nom, attendu) -> None:
      "Hélène ROUSSET. Étiez-vous l'appelant ?", ("03/02/2033", "13h15")),
     ("Le 03/02/2033 de 10h40 à 11h50, perquisition au domicile.", ("03/02/2033", "10h40")),
     ("Notifions à X, né le 12/03/1990. Le 03/02/2033 à 10h20, nous notifions.", ("03/02/2033", "10h20")),
+    # Casier : relevé le 4 mars, intéressé né le 20/11/2010 — observé daté
+    # du jour de naissance.
+    ("Relevé le 4 mars 2033.\nLEROY Kevin, né le 20/11/2010 à Valmont : condamnation du 14/09/2031.",
+     ("04/03/2033", None)),
+    ("LEROY Kevin, né le 20/11/2010 à Valmont : condamnation.", (None, None)),
 ])
 def test_date_de_l_acte_jamais_celle_d_une_question(texte, attendu) -> None:
     """Observé dans l'appli : une audition « Le 03/02/2033, audition débutée
@@ -740,3 +748,94 @@ def test_date_de_l_acte_jamais_celle_d_une_question(texte, attendu) -> None:
     from depouille.regex_patterns import detecter_date_heure_acte
 
     assert detecter_date_heure_acte(texte) == attendu
+
+
+# Les vrais PV n'écrivent pas le rôle entre parenthèses : « Personne
+# entendue : LEROY Kevin » sous l'intitulé « AUDITION DE PERSONNE GARDÉE À
+# VUE ». Observé sur un dossier d'essai écrit ainsi : aucune personne
+# identifiée, aucune déclaration, aucune durée de garde à vue.
+@pytest.mark.parametrize("entete, attendu", [
+    ("PROCÈS-VERBAL D'AUDITION DE PERSONNE GARDÉE À VUE", "mis_en_cause"),
+    ("PROCES-VERBAL D'AUDITION LIBRE", "mis_en_cause"),
+    ("PROCÈS-VERBAL DE DÉPÔT DE PLAINTE", "victime"),
+    ("PROCÈS-VERBAL D'AUDITION DE TÉMOIN", "témoin"),
+    ("PROCÈS-VERBAL D'AUDITION", None),
+    ("AUDITION DE TÉMOIN — GARDE À VUE", None),
+])
+def test_role_deduit_de_l_intitule(entete, attendu) -> None:
+    from depouille.classify import role_par_intitule
+
+    assert role_par_intitule(entete) == attendu
+
+
+@pytest.mark.parametrize("texte, attendu", [
+    ("Personne entendue : LEROY Kevin, assisté de Maître Lucie GERMAIN.", "Kevin LEROY"),
+    ("Personne gardée à vue : BOUZID Samir, né le 02/02/2009.", "Samir BOUZID"),
+    ("Personne entendue : Gisèle MOUNIER, riveraine.", "Gisèle MOUNIER"),
+    ("Personne : TARDIEU Jean-Marc", "Jean-Marc TARDIEU"),
+    ("Le 14/03/2031 à 15h00, nous entendons Paul LEROUX, voisin.", "Paul LEROUX"),
+    ("Nous auditionnons Madame RIVIÈRE Anne, gérante.", "Anne RIVIÈRE"),
+    ("La personne entendue persiste et signe.", None),
+])
+def test_champ_d_identite(texte, attendu) -> None:
+    from depouille.classify import personne_du_champ
+
+    assert personne_du_champ(texte) == attendu
+
+
+def test_au_nomme_nom_prenom() -> None:
+    texte = "Procédons à l'interpellation du nommé LEROY Kevin à son domicile."
+    assert _premiere_mention_hors_titres(texte) == ("Kevin", "LEROY")
+
+
+def test_audition_sans_tag_role_par_intitule(tmp_path) -> None:
+    from depouille.classify import _enregistrer_personnes_taguees
+    from depouille.db import ouvrir_db
+
+    db = ouvrir_db(tmp_path / "t.db")
+    plainte = "PROCÈS-VERBAL DE DÉPÔT DE PLAINTE\nPersonne entendue : BLANCHARD Hélène, née le 12/06/1979."
+    temoin = "PROCÈS-VERBAL D'AUDITION DE TÉMOIN\nPersonne entendue : MOUNIER Gisèle, riveraine."
+    gav = "PROCÈS-VERBAL D'AUDITION DE PERSONNE GARDÉE À VUE\nPersonne entendue : LEROY Kevin."
+    neutre = "PROCÈS-VERBAL D'AUDITION\nPersonne entendue : DURAND Paul."
+    _enregistrer_personnes_taguees(db, [plainte, temoin, gav, neutre])
+    assert {tuple(r) for r in db.execute("SELECT nom, role FROM personnes")} == {
+        ("Hélène BLANCHARD", "victime"), ("Gisèle MOUNIER", "témoin"), ("Kevin LEROY", "mis_en_cause"),
+    }, "sans rôle établi, personne n'est créé"
+
+    console = Console(quiet=True)
+    for texte, attendu in ((plainte, "Hélène BLANCHARD"), (gav, "Kevin LEROY")):
+        personne_id, methode = identifier_personne_principale(
+            db, Config(offline=True), "PV d'audition", texte, console, {"tokens_in": 0, "tokens_out": 0},
+        )
+        assert methode == "champ_identite"
+        assert db.execute("SELECT nom FROM personnes WHERE id = ?", (personne_id,)).fetchone()[0] == attendu
+    assert identifier_personne_principale(
+        db, Config(offline=True), "PV d'audition", neutre, console, {"tokens_in": 0, "tokens_out": 0},
+    ) == (None, "non_identifie"), "hors ligne, pas de rôle deviné"
+
+
+@pytest.mark.parametrize("texte", [
+    "Notifions à l'intéressé, LEROY Kevin, les droits attachés à la mesure de garde à vue.",
+    "Autorise la prolongation pour vingt-quatre heures de la garde à vue de LEROY Kevin.",
+    "Madame Anne-Sophie DELORME, Procureure de la République, autorise la prolongation de la garde à vue "
+    "de LEROY Kevin.",
+])
+def test_acte_de_garde_a_vue_rattache_au_mis_en_cause_connu(tmp_path, texte) -> None:
+    """NOM Prénom sans formule d'identité : le mis en cause déjà identifié
+    est reconnu, jamais une nouvelle personne créée (ni la procureure)."""
+    from depouille.db import ouvrir_db
+
+    db = ouvrir_db(tmp_path / "t.db")
+    db.execute("INSERT INTO personnes (id, nom, role) VALUES (1, 'Hélène BLANCHARD', 'victime'), (2, 'Kevin LEROY', 'mis_en_cause')")
+    assert _premiere_mention_ou_creation(db, texte, "mis_en_cause") == 2
+    assert db.execute("SELECT COUNT(*) FROM personnes").fetchone()[0] == 2
+
+
+def test_identite_declaree_prime_sur_un_mis_en_cause_cite(tmp_path) -> None:
+    from depouille.db import ouvrir_db
+
+    db = ouvrir_db(tmp_path / "t.db")
+    db.execute("INSERT INTO personnes (id, nom, role) VALUES (1, 'Kevin LEROY', 'mis_en_cause')")
+    texte = "Dans la procédure visant LEROY Kevin, notifions au nommé BOUZID Samir son placement."
+    personne_id = _premiere_mention_ou_creation(db, texte, "mis_en_cause")
+    assert db.execute("SELECT nom FROM personnes WHERE id = ?", (personne_id,)).fetchone()[0] == "Samir BOUZID"

@@ -30,6 +30,7 @@ from .titres import titrer_pieces
 CATEGORIES = [
     "PV d'audition",
     "PV d'audition libre",
+    "PV de plainte",
     "PV d'interpellation",
     "PV de surveillance",
     "PV de notification de placement en garde à vue",
@@ -110,6 +111,13 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     # Deux personnes répondent tour à tour : ni « audition » ni pièce
     # inconnue (observé : classée « Non identifié », déclarations perdues).
     (["CONFRONTATION"], "PV de confrontation"),
+    # « PROCÈS-VERBAL DE DÉPÔT DE PLAINTE » : une audition de la victime,
+    # avec ses questions et réponses (observé : classée « Non identifié »,
+    # déclarations de la plaignante perdues). « DE PLAINTE » et non
+    # « PLAINTE » : un « SERVICE DES PLAINTES » en en-tête d'une audition de
+    # témoin ne doit pas l'emporter.
+    (["DE PLAINTE"], "PV de plainte"),
+    (["PLAIGNANT"], "PV de plainte"),
     (["AUDITION LIBRE"], "PV d'audition libre"),
     (["AUDITION"], "PV d'audition"),
     # Pièces documentaires saisies comme preuve plutôt que rédigées par un
@@ -164,7 +172,7 @@ ROLE_PAR_TAG = {
 }
 ROLES_VALIDES = ("mis_en_cause", "victime", "témoin", "expert", "enqueteur")
 
-TYPES_AUDITION = ("PV d'audition", "PV d'audition libre")
+TYPES_AUDITION = ("PV d'audition", "PV d'audition libre", "PV de plainte")
 TYPE_CONFRONTATION = "PV de confrontation"
 
 # Types où le premier nom "Prénom NOM" mentionné dans la pièce désigne sans
@@ -394,7 +402,14 @@ def _enregistrer_personnes_taguees(db: sqlite3.Connection, textes: list[str]) ->
     rattachées par leur en-tête."""
     roles: dict[str, str] = {}
     for texte in textes:
-        for nom, role in _detecter_personnes_avec_role(texte):
+        trouvees = _detecter_personnes_avec_role(texte)
+        if not trouvees:
+            # Sans rôle entre parenthèses : « Personne entendue : NOM
+            # Prénom » sous l'intitulé « AUDITION DE TÉMOIN ».
+            nom, role = personne_du_champ(texte), role_par_intitule(_entete_etendu(texte))
+            if nom and role:
+                trouvees = [(nom, role)]
+        for nom, role in trouvees:
             if PRIORITE_ROLE_TAGUE[role] > PRIORITE_ROLE_TAGUE.get(roles.get(nom, ""), 0):
                 roles[nom] = role
     for nom, role in roles.items():
@@ -417,6 +432,42 @@ def _mots(texte: str) -> frozenset[str]:
     n'apporte rien à la comparaison et ferait échouer un rapprochement par
     ailleurs correct."""
     return frozenset(m.group(0).lower() for m in RE_MOT.finditer(texte) if len(m.group(0)) > 1)
+
+
+def _personne_par_mots(db: sqlite3.Connection, nom: str) -> int | None:
+    """« Kevin LEROY » retrouve « LEROY Kevin » : même ensemble de mots."""
+    mots = _mots(nom)
+    for row in db.execute("SELECT id, nom FROM personnes ORDER BY id"):
+        if _mots(row["nom"]) == mots:
+            return row["id"]
+    return None
+
+
+def _motif_nom(nom: str) -> re.Pattern:
+    """Un nom connu, dans un ordre ou l'autre (« Kevin LEROY », « LEROY
+    Kevin »)."""
+    mots = nom.split()
+    prenoms = [m for m in mots if not m.isupper()]
+    noms = [m for m in mots if m.isupper()]
+    ordres = {" ".join(mots), " ".join(noms + prenoms)}
+    variantes = "|".join(r"\s+".join(re.escape(m) for m in ordre.split()) for ordre in ordres)
+    return re.compile(rf"(?<![\w-])(?:{variantes})(?![\w-])", re.IGNORECASE)
+
+
+def _premier_mis_en_cause_nomme(db: sqlite3.Connection, texte: str) -> tuple[int, int] | None:
+    """(position, id) du premier mis en cause déjà identifié nommé dans le
+    texte, ou None."""
+    meilleur = None
+    for row in db.execute("SELECT id, nom FROM personnes WHERE role = 'mis_en_cause'"):
+        m = _motif_nom(row["nom"]).search(texte)
+        if m and (meilleur is None or m.start() < meilleur[0]):
+            meilleur = (m.start(), row["id"])
+    return meilleur
+
+
+def _position_mention(texte: str, prenom_nom: tuple[str, str]) -> int:
+    m = _motif_nom(f"{prenom_nom[0]} {prenom_nom[1].upper()}").search(texte)
+    return m.start() if m else len(texte)
 
 
 def _upsert_personne(db: sqlite3.Connection, nom: str, role: str) -> int:
@@ -469,8 +520,16 @@ HONORIFIQUES_ABREGES = {"me", "mme", "mlle", "m"}
 # libellé de champ précis plutôt que généralisé à tout le texte : une
 # règle "NOM Prénom" sans ancrage confondrait presque tout titre en
 # capitales suivi d'un mot de la phrase suivante avec un nom de personne.
+#
+# Le libellé varie d'un service à l'autre : « Personne entendue : », « Personne
+# gardée à vue : »… (observé : aucune personne identifiée sur un dossier
+# d'essai écrit comme les vrais PV). L'ordre Prénom NOM y est aussi admis.
+_NOM_MAJUSCULES = r"[A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?"
+_PRENOM = r"[A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?"
 RE_PERSONNE_CHAMP = re.compile(
-    r"\bPersonne\s*:\s*([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
+    r"\bPersonne(?:\s+(?:entendue|auditionn[ée]e|gard[ée]e\s+[àa]\s+vue|interpell[ée]e|concern[ée]e"
+    r"|mise\s+en\s+cause|soup[çc]onn[ée]e))?\s*:\s*"
+    rf"(?:(?P<nom>{_NOM_MAJUSCULES})\s+(?P<prenom>{_PRENOM})|(?P<prenom2>{_PRENOM})\s+(?P<nom2>{_NOM_MAJUSCULES})\b)"
 )
 
 # Autres formulations, tout aussi standard, du même besoin NOM Prénom : "la
@@ -489,10 +548,56 @@ RE_PERSONNE_CHAMP = re.compile(
 # "mis_en_cause" de cette pièce. Ancré sur ces tours de phrase précis
 # plutôt que généralisé à tout "NOM Prénom" du texte, pour la même raison
 # que RE_PERSONNE_CHAMP.
+#
+# « au nommé LEROY Kevin », « du nommé », « la nommée » : même formule,
+# sans le préfixe (observé sur un dossier d'essai écrit comme les vrais PV).
 RE_PERSONNE_DENOMMEE = re.compile(
-    r"\b(?:d[ée]nomm[ée]e?|se\s+nomm(?:e|er|ant))\b[^:\n]{0,20}:?\s+"
+    r"\b(?:d[ée]nomm[ée]e?|se\s+nomm(?:e|er|ant)|(?:au|du|le|la)\s+nomm[ée]e?)\b[^:\n]{0,20}:?\s+"
     r"([A-ZÀ-Ÿ]{2,}(?:-[A-ZÀ-Ÿ]{2,})?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:-[A-ZÀ-Ÿ][a-zà-ÿ]+)?)"
 )
+
+
+def _prenom_nom_du_champ(m: re.Match) -> tuple[str, str]:
+    if m.group("nom"):
+        return m.group("prenom"), m.group("nom")
+    return m.group("prenom2"), m.group("nom2")
+
+
+# « Le 14/03/2031 à 15h00, nous entendons Paul LEROUX, voisin, … » : la
+# formule d'audition nomme la personne entendue (observé : audition de
+# témoin sans déclarant, sur le dossier de contrôle).
+RE_PERSONNE_ENTENDUE = re.compile(
+    r"\b(?:entendons|auditionnons)\s+(?:(?:M\.|Mme|Mlle|Monsieur|Madame|Mademoiselle)\s+)?"
+    rf"(?:(?P<nom>{_NOM_MAJUSCULES})\s+(?P<prenom>{_PRENOM})|(?P<prenom2>{_PRENOM})\s+(?P<nom2>{_NOM_MAJUSCULES})\b)"
+)
+
+
+def personne_du_champ(texte: str) -> str | None:
+    """« Personne entendue : LEROY Kevin » ou « nous entendons Kevin LEROY »
+    -> « Kevin LEROY » : la première des deux formules dans le texte."""
+    trouves = [m for m in (RE_PERSONNE_CHAMP.search(texte), RE_PERSONNE_ENTENDUE.search(texte)) if m]
+    if not trouves:
+        return None
+    prenom, nom = _prenom_nom_du_champ(min(trouves, key=lambda m: m.start()))
+    return f"{prenom} {nom.upper()}"
+
+
+# Rôle que l'intitulé du PV donne à la personne entendue, quand l'en-tête
+# ne l'écrit pas entre parenthèses — le cas des vrais PV : « AUDITION DE
+# PERSONNE GARDÉE À VUE », « DÉPÔT DE PLAINTE », « AUDITION DE TÉMOIN ».
+# L'audition libre (art. 61-1 CPP) est celle d'un suspect. Deux rôles
+# différents dans le même intitulé : aucun n'est retenu.
+ROLES_PAR_INTITULE: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bGARDEE?\s+A\s+VUE\b|\bAUDITION\s+LIBRE\b|\bMIS\s+EN\s+CAUSE\b|\bSUSPECT|\bINTERROGATOIRE\b"), "mis_en_cause"),
+    (re.compile(r"\bDE\s+PLAINTE\b|\bPLAIGNANTE?\b|\bVICTIME\b|\bPARTIE\s+CIVILE\b"), "victime"),
+    (re.compile(r"\bTEMOIN\b"), "témoin"),
+]
+
+
+def role_par_intitule(entete: str) -> str | None:
+    majuscules = _sans_accents(entete.upper())
+    roles = {role for motif, role in ROLES_PAR_INTITULE if motif.search(majuscules)}
+    return roles.pop() if len(roles) == 1 else None
 
 
 def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
@@ -507,7 +612,7 @@ def _premiere_mention_hors_titres(texte: str) -> tuple[str, str] | None:
     est cherchée après ça."""
     m_champ = RE_PERSONNE_CHAMP.search(texte)
     if m_champ:
-        return m_champ.group(2), m_champ.group(1)
+        return _prenom_nom_du_champ(m_champ)
 
     m_denommee = RE_PERSONNE_DENOMMEE.search(texte)
     if m_denommee:
@@ -546,7 +651,16 @@ def _premiere_mention_ou_creation(db: sqlite3.Connection, texte: str, role_par_d
     d'un mot tout en capitales matche par erreur le motif Prénom-NOM, sans
     rapport avec la personne concernée. Observé en réel sur un vrai
     dossier."""
-    trouve = _premiere_mention_hors_titres(texte_sans_entete(texte, _est_titre))
+    texte = texte_sans_entete(texte, _est_titre)
+    trouve = _premiere_mention_hors_titres(texte)
+    # « Notifions à l'intéressé, LEROY Kevin, … », « la garde à vue de LEROY
+    # Kevin » : un mis en cause déjà identifié, écrit NOM Prénom sans
+    # formule d'identité. Retenu s'il est nommé avant toute autre personne ;
+    # une identité déclarée (« Personne : », « dénommé ») prime toujours.
+    ancre = RE_PERSONNE_CHAMP.search(texte) or RE_PERSONNE_DENOMMEE.search(texte)
+    connu = None if ancre else _premier_mis_en_cause_nomme(db, texte)
+    if connu is not None and (trouve is None or connu[0] < _position_mention(texte, trouve)):
+        return connu[1]
     if not trouve:
         return None
     prenom, nom_famille = trouve
@@ -704,6 +818,19 @@ def identifier_personne_principale(
     personne_id = identifier_declarant(db, texte_complet)
     if personne_id is not None:
         return personne_id, "tag_entete"
+
+    # « Personne entendue : NOM Prénom » : l'identité est écrite, le rôle
+    # vient de l'intitulé (ou de la pré-passe, qui a déjà enregistré la
+    # personne). Sans rôle établi, on ne crée personne : le modèle tranche.
+    nom = personne_du_champ(texte_complet)
+    if nom:
+        personne_id = _personne_par_mots(db, nom)
+        if personne_id is None:
+            role = role_par_intitule(_entete_etendu(texte_complet))
+            if role:
+                personne_id = _upsert_personne(db, nom, role)
+        if personne_id is not None:
+            return personne_id, "champ_identite"
 
     if type_piece in TYPES_PERSONNE_PAR_PREMIERE_MENTION:
         personne_id = _premiere_mention_ou_creation(db, texte_complet, "mis_en_cause")

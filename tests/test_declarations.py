@@ -91,3 +91,27 @@ def test_confrontation_chaque_reponse_rattachee_a_son_locuteur(tmp_path) -> None
         ("Karim TALBI", "Il ment pour se protéger."),
     ], "une personne non identifiée au dossier n'est jamais créée"
     assert all(r[2] == "verifie" for r in lignes)
+
+
+def test_questions_reponses_en_capitales_et_abregees(tmp_path) -> None:
+    """« QUESTION : / REPONSE : » en capitales sans accent, comme dans les
+    vrais PV : observé, AUCUNE déclaration extraite d'un dossier d'essai
+    ainsi écrit. Une cote « D 12 » n'est jamais prise pour une question, et
+    une question sur deux lignes reste entière."""
+    from depouille.declarations import _extraire_qr_deterministe
+
+    texte = (
+        "D 12\n"
+        "QUESTION : Votre empreinte a été relevée sur le coffre. Comment\n"
+        "l'expliquez-vous ?\n"
+        "REPONSE : Je suis allé à la pharmacie plusieurs fois.\n"
+        "D : Y êtes-vous entré ?\n"
+        "R : Non, jamais.\n"
+        "RÉPONSE : Je maintiens.\n"
+    )
+    points = _extraire_qr_deterministe([{"numero_global": 3, "texte": texte}])
+    assert [(p["point_factuel"], p["citation"]) for p in points] == [
+        ("votre empreinte a été relevée sur le coffre. comment l'expliquez-vous", "Je suis allé à la pharmacie plusieurs fois."),
+        ("y êtes-vous entré", "Non, jamais."),
+        ("y êtes-vous entré", "Je maintiens."),
+    ]

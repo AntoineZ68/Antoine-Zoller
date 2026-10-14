@@ -34,12 +34,18 @@ from .config import Config
 from .llm import ErreurModeOffline, executer_en_parallele, extraire_json, lots_de_pages, obtenir_provider
 from .verification import _normaliser, verifier_table
 
-RE_QUESTION = re.compile(r"^(?:Question|Q)[.:\s]+(.+)$")
-RE_REPONSE = re.compile(r"^(?:Réponse|R)[.:\s]+(.+)$")
+# « Question : », « QUESTION : », « Q. », « D : » (demande) ; « Réponse : »,
+# « REPONSE : » (capitales sans accent), « R : ». Un dossier d'essai écrit
+# comme les vrais PV — « QUESTION : / REPONSE : » — ne donnait AUCUNE
+# déclaration : la casse exacte était exigée. « D » et « R » seuls
+# demandent une ponctuation suivie d'une lettre : « D 12 » ou « D.3 » est
+# une cote, pas une question.
+RE_QUESTION = re.compile(r"^(?:(?:question|q)[.:\s]+|d\s*[.:\-–—]\s*(?=[^\W\d]))(.+)$", re.IGNORECASE)
+RE_REPONSE = re.compile(r"^(?:(?:r[ée]ponse|r)[.:\s]+|r\s*[.:\-–—]\s*(?=[^\W\d]))(.+)$", re.IGNORECASE)
 # Confrontation : « Question à Yanis BOUCHARD : … », « Réponse de Karim
 # TALBI : … ». Le locuteur est nommé à chaque réponse.
-RE_QUESTION_A = re.compile(r"^Question\s+à\s+([^:]{3,60}?)\s*:\s*(.+)$")
-RE_REPONSE_DE = re.compile(r"^Réponse\s+de\s+([^:]{3,60}?)\s*:\s*(.+)$")
+RE_QUESTION_A = re.compile(r"^Question\s+à\s+([^:]{3,60}?)\s*:\s*(.+)$", re.IGNORECASE)
+RE_REPONSE_DE = re.compile(r"^R[ée]ponse\s+de\s+([^:]{3,60}?)\s*:\s*(.+)$", re.IGNORECASE)
 
 # Rapprochement déterministe minimal entre questions différemment formulées
 # mais portant sur le même point factuel. Volontairement restreint : la
@@ -114,6 +120,15 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
                 and "N° PARQUET" not in ligne
             ):
                 reponse_courante.append(ligne)
+            elif (
+                reponse_courante is None
+                and question_courante is not None
+                and not question_courante.endswith("?")
+                and "N° PARQUET" not in ligne
+            ):
+                # Question sur deux lignes (« … Comment / l'expliquez-vous
+                # ? ») : sans la suite, le point factuel est tronqué.
+                question_courante = f"{question_courante} {ligne}"
 
     _flush()
     return resultats
