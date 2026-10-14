@@ -90,9 +90,10 @@ def test_dossier_dans_la_limite_accepte(api) -> None:
     assert len(supabase.inserts) == 1 and len(envoyes) == 2
 
 
-def test_trop_de_pages_refuse_avec_un_message_clair(api) -> None:
+def test_trop_de_pages_refuse_avec_un_message_clair(api, monkeypatch) -> None:
     """La limite porte sur le dossier entier, tous fichiers confondus."""
     client, supabase, envoyes = api
+    monkeypatch.setattr(main, "LIMITE_PAGES", 150)
     r = _envoyer(client, ("tome1.pdf", _pdf(100)), ("tome2.pdf", _pdf(51)))
     assert r.status_code == 413
     assert "151 pages" in r.json()["detail"] and str(main.LIMITE_PAGES) in r.json()["detail"]

@@ -108,12 +108,16 @@ def _nom_disponible(repertoire: Path, nom_souhaite: str) -> str:
     return f"{tige}_{compteur}{suffixe}"
 
 
-# Taille de dossier prise en charge pour l'instant. Au-delà, le traitement
-# dépasse ce que le serveur actuel tient en un temps raisonnable, et un
-# fichier de plus de 50 Mo est refusé par le Storage en offre gratuite —
-# mieux vaut le dire à l'envoi qu'échouer au bout d'une heure.
+# Taille de dossier prise en charge pour l'instant. Mesuré sur un dossier
+# de 366 pages entièrement numérisées, appli web chargée, une lecture à la
+# fois (cas d'un conteneur à 512 Mo) : 222 Mo de pic, plus ≈ 70 Mo pour
+# Tesseract ; 1,4 s de calcul par page — soit ≈ 1 h 30 sur une instance
+# gratuite de Render (0,1 processeur), ≈ 9 min sur un processeur entier.
+# Au-delà de 400 pages, la durée devient le vrai frein. Un fichier de plus
+# de 50 Mo est refusé par le Storage en offre gratuite : l'avocat envoie
+# alors son dossier en plusieurs PDF (un même dossier en accepte plusieurs).
 # Réglables sans redéploiement de code (variables d'environnement).
-LIMITE_PAGES = int(os.environ.get("LIMITE_PAGES", "150"))
+LIMITE_PAGES = int(os.environ.get("LIMITE_PAGES", "400"))
 LIMITE_MO_PAR_FICHIER = int(os.environ.get("LIMITE_MO_PAR_FICHIER", "50"))
 
 
