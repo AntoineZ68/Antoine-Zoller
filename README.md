@@ -83,6 +83,38 @@ Dans `mon_affaire/out/` :
 - `99_controle.md` — **à lire en premier** : ce qui a été rejeté, ce qui
   manque, ce qu'il faut relire à la main
 
+## Contrôles de procédure
+
+Les actes de garde à vue (placement, droits, avocat, médecin, interprète,
+avis au procureur, audition, perquisition, fouille, prolongation…) sont lus
+par le modèle, puis vérifiés par le code (`src/depouille/actes.py`) : la
+citation doit figurer mot pour mot sur sa page, l'heure dans la citation,
+et chaque précision (« sans interprète », « décidée par l'OPJ », « non
+présenté ») dans la citation ou la phrase qui la suit. Une fiche non
+appuyée est écartée.
+
+Sur ces actes vérifiés, une liste **fermée** de contrôles s'applique par
+règles fixes (`src/depouille/controles.py`, `src/depouille/conformite.py`).
+Chaque signalement dit « à vérifier » et cite l'article, jamais « nullité » :
+
+| Domaine | Contrôle |
+|---|---|
+| Garde à vue | durée > 24 h sans prolongation, > 48 h ; fin, droits, entretien avocat non retrouvés ; avis au procureur non retrouvé |
+| Avocat | première audition moins de 2 h après l'avis à l'avocat (art. 63-4-2) ; audition hors présence de l'avocat demandé |
+| Interprète | audition sans interprète ; interprète demandé, absent de la notification des droits (art. 63-1, 803-5) |
+| Médecin | examen demandé, jamais réalisé |
+| Proches | avis demandé non retrouvé, ou fait plus de 3 h après (art. 63-2) |
+| Fouille | fouille intégrale par un agent et non un officier de police judiciaire (art. 63-7) |
+| Prolongation | décidée par un enquêteur, sans présentation, après l'échéance des 24 h (art. 63 II) |
+| Propos | recueillis hors procès-verbal d'audition |
+| Mineur | personne de moins de 18 ans au placement |
+| Perquisition | avant 6 h ou après 21 h (art. 59) ; en enquête préliminaire sans assentiment ni juge (art. 76) |
+| Chronologie | acte de procédure antérieur à la saisine ; même acte daté différemment selon les pièces |
+
+Les écarts que la loi ne chiffre pas (interpellation → notification du
+placement, début de la mesure → avis au procureur) sont affichés en
+chiffres sur la frise de la garde à vue, sans seuil inventé.
+
 ## Jeu d'essai
 
 Pour générer un faux dossier de procédure entièrement fictif et voir le
