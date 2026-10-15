@@ -16,6 +16,7 @@ concerner personne d'autre. Avec plusieurs gardes à vue, il n'est rattaché
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -35,6 +36,11 @@ NATURES_GAV = (
     "fin_garde_a_vue",
     "avis_avocat",
     "avis_parquet",
+    "demande_interprete",
+    "demande_avis_famille",
+    "avis_famille",
+    "fouille_integrale",
+    "propos_hors_audition",
 )
 # Fenêtre autour de la mesure dans laquelle un acte de la personne est
 # montré sur sa ligne : l'interpellation précède le placement, et une
@@ -77,7 +83,7 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
     colonnes = {r[1] for r in db.execute("PRAGMA table_info(personnes)")}
     champ_client = "pe.est_client" if "est_client" in colonnes else "0"
     lignes = db.execute(
-        f"""SELECT e.nature, e.date, e.heure, e.page, e.citation, e.personne_id,
+        f"""SELECT e.nature, e.date, e.heure, e.page, e.citation, e.personne_id, e.details_json,
                    pe.nom, {champ_client} AS est_client
             FROM evenements_procedure e LEFT JOIN personnes pe ON pe.id = e.personne_id
             WHERE e.statut_verif = 'verifie' AND e.nature IN ({",".join("?" * len(NATURES_GAV))})
@@ -90,7 +96,9 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
     # originaux. Un seul acte daté suffit à revenir au calcul ordinaire.
     sans_date = bool(lignes) and all(not l["date"] for l in lignes) and any(l["heure"] for l in lignes)
     evenements = [
-        dict(l, instant=_instant(JOUR_SUPPOSE if sans_date else l["date"], l["heure"])) for l in lignes
+        dict(l, instant=_instant(JOUR_SUPPOSE if sans_date else l["date"], l["heure"]),
+             details=json.loads(l["details_json"] or "{}"))
+        for l in lignes
     ]
     evenements.sort(key=lambda e: (e["instant"] is None, e["instant"] or datetime.min))
 

@@ -178,6 +178,10 @@ MIGRATIONS = (
     # Intitulé précis de la pièce pour l'index (« Réquisition ORBIS (ligne
     # 14 52) et réponse »), plus parlant que son seul type.
     ("pieces", "titre", "TEXT"),
+    # Précisions vérifiées d'un acte relevé par le modèle (actes.py) : qui
+    # l'accomplit, avocat ou interprète présent ou absent, présentation au
+    # magistrat, assentiment, cadre d'enquête. JSON.
+    ("evenements_procedure", "details_json", "TEXT"),
 )
 
 

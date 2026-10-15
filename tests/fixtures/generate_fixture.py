@@ -209,6 +209,7 @@ def _pieces() -> list[dict]:
                     "des Tanneurs à Vaucressin, son placement en garde à vue.",
                     "Interpellation effectuée le 14/03/2031 à 07h50, 14 rue des "
                     "Tanneurs à Vaucressin.",
+                    "Avis est donné à Monsieur le Procureur de la République à 08h20.",
                 ]
             ],
         },
@@ -306,7 +307,7 @@ def _pieces() -> list[dict]:
             "pages": [
                 [
                     "## PROCÈS-VERBAL DE PROLONGATION DE GARDE À VUE",
-                    "Le 15/03/2031 à 08h10, M. Antoine ROQUIER, Procureur de la "
+                    "Le 15/03/2031 à 07h30, M. Antoine ROQUIER, Procureur de la "
                     "République de Vaucressin, autorise la prolongation de la garde "
                     "à vue de Julien MORVANNEC pour une durée de vingt-quatre heures.",
                 ]

@@ -578,6 +578,11 @@ def lancer_chrono(db: sqlite3.Connection, config: Config, force: bool, console: 
         )
         nb_faits = 0
     else:
+        # Les actes que les règles ci-dessus n'ont pas reconnus (tournures
+        # trop variées) sont relevés par le modèle, puis vérifiés : voir actes.py.
+        from .actes import extraire_actes
+
+        extraire_actes(db, config, pieces, console, compteur)
         nb_faits = _extraire_faits_llm(db, config, pieces, console, compteur)
 
     resume_procedure = verifier_table(db, "evenements_procedure", config.seuil_flou_ocr)

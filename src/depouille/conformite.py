@@ -25,6 +25,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from .controles import controle_mineur, controles_garde_a_vue
+
 SEUIL_GAV_DROIT_COMMUN_H = 24.0
 SEUIL_GAV_PROLONGATION_MAX_H = 48.0
 
@@ -128,6 +130,8 @@ def _signalements_garde_a_vue(db: sqlite3.Connection, gav: dict, suffixe: str, u
             ))
 
     signalements.extend(_signalements_ecarts(gav, suffixe))
+    signalements.extend(controles_garde_a_vue(gav, suffixe))
+    signalements.extend(controle_mineur(db, gav, suffixe))
 
     if "notification_droits" not in natures:
         signalements.append(Signalement(
@@ -241,7 +245,9 @@ def _perquisitions_hors_heures_legales(db: sqlite3.Connection) -> list[Signaleme
 
 
 def detecter_signalements(db: sqlite3.Connection) -> list[Signalement]:
-    return _signalements_garde_a_vue_dossier(db) + _perquisitions_hors_heures_legales(db)
+    from .controles import controles_dossier
+
+    return _signalements_garde_a_vue_dossier(db) + _perquisitions_hors_heures_legales(db) + controles_dossier(db)
 
 
 def _signalements_garde_a_vue_dossier(db: sqlite3.Connection) -> list[Signalement]:
