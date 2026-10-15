@@ -54,6 +54,7 @@ from depouille.build_deliverables import construire_livrables  # noqa: E402
 from depouille.chrono import lancer_chrono  # noqa: E402
 from depouille.classify import lancer_classification  # noqa: E402
 from depouille.config import config_depuis_environnement  # noqa: E402
+from depouille.conformite import detecter_signalements  # noqa: E402
 from depouille.contradictions import discordances_connues, toutes_les_contradictions  # noqa: E402
 from depouille.db import ouvrir_db  # noqa: E402
 from depouille.declarations import lancer_declarations  # noqa: E402
@@ -290,6 +291,19 @@ def controler(db: sqlite3.Connection, resultat: Resultat, config, verite=None) -
             + (f" — manquant : {', '.join(manquants)}" if manquants else "")
             + (f" — à tort : {', '.join(a_tort)}" if a_tort else ""),
         ))
+        # Contrôles de procédure : ceux des règles même hors ligne, ceux
+        # qui lisent les actes relevés par le modèle en ligne seulement.
+        titres_signalements = [s.titre for s in detecter_signalements(db)]
+        attendus = list(verite.signalements_regles) + ([] if config.offline else list(verite.signalements_modele))
+        for attendu in attendus:
+            resultat.qualite.append((
+                f"Signalement attendu : {attendu}",
+                any(t.startswith(attendu) for t in titres_signalements),
+                "; ".join(titres_signalements)[:300] or "aucun signalement",
+            ))
+        for interdit in verite.signalements_jamais:
+            a_tort = [t for t in titres_signalements if t.startswith(interdit)]
+            resultat.qualite.append((f"Jamais signalé à tort : {interdit}", not a_tort, "; ".join(a_tort)))
         gav_par_nom = {cle(g["nom"] or ""): g["duree_minutes"] for g in gardes_a_vue(db)}
         for nom, attendue in verite.durees_gav.items():
             calculee = gav_par_nom.get(cle(nom))

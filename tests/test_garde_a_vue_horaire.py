@@ -171,3 +171,11 @@ def test_perquisition_avant_six_heures_signalee(tmp_path) -> None:
     )
     [s] = [s for s in detecter_signalements(db) if "Perquisition" in s.titre]
     assert s.titre == "Perquisition débutée à 04h20 — hors de la plage 6 h – 21 h" and "article 59" in s.description
+
+
+def test_tache_de_scan_devant_l_intitule() -> None:
+    """« _ PROCÈS-VERBAL D'INTERPELLATION » : la pièce était fondue dans la précédente."""
+    from depouille.classify import _est_titre
+
+    assert _est_titre("_ PROCÈS-VERBAL D'INTERPELLATION")
+    assert not _est_titre("_ texte ordinaire de la page")

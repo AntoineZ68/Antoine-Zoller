@@ -213,8 +213,14 @@ def _sans_suffixe_metadonnee(ligne: str) -> str:
     return RE_SUFFIXE_METADONNEE_COLONNE.sub("", ligne)
 
 
+# Taches de scan lues par l'OCR en bord de ligne : « _ PROCÈS-VERBAL
+# D'INTERPELLATION » n'était plus un intitulé, et la pièce était fondue dans
+# la précédente (observé sur des pages numérisées dégradées).
+PARASITES_BORD_DE_LIGNE = "_|~•*·`¦"
+
+
 def _est_titre(ligne: str) -> bool:
-    ligne = _sans_suffixe_metadonnee(ligne.strip()).strip()
+    ligne = _sans_suffixe_metadonnee(ligne.strip().strip(PARASITES_BORD_DE_LIGNE).strip()).strip()
     return bool(ligne) and len(ligne) >= 8 and bool(RE_TITRE.match(ligne))
 
 

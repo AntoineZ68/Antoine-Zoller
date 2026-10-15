@@ -65,6 +65,13 @@ class VeriteDossier:
     mis_en_cause: tuple[str, ...] = ()
     jamais_mis_en_cause: tuple[str, ...] = ()
     questions: tuple[QuestionAttendue, ...] = ()
+    # Contrôles de procédure attendus (début du titre du signalement) :
+    # par les règles seules (vérifiés même hors ligne), ou avec les actes
+    # relevés par le modèle (en ligne seulement) ; et ceux qui ne doivent
+    # jamais sortir (faux positif connu).
+    signalements_regles: tuple[str, ...] = ()
+    signalements_modele: tuple[str, ...] = ()
+    signalements_jamais: tuple[str, ...] = ()
 
 
 # --- Rendu ---------------------------------------------------------------------
@@ -1893,7 +1900,133 @@ def generer_valmont(dossier: Path) -> VeriteDossier:
     )
 
 
-DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur, generer_armorine, generer_valmont)
+# --- Dossiers « pièges » ---------------------------------------------------------
+# Reprennent les pièges de deux dossiers de test fournis par l'utilisateur
+# (jamais versés au dépôt), réécrits avec d'autres noms et d'autres
+# tournures : des actes horodatés sans date, des pages de remplissage, et
+# des irrégularités apparentes que l'outil doit signaler sans les qualifier.
+
+REMPLISSAGE = (
+    "Conformément aux instructions du magistrat mandant, procédons aux actes d'enquête habituels. " * 9
+).strip()
+
+
+def _remplissage(titre: str, scan: bool | str = False) -> dict:
+    return piece(titre, REMPLISSAGE, scan=scan)
+
+
+def _pieces_nuit() -> list[dict]:
+    return [
+        piece("SYNTHÈSE DE LA PROCÉDURE",
+              "Procédure suivie contre Rachid HAMMOUDI et X. Infraction à la législation sur les stupéfiants. "
+              "Date des faits : mars 2034."),
+        piece("PROCÈS-VERBAL DE SAISINE",
+              "L'an deux mille trente-quatre, Nous, Officier de Police Judiciaire, rapportons les faits suivants : "
+              "Ce jour à 06h15, nous recevons un appel anonyme signalant un trafic au 8 rue des Glycines. Nous "
+              "décidons d'ouvrir une enquête de flagrance et de nous transporter sur les lieux."),
+        _remplissage("ACTE D'ENQUÊTE"),
+        _remplissage("ACTE D'ENQUÊTE", scan="tourne"),
+        piece("PROCÈS-VERBAL D'INTERPELLATION",
+              "A 05h40, nous pénétrons dans l'appartement du 2ème étage. Le nommé Rachid HAMMOUDI est aussitôt "
+              "maîtrisé et menotté ; il est privé de sa liberté d'aller et venir à compter de cet instant.",
+              scan="degrade"),
+        piece("PROCÈS-VERBAL DE PLACEMENT EN GARDE À VUE",
+              "A 07h20, de retour au service, nous notifions au nommé Rachid HAMMOUDI son placement en garde à vue. "
+              "A 07h25, nous lui notifions ses droits. L'intéressé demande l'assistance de Maître Inès ROBIN, avocate."),
+        piece("AVIS À L'AVOCAT ET AU MAGISTRAT",
+              "A 07h35, nous contactons le cabinet de Maître Inès ROBIN pour l'informer de la mesure et de la demande "
+              "d'entretien. A 07h45, nous avisons Madame la Procureure de la République du placement en garde à vue.",
+              scan="degrade"),
+        _remplissage("ACTE D'ENQUÊTE"),
+        piece("PROCÈS-VERBAL D'AUDITION DE M. HAMMOUDI",
+              "A 08h30, nous extrayons le gardé à vue de sa cellule. Constatons que l'avocate n'est pas présente au "
+              "service. Décidons de débuter l'audition sur le fond.",
+              "Question : Reconnaissez-vous les faits ? Réponse : Je ne parlerai qu'en présence de mon avocate."),
+        piece("PROCÈS-VERBAL D'EXPLOITATION DU TÉLÉPHONE",
+              "Mentionnons que, lors de la conduite de l'intéressé vers les geôles, hors procès-verbal d'audition et "
+              "hors la présence de son avocate, nous lui avons demandé le code de son téléphone, qu'il nous a donné "
+              "oralement. Procédons à l'exploitation de l'appareil."),
+        _remplissage("ACTE D'ENQUÊTE"),
+    ]
+
+
+def generer_nuit(dossier: Path) -> VeriteDossier:
+    """Police, actes horodatés sans date : interpellation avant la saisine,
+    audition moins de deux heures après l'avis à l'avocat, code du téléphone
+    obtenu hors audition."""
+    chemin = dossier / "dossier_nuit.pdf"
+    nb, scans = ecrire_dossier(_pieces_nuit(), chemin, "2034/00077")
+    return VeriteDossier(
+        chemin_pdf=chemin, nb_pages=nb, pages_scan=scans,
+        contradictions_par_regles=(("avant la saisine", "05h40", "06h15"),),
+        mis_en_cause=("Rachid HAMMOUDI",),
+        jamais_mis_en_cause=("Inès ROBIN",),
+        signalements_regles=("Audition débutée 55 min après l'avis à l'avocat — moins de 2 h",),
+        signalements_modele=("Propos recueillis hors procès-verbal d'audition",),
+        signalements_jamais=("Avis au procureur non identifié", "Prolongation"),
+    )
+
+
+def _pieces_brigade() -> list[dict]:
+    return [
+        piece("BORDEREAU D'ENVOI - GENDARMERIE NATIONALE",
+              "Unité : brigade de recherches. Affaire : vols aggravés, recel. Mis en cause : Andrei POPESCU. "
+              "Date des faits : 8 février 2034."),
+        _remplissage("ACTE D'ENQUÊTE"),
+        piece("PROCÈS-VERBAL DE PERQUISITION",
+              "L'an deux mille trente-quatre, le 9 février. Agissant en enquête de flagrance. À 05h10, nous nous "
+              "présentons au domicile d'Andrei POPESCU. Procédons à l'ouverture forcée de la porte et débutons les "
+              "opérations de perquisition à 05h15, sans l'assentiment de l'intéressé."),
+        piece("PLACEMENT EN GARDE À VUE",
+              "Le 9 février 2034 à 09h00, notifions à M. Andrei POPESCU, né le 12/02/2016 à Iasi, son placement en "
+              "garde à vue. Droits notifiés à 09h10. L'intéressé déclare : « Je comprends pas bien français, je veux "
+              "un traducteur roumain et voir un médecin. » Nous actons ces demandes.",
+              scan="degrade"),
+        _remplissage("ACTE D'ENQUÊTE"),
+        piece("PROCÈS-VERBAL DE FOUILLE À CORPS INTÉGRALE",
+              "Moi, gendarme adjoint, Agent de Police Judiciaire Adjoint (APJA), vu l'agitation de l'intéressé, je "
+              "procède à une fouille à corps intégrale avec mise à nu, sans découvrir d'objet."),
+        piece("PROCÈS-VERBAL D'AUDITION",
+              "À 13h45, extrayons le mis en cause. L'interprète en langue roumaine n'étant pas joignable avant "
+              "19h00, nous procédons à l'audition en français.",
+              "Question : Reconnaissez-vous le vol ? Réponse : Moi pas comprendre."),
+        piece("AVIS MÉDECIN",
+              "Mentionnons que le médecin de permanence, requis à 09h20, ne s'est pas présenté à 21h00. La mesure se "
+              "poursuit sans examen médical."),
+        _remplissage("ACTE D'ENQUÊTE", scan="degrade"),
+        piece("PROLONGATION DE GARDE À VUE",
+              "Le 10 février 2034 à 08h40. Nous, Officier de Police Judiciaire, décidons de prolonger la garde à vue "
+              "de M. Andrei POPESCU pour vingt-quatre heures. L'intéressé n'a pas été présenté au magistrat."),
+    ]
+
+
+def generer_brigade(dossier: Path) -> VeriteDossier:
+    """Gendarmerie : perquisition de nuit (en flagrance), interprète et
+    médecin demandés, fouille intégrale par un agent, prolongation décidée
+    par l'enquêteur sans présentation, personne mineure."""
+    chemin = dossier / "dossier_brigade.pdf"
+    nb, scans = ecrire_dossier(_pieces_brigade(), chemin, "2034/00102")
+    return VeriteDossier(
+        chemin_pdf=chemin, nb_pages=nb, pages_scan=scans,
+        mis_en_cause=("Andrei POPESCU",),
+        signalements_regles=(
+            "Perquisition débutée à 05h15 — hors de la plage 6 h – 21 h",
+            "Examen médical demandé mais non réalisé",
+            "Personne mineure lors de la garde à vue",
+        ),
+        signalements_modele=(
+            "Audition menée sans interprète",
+            "Interprète demandé — aucun interprète mentionné à la notification des droits",
+            "Fouille intégrale décidée par un agent de police judiciaire",
+            "Prolongation de garde à vue décidée par un enquêteur",
+            "Prolongation sans présentation au magistrat",
+        ),
+        # En flagrance, l'assentiment n'est pas requis ; prolongation à 23 h 40.
+        signalements_jamais=("Perquisition en enquête préliminaire", "Prolongation après l'échéance"),
+    )
+
+
+DOSSIERS_COMPLEXES = (generer_ressac, generer_pasteur, generer_armorine, generer_valmont, generer_nuit, generer_brigade)
 
 
 if __name__ == "__main__":
