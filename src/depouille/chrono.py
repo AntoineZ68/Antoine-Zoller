@@ -299,12 +299,20 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
 _HEURE_NOMMEE = rf"(?P<heure>{FRAGMENT_HEURE})"
 ACTES_HORODATES: tuple[tuple[str, re.Pattern], ...] = (
     ("notification_droits", re.compile(
-        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:lui\s+)?notifions\s+[^.]{{0,40}}?\bdroits\b", re.IGNORECASE)),
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*(?:nous\s+)?(?:lui\s+)?notifions\s+[^.]{{0,40}}?\bdroits\b", re.IGNORECASE)),
+    # « Droits notifiés à 09h05 » (gendarmerie) : l'heure après.
+    ("notification_droits", re.compile(
+        rf"\bdroits\s+(?:lui\s+(?:ont\s+été\s+|sont\s+)?)?notifi[ée]s\s+à\s+{_HEURE_NOMMEE}", re.IGNORECASE)),
+    ("demande_examen_medical", re.compile(
+        rf"m[ée]decins?\b[^.]{{0,30}}?\b(?:contact[ée]|requis|avis[ée]|sollicit[ée])\s+à\s+{_HEURE_NOMMEE}", re.IGNORECASE)),
+    ("debut_perquisition", re.compile(
+        rf"(?:d[ée]butons|commen[çc]ons|proc[ée]dons\s+aux?)\s+(?:les\s+)?(?:op[ée]rations\s+de\s+)?perquisition\w*"
+        rf"\s+à\s+{_HEURE_NOMMEE}", re.IGNORECASE)),
     ("avis_avocat", re.compile(
-        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:contactons|avisons|informons|joignons|appelons|pr[ée]venons)\s+"
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*(?:nous\s+)?(?:contactons|avisons|informons|joignons|appelons|pr[ée]venons)\s+"
         r"[^.]{0,60}?(?:avocat|ma[îi]tre|barreau|permanence)", re.IGNORECASE)),
     ("avis_parquet", re.compile(
-        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:avisons|informons|pr[ée]venons|contactons)\s+"
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*(?:nous\s+)?(?:avisons|informons|pr[ée]venons|contactons)\s+"
         r"[^.]{0,60}?(?:procureur|parquet)", re.IGNORECASE)),
     # « Avis est donné à Madame la Procureure de la République à six heures
     # quarante-cinq » : l'heure après, souvent en lettres.

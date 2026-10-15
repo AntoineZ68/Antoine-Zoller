@@ -132,3 +132,42 @@ def test_juge_d_instruction_n_est_pas_illisible() -> None:
 
     texte = "Conformément aux instructions du magistrat mandant, procédons aux actes de procédure habituels. " * 6
     assert score_illisibilite(texte) < SEUIL_ILLISIBILITE
+
+
+@pytest.mark.parametrize("lu, attendu", [
+    ("À 69h00, notifions", "À 09h00, notifions"),
+    ("Le 16 novembre à 68h30.", "Le 16 novembre à 08h30."),
+    ("À 14F30, extrayons", "À 14h30, extrayons"),
+    ("contacté à €9h10", "contacté à 09h10"),
+    ("à 19h00 et 08h30", "à 19h00 et 08h30"),
+])
+def test_heures_mal_lues_par_l_ocr_corrigees(lu, attendu) -> None:
+    """Observé sur un dossier de gendarmerie scanné : le résumé écrivait
+    « placé en garde à vue à 69h00 »."""
+    from depouille.ingest import corriger_heures_ocr
+
+    assert corriger_heures_ocr(lu) == attendu
+
+
+def test_tournures_de_gendarmerie(tmp_path) -> None:
+    from depouille.chrono import ACTES_HORODATES
+
+    texte = (
+        "Droits notifiés à 09h05. Mentionnons que SOS Médecins, contacté à 09h10, ne s'est toujours pas présenté. "
+        "Pénétrons dans les lieux et débutons les opérations de perquisition à 04h20."
+    )
+    trouves = {n: m.group("heure") for n, motif in ACTES_HORODATES if (m := motif.search(texte))}
+    assert trouves == {"notification_droits": "09h05", "demande_examen_medical": "09h10", "debut_perquisition": "04h20"}
+
+
+def test_perquisition_avant_six_heures_signalee(tmp_path) -> None:
+    from depouille.conformite import detecter_signalements
+
+    db = ouvrir_db(tmp_path / "t.db")
+    db.execute(
+        "INSERT INTO evenements_procedure (nature, date, heure, page, citation, statut_verif) "
+        "VALUES ('debut_perquisition', '15/11/2026', '04h20', 5, 'débutons les opérations de perquisition à 04h20', 'verifie'), "
+        "('debut_perquisition', '16/11/2026', '10h00', 6, 'x', 'verifie')"
+    )
+    [s] = [s for s in detecter_signalements(db) if "Perquisition" in s.titre]
+    assert s.titre == "Perquisition débutée à 04h20 — hors de la plage 6 h – 21 h" and "article 59" in s.description

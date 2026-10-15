@@ -61,7 +61,7 @@ RE_COTE = re.compile(
 # milieu d'une page, une ligne isolée « B 02 » est bien plus souvent un
 # débris de texte pivoté ou de tableau (observé sur une facture saisie)
 # qu'une cote.
-RE_TAMPON_COTE = re.compile(r"^([A-D])\s?[.\-]?\s?(\d{1,5})(?:\s?/\s?(\d{1,4}))?$")
+RE_TAMPON_COTE = re.compile(r"^([A-DP])\s?[.\-]?\s?(\d{1,5})(?:\s?/\s?(\d{1,4}))?$")
 LIGNES_DE_MARGE = 3
 RE_NUM_PROCEDURE = re.compile(r"N[°ºo]\s*PARQUET\s*([\d/]+)", re.IGNORECASE)
 RE_DATE = re.compile(FRAGMENT_DATE, re.IGNORECASE)
@@ -413,7 +413,7 @@ LONGUEUR_OUVERTURE = 400
 # En tête de ligne, et suivi de l'enquêteur qui agit (« nous ») : « A 23h10
 # il revient », au fil d'une déposition, n'est pas l'ouverture de l'acte.
 RE_OUVERTURE_HEURE_SEULE = re.compile(
-    rf"(?:(?m:^)\s*[AÀ]|\b[Cc]e\s+jour\s+[àa])\s+{FRAGMENT_HEURE}\b(?=[^.\n]{{0,60}}?\bnous\b)"
+    rf"(?:(?m:^)\s*[AÀ]|\b[Cc]e\s+jour\s+[àa])\s+{FRAGMENT_HEURE}\b(?=[^.\n]{{0,60}}?\b(?:nous|[a-zéè]{{3,}}ons)\b)"
 )
 
 

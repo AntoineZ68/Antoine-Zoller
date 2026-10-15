@@ -72,7 +72,32 @@ def _fusionner(texte_natif: str, texte_ocr: str) -> str:
     caractères, typiquement la cote « D12 » apposée numériquement, que le
     rendu pour l'OCR retire — voir _rendre_page) précède le texte reconnu."""
     natif = texte_natif.strip()
+    texte_ocr = corriger_heures_ocr(texte_ocr)
     return f"{natif}\n{texte_ocr}" if natif else texte_ocr
+
+
+# Confusions de l'OCR sur les heures, observées sur un dossier de test
+# scanné : « 69h00 », « 68h30 » (0 lu 6 ou 8), « €9h10 », « 14F30 ». Une
+# heure impossible (au-delà de 23) dont le premier chiffre est une forme
+# voisine du zéro redevient 0X ; un « F » entre deux nombres d'heure redevient
+# « h ». Sans cela, le résumé écrivait « placé en garde à vue à 69h00 » et
+# aucun acte de garde à vue n'était reconnu.
+RE_HEURE_ZERO_MAL_LU = re.compile(r"(?<![\d\w])([€6890Oo])(\d)\s*h\s*(\d{2})(?!\d)")
+RE_HEURE_F = re.compile(r"(?<![\d\w])(\d{1,2})[Ff](\d{2})(?!\d)")
+
+
+def corriger_heures_ocr(texte: str) -> str:
+    def zero(m: re.Match) -> str:
+        if m.group(1) in "0" or (m.group(1).isdigit() and int(m.group(1) + m.group(2)) <= 23):
+            return m.group(0)
+        return f"0{m.group(2)}h{m.group(3)}"
+
+    def heure_f(m: re.Match) -> str:
+        if int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            return m.group(0)
+        return f"{m.group(1)}h{m.group(2)}"
+
+    return RE_HEURE_F.sub(heure_f, RE_HEURE_ZERO_MAL_LU.sub(zero, texte))
 
 
 def _extraire_textes_natifs(chemin_pdf: Path, numeros: set[int] | None = None) -> list[str]:

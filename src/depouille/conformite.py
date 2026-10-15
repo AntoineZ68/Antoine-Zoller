@@ -213,7 +213,38 @@ def _signalements_ecarts(gav: dict, suffixe: str) -> list[Signalement]:
     return signalements
 
 
+def _perquisitions_hors_heures_legales(db: sqlite3.Connection) -> list[Signalement]:
+    """Heures fixées en chiffres par la loi : une perquisition ne peut
+    commencer avant 6 h ni après 21 h (art. 59 CPP), hors exceptions
+    (assentiment, régimes dérogatoires). Observé : perquisition débutée à
+    04h20 sur un dossier de test, non signalée."""
+    signalements = []
+    for e in db.execute(
+        "SELECT * FROM evenements_procedure WHERE nature = 'debut_perquisition' AND statut_verif = 'verifie' AND heure IS NOT NULL"
+    ):
+        try:
+            heures, minutes = (int(x) for x in e["heure"].split("h"))
+        except ValueError:
+            continue
+        if heures < 6 or (heures, minutes) > (21, 0):
+            signalements.append(Signalement(
+                titre=f"Perquisition débutée à {e['heure']} — hors de la plage 6 h – 21 h",
+                description=(
+                    f"La perquisition commence à {e['heure']} (page {e['page']}). L'article 59 du code de "
+                    "procédure pénale interdit de commencer une perquisition avant 6 heures et après 21 heures, "
+                    "sauf exceptions (réclamation de l'occupant, régimes dérogatoires) — à vérifier."
+                ),
+                page_reference=e["page"],
+                citation_reference=e["citation"],
+            ))
+    return signalements
+
+
 def detecter_signalements(db: sqlite3.Connection) -> list[Signalement]:
+    return _signalements_garde_a_vue_dossier(db) + _perquisitions_hors_heures_legales(db)
+
+
+def _signalements_garde_a_vue_dossier(db: sqlite3.Connection) -> list[Signalement]:
     from .gardes_a_vue import gardes_a_vue
 
     toutes = gardes_a_vue(db)
