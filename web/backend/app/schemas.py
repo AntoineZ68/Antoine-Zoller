@@ -206,6 +206,14 @@ class GardeAVue(BaseModel):
     delai_notification_minutes: int | None = None
     delai_examen_medical_minutes: int | None = None
     delai_entretien_avocat_minutes: int | None = None
+    # Écarts tirés des pièces, sans seuil : interpellation -> notification du
+    # placement, début de la mesure -> avis au procureur, avis à l'avocat ->
+    # première audition.
+    delai_interpellation_placement_minutes: int | None = None
+    delai_avis_parquet_minutes: int | None = None
+    delai_avis_avocat_audition_minutes: int | None = None
+    # Aucune pièce datée : heures placées sur une même journée.
+    heures_sans_date: bool = False
     # Actes sans personne identifiée, rattachés parce que c'est la seule
     # garde à vue du dossier.
     actes_sans_personne_rattaches: bool = False

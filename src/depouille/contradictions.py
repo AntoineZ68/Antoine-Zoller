@@ -196,8 +196,78 @@ def _identifiants_proches(db: sqlite3.Connection) -> list[Contradiction]:
     return resultats
 
 
+LIBELLES_ACTES = {
+    **ACTES_UNIQUES,
+    "debut_audition": "Audition",
+    "avis_avocat": "Avis à l'avocat",
+    "avis_parquet": "Avis au procureur",
+    "debut_perquisition": "Perquisition",
+}
+
+
+def _actes_avant_saisine(db: sqlite3.Connection) -> list[Contradiction]:
+    """Un acte de procédure horodaté AVANT le PV de saisine qui ouvre
+    l'enquête : interpellation à 05h52, saisine du service à 06h00 (observé
+    sur un dossier de test). Le modèle ne le relevait qu'un passage sur
+    deux ; c'est une comparaison d'heures, elle revient aux règles. Sans
+    aucune date dans le dossier, les heures sont comparées sur une même
+    journée, et la description le dit."""
+    from .chrono import _chercher_ouverture_acte_sur_pages
+    from .gardes_a_vue import _instant
+
+    saisine = db.execute(
+        "SELECT * FROM pieces WHERE type = 'PV de saisine' ORDER BY page_debut LIMIT 1"
+    ).fetchone()
+    if saisine is None:
+        return []
+    pages = db.execute(
+        "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
+        (saisine["page_debut"], saisine["page_fin"]),
+    ).fetchall()
+    ouverture = _chercher_ouverture_acte_sur_pages(pages)
+    if ouverture is None or not ouverture[2]:
+        return []
+    page_s, date_s, heure_s, citation_s = ouverture
+    actes = db.execute(
+        f"""SELECT e.nature, e.date, e.heure, e.page, e.citation, pi.type AS type_piece, pi.cote
+            FROM evenements_procedure e LEFT JOIN pieces pi ON pi.id = e.piece_id
+            WHERE e.statut_verif = 'verifie' AND e.heure IS NOT NULL
+              AND e.nature IN ({",".join("?" * len(LIBELLES_ACTES))})
+            ORDER BY e.page""",
+        tuple(LIBELLES_ACTES),
+    ).fetchall()
+    sans_date = not date_s and all(not a["date"] for a in actes)
+    if not sans_date and not date_s:
+        return []
+    jour = "01/01/2000" if sans_date else None
+    debut = _instant(jour or date_s, heure_s)
+    libelle_s = _libelle_piece(saisine["type"], saisine["cote"])
+    resultats, vus = [], set()
+    for acte in actes:
+        instant = _instant(jour or acte["date"], acte["heure"])
+        if instant is None or debut is None or instant >= debut or acte["nature"] in vus:
+            continue
+        vus.add(acte["nature"])
+        libelle_a = _libelle_piece(acte["type_piece"], acte["cote"])
+        resultats.append(Contradiction(
+            domaine="procedure",
+            titre=f"{LIBELLES_ACTES[acte['nature']]} à {acte['heure']}, avant la saisine à {heure_s}",
+            description=(
+                f"{libelle_a} : {_moment(acte['date'], acte['heure'], True)} ; {libelle_s} : "
+                f"{_moment(date_s, heure_s, True)}. Un acte placé avant la saisine qui ouvre l'enquête — "
+                "erreur de plume ou chronologie à reconstituer, à vérifier."
+                + (" Les pièces ne portent pas de date : heures comparées sur une même journée." if sans_date else "")
+            ),
+            sources=[
+                {"libelle": libelle_s, "page": page_s, "citation": citation_s},
+                {"libelle": libelle_a, "page": acte["page"], "citation": acte["citation"]},
+            ],
+        ))
+    return resultats
+
+
 def contradictions_par_regles(db: sqlite3.Connection) -> list[Contradiction]:
-    return _actes_dates_differemment(db) + _identifiants_proches(db)
+    return _actes_dates_differemment(db) + _actes_avant_saisine(db) + _identifiants_proches(db)
 
 
 def discordances_connues(db: sqlite3.Connection) -> list[tuple[str, list[str]]]:

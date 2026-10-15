@@ -265,8 +265,53 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
             r = _chercher_sur_pages(pages, RE_AUDITION_FIN)
             if r:
                 ajouter("fin_audition", r, None, 1)
+        # Sans « audition débutée à », l'audition commence à l'ouverture du
+        # PV (« L'an…, le quatre mars, à dix heures cinq », « A 08h50, nous
+        # extrayons le gardé à vue ») : sans elle, l'audition n'apparaissait
+        # pas sur la frise de la garde à vue.
+        if not any(e["nature"] == "debut_audition" for e in evenements):
+            r_ouverture = _chercher_ouverture_acte_sur_pages(pages)
+            if r_ouverture and r_ouverture[2]:
+                page, date, heure, citation = r_ouverture
+                evenements.append({"nature": "debut_audition", "date": date, "heure": heure, "page": page,
+                                   "citation": citation, "personne_id": personne_id})
+
+    # Actes horodatés au fil du texte, quelle que soit la pièce : un même PV
+    # relate souvent la notification des droits, l'avis à l'avocat et l'avis
+    # au procureur (« A 07h42, nous contactons la permanence du cabinet de
+    # Maître X… A 07h50, nous avisons Monsieur le Procureur… »). La date,
+    # jamais écrite dans ces phrases, est celle de la pièce, ou aucune.
+    for nature, motif in ACTES_HORODATES:
+        if any(e["nature"] == nature for e in evenements):
+            continue
+        r = _chercher_sur_pages(pages, motif)
+        if not r:
+            continue
+        page, m, citation = r
+        heure = _normaliser_heure_libre(m.group("heure"))
+        if heure:
+            evenements.append({"nature": nature, "date": piece["date_apparente"], "heure": heure, "page": page,
+                               "citation": citation, "personne_id": personne_id})
 
     return evenements
+
+
+_HEURE_NOMMEE = rf"(?P<heure>{FRAGMENT_HEURE})"
+ACTES_HORODATES: tuple[tuple[str, re.Pattern], ...] = (
+    ("notification_droits", re.compile(
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:lui\s+)?notifions\s+[^.]{{0,40}}?\bdroits\b", re.IGNORECASE)),
+    ("avis_avocat", re.compile(
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:contactons|avisons|informons|joignons|appelons|pr[ée]venons)\s+"
+        r"[^.]{0,60}?(?:avocat|ma[îi]tre|barreau|permanence)", re.IGNORECASE)),
+    ("avis_parquet", re.compile(
+        rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*nous\s+(?:avisons|informons|pr[ée]venons|contactons)\s+"
+        r"[^.]{0,60}?(?:procureur|parquet)", re.IGNORECASE)),
+    # « Avis est donné à Madame la Procureure de la République à six heures
+    # quarante-cinq » : l'heure après, souvent en lettres.
+    ("avis_parquet", re.compile(
+        r"\bavis\s+(?:est\s+|a\s+été\s+)?donn[ée]\s+[^.]{0,40}?procureure?\b[^.]{0,60}?\bà\s+(?P<heure>[^.,;\n]{1,40})",
+        re.IGNORECASE)),
+)
 
 
 def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:

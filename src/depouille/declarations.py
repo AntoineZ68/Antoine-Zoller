@@ -67,6 +67,30 @@ def _reponse_terminee(fragments: list[str]) -> bool:
     return fragments[-1].rstrip().endswith((".", "?", "!"))
 
 
+# « … dans le trafic de stupéfiants ? Réponse : Je n'ai rien à dire » : la
+# réponse commence au milieu d'une ligne (texte justifié, scan). Sans coupure
+# ici, la pièce passait pour narrative, et le modèle prenait le récit de
+# l'enquêteur (« Décidons néanmoins de débuter l'audition ») pour les
+# déclarations de la personne entendue (observé, dossier de test).
+RE_QR_EN_LIGNE = re.compile(r"(?<=[?.!»])\s+(?=(?:Question|QUESTION|Réponse|REPONSE|RÉPONSE)\s*:)")
+
+
+def _lignes_qr(texte: str) -> list[str]:
+    lignes = []
+    for ligne in texte.splitlines():
+        lignes.extend(RE_QR_EN_LIGNE.split(ligne))
+    return lignes
+
+
+# Phrase de l'enquêteur, jamais déclaration de la personne entendue :
+# « Constatons… », « Décidons… », « A 08h50, nous extrayons… ».
+RE_VOIX_ENQUETEUR = re.compile(
+    r"^\W*(?:[AÀ]\s+\d{1,2}\s*h\s*\d{2}\s*,\s*)?(?:nous\b|constatons|d[ée]cidons|mentionnons|proc[ée]dons|"
+    r"notifions|avisons|disons|relevons|requ[ée]rons|transportons|interpellons|informons|extrayons)",
+    re.IGNORECASE,
+)
+
+
 def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
     """Une réponse peut être répartie sur plusieurs lignes visuelles du PDF
     (retour à la ligne dû à la largeur de mise en page) : on recolle les
@@ -91,7 +115,7 @@ def _extraire_qr_deterministe(pages: list[sqlite3.Row]) -> list[dict]:
             resultats.append(point)
 
     for page in pages:
-        for ligne in page["texte"].splitlines():
+        for ligne in _lignes_qr(page["texte"]):
             ligne = ligne.strip()
             if not ligne:
                 continue
@@ -142,7 +166,9 @@ PROMPT_EXTRACTION_DECLARATIONS = (
     "rien. Le texte peut provenir d'une page numérisée mal reconnue : n'extrais "
     "que ce que tu peux citer mot pour mot tel qu'écrit, sans corriger ni "
     "deviner ; si un passage est trop dégradé pour être cité fidèlement, ne "
-    "l'extrais pas. Réponds en JSON : une liste d'objets "
+    "l'extrais pas. N'extrais JAMAIS ce qu'écrit l'enquêteur (« nous constatons », "
+    "« décidons », « nous notifions »…) : seulement les propos de la personne entendue. "
+    "Réponds en JSON : une liste d'objets "
     '{"page": int, "citation": "...", "point_factuel": "..."}.'
 )
 
@@ -263,7 +289,10 @@ def lancer_declarations(db: sqlite3.Connection, config: Config, force: bool, con
                             if pages_pour_le_modele else [])
     for piece, personne_id, points in a_enregistrer:
         if points is None:
-            points = next(points_du_modele)
+            points = [
+                p for p in next(points_du_modele)
+                if isinstance(p, dict) and not RE_VOIX_ENQUETEUR.match(str(p.get("citation", "")))
+            ]
             nb_llm += len(points)
         for point in points:
             db.execute(

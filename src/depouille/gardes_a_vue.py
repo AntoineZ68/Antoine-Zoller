@@ -33,11 +33,14 @@ NATURES_GAV = (
     "fin_perquisition",
     "prolongation_garde_a_vue",
     "fin_garde_a_vue",
+    "avis_avocat",
+    "avis_parquet",
 )
 # Fenêtre autour de la mesure dans laquelle un acte de la personne est
 # montré sur sa ligne : l'interpellation précède le placement, et une
 # garde à vue sans fin retrouvée ne dure pas indéfiniment.
 AVANT_PLACEMENT = timedelta(hours=6)
+JOUR_SUPPOSE = "01/01/2000"
 SANS_FIN_RETROUVEE = timedelta(hours=96)
 
 
@@ -81,7 +84,14 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
             ORDER BY e.id""",
         NATURES_GAV,
     ).fetchall()
-    evenements = [dict(l, instant=_instant(l["date"], l["heure"])) for l in lignes]
+    # Aucun acte daté, mais des heures (« A 07h30, nous notifions… ») : les
+    # actes sont placés sur une même journée, et chaque garde à vue le dit
+    # (heures_sans_date) — un écart calculé ainsi est à vérifier sur les
+    # originaux. Un seul acte daté suffit à revenir au calcul ordinaire.
+    sans_date = bool(lignes) and all(not l["date"] for l in lignes) and any(l["heure"] for l in lignes)
+    evenements = [
+        dict(l, instant=_instant(JOUR_SUPPOSE if sans_date else l["date"], l["heure"])) for l in lignes
+    ]
     evenements.sort(key=lambda e: (e["instant"] is None, e["instant"] or datetime.min))
 
     placements: dict[int | None, dict] = {}
@@ -105,6 +115,16 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
         ]
         demande_medecin = _premier(siens, "demande_examen_medical", apres=debut)
         demande_avocat = _premier(siens, "demande_entretien_avocat", apres=debut)
+        # La privation de liberté commence à l'interpellation quand elle
+        # précède la notification du placement : c'est de là que courent
+        # l'avis au procureur et l'écart avec la notification.
+        interpellation = next(
+            (e for e in siens if e["nature"] == "interpellation" and e["instant"] and debut and e["instant"] <= debut),
+            None,
+        )
+        debut_mesure = interpellation or placement
+        avis_avocat = _premier(siens, "avis_avocat", apres=debut_mesure["instant"])
+        audition = _premier(siens, "debut_audition", apres=avis_avocat and avis_avocat["instant"])
         resultat.append({
             "personne_id": personne_id,
             "nom": placement["nom"],
@@ -119,6 +139,14 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
             "delai_entretien_avocat_minutes": _minutes(
                 demande_avocat, _premier(siens, "realisation_entretien_avocat", apres=demande_avocat and demande_avocat["instant"])
             ),
+            "interpellation": interpellation,
+            "delai_interpellation_placement_minutes": _minutes(interpellation, placement) if interpellation else None,
+            "avis_parquet": _premier(siens, "avis_parquet", apres=debut_mesure["instant"]),
+            "delai_avis_parquet_minutes": _minutes(debut_mesure, _premier(siens, "avis_parquet", apres=debut_mesure["instant"])),
+            "avis_avocat": avis_avocat,
+            "audition_apres_avis_avocat": audition if avis_avocat else None,
+            "delai_avis_avocat_audition_minutes": _minutes(avis_avocat, audition) if avis_avocat else None,
+            "heures_sans_date": sans_date,
             "evenements": visibles,
             "actes_sans_personne_rattaches": une_seule and any(e["personne_id"] is None for e in siens),
         })

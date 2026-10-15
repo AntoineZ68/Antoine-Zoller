@@ -127,6 +127,8 @@ def _signalements_garde_a_vue(db: sqlite3.Connection, gav: dict, suffixe: str, u
                 **reference,
             ))
 
+    signalements.extend(_signalements_ecarts(gav, suffixe))
+
     if "notification_droits" not in natures:
         signalements.append(Signalement(
             titre=f"Notification des droits non identifiée{suffixe}",
@@ -164,6 +166,50 @@ def _signalements_garde_a_vue(db: sqlite3.Connection, gav: dict, suffixe: str, u
                 page_reference=evt["page"],
                 citation_reference=evt["citation"],
             ))
+    return signalements
+
+
+# Délai fixé en chiffres par la loi : la première audition d'une personne
+# qui a demandé un avocat ne peut débuter hors sa présence avant deux heures
+# après l'avis adressé à celui-ci (art. 63-4-2 CPP), sauf autorisation.
+DELAI_AVOCAT_AVANT_AUDITION_MIN = 120
+
+
+def _signalements_ecarts(gav: dict, suffixe: str) -> list[Signalement]:
+    """Seul écart horaire signalé : celui que la loi chiffre (deux heures
+    avant la première audition). Les autres (interpellation -> placement,
+    début de la mesure -> avis au procureur) sont affichés en chiffres sur
+    la frise de la garde à vue, sans seuil : la loi dit « dès le début »,
+    « immédiatement », et un seuil inventé signalerait à tort le simple
+    temps de transport de tout dossier ordinaire."""
+    from .gardes_a_vue import formater_duree
+
+    signalements: list[Signalement] = []
+    note = (
+        " Les pièces ne portent pas de date : les heures sont placées sur une même journée — "
+        "à vérifier sur les originaux."
+        if gav.get("heures_sans_date") else ""
+    )
+
+    avis_avocat, audition = gav.get("avis_avocat"), gav.get("audition_apres_avis_avocat")
+    delai = gav.get("delai_avis_avocat_audition_minutes")
+    entretien_avant = any(
+        e["nature"] == "realisation_entretien_avocat" and e["instant"] and audition and audition["instant"]
+        and e["instant"] <= audition["instant"]
+        for e in gav["evenements"]
+    )
+    if avis_avocat and audition and delai is not None and delai < DELAI_AVOCAT_AVANT_AUDITION_MIN and not entretien_avant:
+        signalements.append(Signalement(
+            titre=f"Audition débutée {formater_duree(delai)} après l'avis à l'avocat — moins de 2 h{suffixe}",
+            description=(
+                f"L'avocat est avisé à {avis_avocat['heure']} (page {avis_avocat['page']}) ; l'audition débute à "
+                f"{audition['heure']} (page {audition['page']}), sans entretien avec l'avocat retrouvé avant elle. "
+                "L'article 63-4-2 du code de procédure pénale prévoit un délai de deux heures après l'avis à "
+                f"l'avocat avant une première audition hors sa présence, sauf exceptions — à vérifier.{note}"
+            ),
+            page_reference=audition["page"],
+            citation_reference=audition["citation"],
+        ))
     return signalements
 
 

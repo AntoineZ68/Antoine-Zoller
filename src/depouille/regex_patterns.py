@@ -396,7 +396,25 @@ def detecter_ouverture_acte(texte: str) -> tuple[str | None, str | None, re.Matc
     if m:
         return normaliser_date(m.group(1)), normaliser_heure(m.group(2)), m
 
+    # Dernier recours : l'acte s'ouvre sur son heure seule (« A 07h30, de
+    # retour au service, nous notifions… », « Ce jour à 06h00, nous
+    # recevons… »), la date étant portée par l'en-tête de la procédure ou
+    # sous-entendue (« ce jour »). Sans cela, aucun acte de garde à vue d'un
+    # dossier de test ainsi rédigé n'était daté : ni durée, ni délai. Heure
+    # rendue sans date — jamais une date devinée.
+    m = RE_OUVERTURE_HEURE_SEULE.search(texte[:LONGUEUR_OUVERTURE])
+    if m:
+        return None, normaliser_heure(m.group(1)), m
+
     return None, None, None
+
+
+LONGUEUR_OUVERTURE = 400
+# En tête de ligne, et suivi de l'enquêteur qui agit (« nous ») : « A 23h10
+# il revient », au fil d'une déposition, n'est pas l'ouverture de l'acte.
+RE_OUVERTURE_HEURE_SEULE = re.compile(
+    rf"(?:(?m:^)\s*[AÀ]|\b[Cc]e\s+jour\s+[àa])\s+{FRAGMENT_HEURE}\b(?=[^.\n]{{0,60}}?\bnous\b)"
+)
 
 
 def detecter_date_heure_acte(texte: str) -> tuple[str | None, str | None]:

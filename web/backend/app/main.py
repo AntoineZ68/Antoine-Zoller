@@ -518,6 +518,10 @@ def donnees_dossier(dossier_id: str, contexte: tuple[Client, str] = Depends(_con
                     "delai_notification_minutes": g["delai_notification_minutes"],
                     "delai_examen_medical_minutes": g["delai_examen_medical_minutes"],
                     "delai_entretien_avocat_minutes": g["delai_entretien_avocat_minutes"],
+                    "delai_interpellation_placement_minutes": g["delai_interpellation_placement_minutes"],
+                    "delai_avis_parquet_minutes": g["delai_avis_parquet_minutes"],
+                    "delai_avis_avocat_audition_minutes": g["delai_avis_avocat_audition_minutes"],
+                    "heures_sans_date": g["heures_sans_date"],
                     "actes_sans_personne_rattaches": g["actes_sans_personne_rattaches"],
                     "evenements": [_acte(e) for e in g["evenements"]],
                 }

@@ -42,6 +42,11 @@ RE_CHIFFRE_DANS_MOT = re.compile(f"[{MAJUSCULES}{MINUSCULES}][0-9]+[{MAJUSCULES}
 # « Marchand ». Le français n'en produit pratiquement pas.
 CONSONNES = "bcdfghjklmnpqrstvwxzßçñBCDFGHJKLMNPQRSTVWXZÇÑ"
 RE_SUITE_CONSONNES = re.compile(f"[{CONSONNES}]{{4}}")
+# Sauf les rares groupes que le français écrit vraiment : « instruction »,
+# « inscrire », « obstruction », « transcription ». Sans eux, une page qui
+# cite trois fois le juge d'instruction passait pour illisible (observé :
+# vingt pages parfaitement lues signalées sur un dossier de test).
+GROUPES_CONSONNES_LEGITIMES = re.compile(r"nstr|nscr|bstr|bscr|rstr|ctr|ngtr|mpt|rchr", re.IGNORECASE)
 VOYELLES = set("aeiouyàâäéèêëîïôöùûüÿæœAEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜŸÆŒ")
 # Caractères qu'un OCR fabrique en interprétant du bruit. « ° » en est
 # volontairement absent : « N° PARQUET » figure sur presque chaque page d'un
@@ -73,7 +78,7 @@ def score_illisibilite(texte: str) -> float:
 
     casse_interne = sum(1 for m in mots if RE_CASSE_INTERNE.search(m)) / n
     chiffre_dans_mot = sum(1 for m in mots if RE_CHIFFRE_DANS_MOT.search(m)) / n
-    suite_consonnes = sum(1 for m in mots if RE_SUITE_CONSONNES.search(m)) / n
+    suite_consonnes = sum(1 for m in mots if RE_SUITE_CONSONNES.search(GROUPES_CONSONNES_LEGITIMES.sub("", m))) / n
     parasites = sum(1 for m in mots if CARACTERES_PARASITES & set(m)) / n
     # Un mot de trois LETTRES ou plus sans aucune voyelle n'existe
     # pratiquement pas en français. Compter les caractères plutôt que les

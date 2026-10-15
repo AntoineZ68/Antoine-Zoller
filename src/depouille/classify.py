@@ -42,6 +42,7 @@ CATEGORIES = [
     "PV de perquisition",
     "PV de saisie",
     "PV de constatations",
+    "PV de saisine",
     "PV de synthèse",
     "PV de confrontation",
     "PV de renseignement",
@@ -87,6 +88,10 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     # même document. Vérifié après les règles plus spécifiques ci-dessus
     # (prolongation, fin) pour ne jamais les court-circuiter.
     (["PLACEMENT", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
+    # Avant les autres mots-clés : « PROCÈS-VERBAL DE SAISINE ET DE
+    # CONSTATATIONS » ouvre la procédure ; c'est l'acte de référence de la
+    # chronologie (voir contradictions._actes_avant_saisine).
+    (["VERBAL DE SAISINE"], "PV de saisine"),
     (["INTERPELLATION"], "PV d'interpellation"),
     (["SURVEILLANCE"], "PV de surveillance"),
     (["CERTIFICAT MÉDICAL"], "Certificat médical"),
@@ -264,6 +269,21 @@ def _entete_etendu(texte_page: str) -> str:
 
 
 NB_LIGNES_EXAMINEES_FRONTIERE = 3
+# Les bandes noires d'un scan (bord de page, agrafe, ombre de la vitre)
+# sont lues par l'OCR comme de courtes lignes de charabia (« RE », « il »,
+# « En 27 | ») en tête de page : elles repoussaient l'intitulé au-delà des
+# lignes examinées, et la pièce était fondue dans la précédente (observé :
+# l'avis à l'avocat et au procureur, et l'exploitation d'un téléphone,
+# perdus dans leurs voisines sur un dossier de test de 30 pages).
+NB_LIGNES_BRUIT_MAX = 6
+RE_MOT_PLEIN = re.compile(r"[A-Za-zÀ-ÿ]{3,}")
+
+
+def _bruit_de_scan(ligne: str) -> bool:
+    """Ligne courte sans aucun mot de trois lettres : bruit d'OCR, ou cote
+    seule (« D.09 »), qui ne décide jamais d'une frontière."""
+    ligne = ligne.strip()
+    return len(ligne) < 12 and not RE_MOT_PLEIN.search(ligne.replace("COTE", ""))
 
 
 def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
@@ -292,7 +312,10 @@ def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
     pieces: list[dict] = []
     for page in pages:
         nouveau_fichier = bool(pieces) and page["fichier_source"] != pieces[-1]["pages"][-1]["fichier_source"]
-        premieres_lignes = [l for l in page["texte"].splitlines() if l.strip()][:NB_LIGNES_EXAMINEES_FRONTIERE]
+        premieres_lignes = [
+            l for l in page["texte"].splitlines()[:NB_LIGNES_BRUIT_MAX + NB_LIGNES_EXAMINEES_FRONTIERE * 2]
+            if l.strip() and not _bruit_de_scan(l)
+        ][:NB_LIGNES_EXAMINEES_FRONTIERE]
         nouvelle_piece = not pieces or nouveau_fichier or any(_est_titre(l) for l in premieres_lignes)
         if nouvelle_piece:
             pieces.append({"page_debut": page["numero_global"], "page_fin": page["numero_global"], "pages": [page]})
