@@ -143,18 +143,41 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
     from .contradictions import discordances_connues  # import ici : évite un cycle au chargement
 
     discordances = discordances_connues(db)
+    prompt = (
+        f"{contexte_client}Question de l'avocat : {question}{bloc_discordances(discordances)}"
+        f"\n\nPages du dossier :\n{texte}"
+    )
+    resultat, problemes = _essai(db, config, question, prompt, pages, discordances)
+    # Un élément de la réponse absent des pages citées (observé : une date
+    # ajoutée de mémoire, « le 13/03/2031 », une fois sur quatre) : un
+    # second essai, motif à l'appui. S'il n'est pas meilleur, l'avocat garde
+    # les seuls passages vérifiés.
+    if problemes:
+        second, _ = _essai(
+            db, config, question,
+            f"{prompt}\n\nTa réponse précédente a été écartée : {'; '.join(problemes)}. N'écris que ce que "
+            "disent les pages que tu cites : retire l'élément, ou cite la page qui le contient.",
+            pages, discordances,
+        )
+        if second["statut"] == "sourcee":
+            return second
+    return resultat
+
+
+def _essai(db, config, question, prompt, pages, discordances) -> tuple[dict, list[str]]:
+    """Un appel au modèle, et sa réponse contrôlée. Renvoie (résultat,
+    problèmes de rédaction) : les problèmes ne sont rendus que lorsque la
+    réponse a été réduite à ses passages pour cette raison."""
+    introuvable = {"statut": "introuvable", "reponse": MESSAGE_INTROUVABLE, "citations": []}
     reponse_modele = obtenir_provider(config).appeler(
-        systeme=PROMPT_SYSTEME,
-        prompt=f"{contexte_client}Question de l'avocat : {question}{bloc_discordances(discordances)}"
-        f"\n\nPages du dossier :\n{texte}",
-        modele=config.modele_analyse,
+        systeme=PROMPT_SYSTEME, prompt=prompt, modele=config.modele_analyse,
     )
     try:
         donnees = extraire_json(reponse_modele.texte)
     except ValueError:
-        return introuvable
+        return introuvable, []
     if not isinstance(donnees, dict):
-        return introuvable
+        return introuvable, []
 
     pages_par_numero = {p["numero_global"]: p for p in pages}
     citations_verifiees = []
@@ -171,9 +194,9 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
 
     texte_reponse = (donnees.get("reponse") or "").strip()
     if not citations_verifiees or not texte_reponse:
-        return introuvable
+        return introuvable, []
     if RE_QUALIFICATION.search(texte_reponse):
-        return {"statut": "passages", "reponse": MESSAGE_QUALIFICATION, "citations": citations_verifiees}
+        return {"statut": "passages", "reponse": MESSAGE_QUALIFICATION, "citations": citations_verifiees}, []
     # Les citations sont vérifiées, mais le texte de la réponse est rédigé :
     # une heure, un nom ou une durée qui ne figure sur aucune des pages
     # citées (un détail venu d'ailleurs, ou de la connaissance du modèle)
@@ -183,8 +206,9 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
         "\n".join([question] + [pages_par_numero[n]["texte"] for n in sorted(pages_citees)]),
         noms_identifies(db),
     )
-    if problemes_redaction(texte_reponse, reference):
-        return {"statut": "passages", "reponse": MESSAGE_PASSAGES, "citations": citations_verifiees}
+    problemes = problemes_redaction(texte_reponse, reference)
+    if problemes:
+        return {"statut": "passages", "reponse": MESSAGE_PASSAGES, "citations": citations_verifiees}, problemes
     # Une réponse qui ne garde qu'une version d'une discordance établie par
     # les règles (« interpellé à 09h45 » quand une autre pièce dit 09h30)
     # est complétée ici, de façon déterministe — observé sur deux dossiers
@@ -195,4 +219,4 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
                 f" Attention : les pièces ne concordent pas sur ce point ({libelle} : "
                 f"{' ou '.join(versions)}) — voir l'onglet des contradictions."
             )
-    return {"statut": "sourcee", "reponse": texte_reponse, "citations": citations_verifiees}
+    return {"statut": "sourcee", "reponse": texte_reponse, "citations": citations_verifiees}, []

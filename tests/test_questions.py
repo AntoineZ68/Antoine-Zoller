@@ -180,3 +180,26 @@ def test_version_unique_d_une_discordance_completee(monkeypatch, db) -> None:
     r = questions.repondre_question(db, Config(offline=False), "Quand est-elle partie ?")
     assert r["statut"] == "sourcee"
     assert "13h30 ou 14h10" in r["reponse"]
+
+
+def test_element_absent_corrige_au_second_essai(monkeypatch, db) -> None:
+    """Observé une fois sur quatre : une date ajoutée de mémoire (« le
+    13/03/2031 ») faisait réduire la réponse à ses passages. Un second
+    essai, motif à l'appui."""
+    reponses = iter([
+        {"reponse": "Le 13/03/2031, Mme SERMET quitte son domicile à 13h30.",
+         "citations": [{"page": 1, "citation": "déclare avoir quitté son domicile de Biviers à 13h30"}]},
+        {"reponse": "Mme SERMET déclare avoir quitté son domicile à 13h30.",
+         "citations": [{"page": 1, "citation": "déclare avoir quitté son domicile de Biviers à 13h30"}]},
+    ])
+    prompts = []
+
+    class Faux:
+        def appeler(self, systeme, prompt, modele):
+            prompts.append(prompt)
+            return ReponseLLM(texte=json.dumps(next(reponses)), tokens_in=1, tokens_out=1)
+
+    monkeypatch.setattr(questions, "obtenir_provider", lambda config: Faux())
+    r = questions.repondre_question(db, Config(offline=False), "Quand Mme SERMET est-elle partie ?")
+    assert r["statut"] == "sourcee" and "13/03" not in r["reponse"]
+    assert len(prompts) == 2 and "2031" in prompts[1].split("écartée")[1]
