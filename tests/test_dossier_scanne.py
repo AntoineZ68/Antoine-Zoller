@@ -253,3 +253,20 @@ def test_question_de_nullite_renvoie_les_points_de_procedure(tmp_path) -> None:
     reponse = repondre_question(db, Config(offline=True), "Y a-t-il une nullité à soulever ?")
     assert reponse["statut"] == "passages" and "Photographie montrée seule" in reponse["reponse"]
     assert reponse["citations"][0]["page"] == 31
+
+
+def test_question_retrouve_les_pages_par_la_racine_des_mots() -> None:
+    from depouille.questions import pages_pertinentes
+
+    pages = [{"numero_global": n, "texte": t} for n, t in (
+        (1, "Procès-verbal d'interpellation du suspect au domicile. " + "x " * 30),
+        (2, "Audition du témoin sur la soirée. " + "y " * 30),
+    )]
+    assert [p["numero_global"] for p in pages_pertinentes(pages, "Comment a-t-il été interpellé ?", budget=150)] == [1]
+
+
+def test_coupure_et_renvoi_entre_crochets_acceptes() -> None:
+    from depouille.garde_fous import problemes_redaction
+
+    assert problemes_redaction("Il est écrit « nous ouvre. […] trouvons » [page 12].", "nous ouvre trouvons") == []
+    assert problemes_redaction("Il est né le [date].", "x") == ["élément à compléter entre crochets"]

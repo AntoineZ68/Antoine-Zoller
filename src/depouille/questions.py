@@ -104,8 +104,16 @@ def _normaliser(texte: str) -> str:
     return "".join(c for c in forme if not unicodedata.combining(c))
 
 
+LONGUEUR_RACINE = 7
+
+
 def _termes(texte: str) -> set[str]:
-    return {m for m in re.findall(r"[a-z0-9]+", _normaliser(texte)) if len(m) >= 3 and m not in MOTS_VIDES}
+    """Mots utiles, réduits à leurs sept premières lettres : « interpellée »
+    retrouve « interpellation » (observé sur un dossier de test : la
+    question sur l'interpellation ne recevait pas la page de
+    l'interpellation)."""
+    return {m[:LONGUEUR_RACINE] for m in re.findall(r"[a-z0-9]+", _normaliser(texte))
+            if len(m) >= 3 and m not in MOTS_VIDES}
 
 
 def pages_pertinentes(pages: list, question: str, budget: int = BUDGET_CARACTERES) -> list:
@@ -216,7 +224,7 @@ def _essai(db, config, question, prompt, pages, discordances) -> tuple[dict, lis
         if not isinstance(c, dict):
             continue
         page = pages_par_numero.get(c.get("page"))
-        citation = (c.get("citation") or "").strip()
+        citation = (c.get("citation") or "").strip().strip('"“”').strip()
         if page is None or not citation:
             continue
         valide, _ = verifier_citation(page["texte"], citation, bool(page["ocr_applique"]), config.seuil_flou_ocr)

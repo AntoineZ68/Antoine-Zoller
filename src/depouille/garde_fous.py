@@ -364,6 +364,9 @@ def bloc_discordances(discordances: list[tuple[str, list[str]]]) -> str:
 RE_PERIODE_VIDE = re.compile(r"\bentre (?:le |les |l')?(.{3,40}?) et (?:le |les |l')?\1\b", re.IGNORECASE)
 
 
+RE_COUPURE_OU_RENVOI = re.compile(r"\[\s*(?:\.{3}|…|pages?\s+\d+(?:\s*(?:,|et|-)\s*\d+)*|p\.\s*\d+)\s*\]", re.IGNORECASE)
+
+
 def problemes_redaction(texte: str, reference: str) -> list[str]:
     """Tout ce qui interdit d'afficher un texte rédigé par le modèle, en clair
     (pour le journal, ou pour le signaler au modèle lors d'un second essai).
@@ -373,11 +376,15 @@ def problemes_redaction(texte: str, reference: str) -> list[str]:
         problemes.append("qualification juridique")
     if contient_jugement(texte):
         problemes.append("jugement sur la sincérité ou la culpabilité")
-    if "[" in texte or "]" in texte:
+    # Une coupure « […] » dans un extrait cité, ou un renvoi « [page 12] »,
+    # n'est pas un élément à compléter (observé : une réponse exacte sur
+    # l'interpellation écartée pour ce seul motif).
+    sans_coupures = RE_COUPURE_OU_RENVOI.sub("", texte)
+    if "[" in sans_coupures or "]" in sans_coupures:
         problemes.append("élément à compléter entre crochets")
     if RE_PERIODE_VIDE.search(texte):
         problemes.append("période dont les deux bornes sont identiques")
-    absents = elements_absents(texte, reference)
+    absents = elements_absents(sans_coupures, reference)
     if absents:
         problemes.append("éléments absents des sources : " + ", ".join(absents[:10]))
     return problemes
