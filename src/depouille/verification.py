@@ -48,6 +48,53 @@ def verifier_citation(
     return False, "rejetee"
 
 
+def _normaliser_avec_positions(texte: str) -> tuple[str, list[int]]:
+    """Comme _normaliser, avec pour chaque caractère sa position dans le
+    texte d'origine."""
+    caracteres: list[str] = []
+    positions: list[int] = []
+    espace = True
+    for i, c in enumerate(texte):
+        if c.isspace():
+            if not espace:
+                caracteres.append(" ")
+                positions.append(i)
+                espace = True
+            continue
+        for minuscule in c.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').lower():
+            caracteres.append(minuscule)
+            positions.append(i)
+        espace = False
+    while caracteres and caracteres[-1] == " ":
+        caracteres.pop()
+        positions.pop()
+    return "".join(caracteres), positions
+
+
+def passage_litteral(texte_page: str, citation: str) -> str | None:
+    """Le passage de la page auquel une citation correspond par
+    approximation (page numérisée), tel qu'il est écrit sur la page, élargi
+    aux mots entiers. Le modèle « corrige » souvent l'OCR en recopiant
+    (« Iasi » pour « lasi », « même » pour « méme ») : c'est le texte de la
+    page qui doit être affiché, pas sa version corrigée (observé au banc
+    d'essai : citation affichée absente telle quelle de sa page)."""
+    page_norm, positions = _normaliser_avec_positions(texte_page)
+    citation_norm = _normaliser(citation)
+    if not citation_norm or not page_norm:
+        return None
+    alignement = fuzz.partial_ratio_alignment(citation_norm, page_norm)
+    if alignement is None or alignement.dest_end <= alignement.dest_start:
+        return None
+    debut = positions[alignement.dest_start]
+    fin = positions[alignement.dest_end - 1] + 1
+    while debut > 0 and not texte_page[debut - 1].isspace():
+        debut -= 1
+    while fin < len(texte_page) and not texte_page[fin].isspace():
+        fin += 1
+    passage = re.sub(r"\s+", " ", texte_page[debut:fin]).strip()
+    return passage or None
+
+
 def verifier_table(db: sqlite3.Connection, table: str, seuil_flou_ocr: int) -> dict[str, int]:
     if table not in TABLES_VERIFIABLES:
         raise ValueError(f"Table non vérifiable : {table!r}")
@@ -67,9 +114,12 @@ def verifier_table(db: sqlite3.Connection, table: str, seuil_flou_ocr: int) -> d
             raison = "citation introuvable sur la page annoncée"
 
         if valide:
+            citation = ligne["citation"]
+            if methode == "floue_ocr":
+                citation = passage_litteral(page["texte"], citation) or citation
             db.execute(
-                f"UPDATE {table} SET statut_verif = 'verifie', methode_verif = ? WHERE id = ?",
-                (methode, ligne["id"]),
+                f"UPDATE {table} SET statut_verif = 'verifie', methode_verif = ?, citation = ? WHERE id = ?",
+                (methode, citation, ligne["id"]),
             )
             resume[methode] += 1
         else:

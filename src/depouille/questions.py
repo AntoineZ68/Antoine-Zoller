@@ -29,7 +29,7 @@ from .garde_fous import (
     RE_QUALIFICATION, avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues,
 )
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider
-from .verification import verifier_citation
+from .verification import passage_litteral, verifier_citation
 
 # Budget de texte soumis au modèle par question (~10 000 tokens). Un petit
 # dossier y tient en entier ; au-delà, on ne soumet que les pages les plus
@@ -227,7 +227,9 @@ def _essai(db, config, question, prompt, pages, discordances) -> tuple[dict, lis
         citation = (c.get("citation") or "").strip().strip('"“”').strip()
         if page is None or not citation:
             continue
-        valide, _ = verifier_citation(page["texte"], citation, bool(page["ocr_applique"]), config.seuil_flou_ocr)
+        valide, methode = verifier_citation(page["texte"], citation, bool(page["ocr_applique"]), config.seuil_flou_ocr)
+        if valide and methode == "floue_ocr":
+            citation = passage_litteral(page["texte"], citation) or citation
         if valide:
             citations_verifiees.append({"page": page["numero_global"], "citation": citation})
 

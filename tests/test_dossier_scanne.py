@@ -270,3 +270,19 @@ def test_coupure_et_renvoi_entre_crochets_acceptes() -> None:
 
     assert problemes_redaction("Il est écrit « nous ouvre. […] trouvons » [page 12].", "nous ouvre trouvons") == []
     assert problemes_redaction("Il est né le [date].", "x") == ["élément à compléter entre crochets"]
+
+
+def test_citation_approchee_affichee_telle_qu_ecrite_sur_la_page(tmp_path) -> None:
+    from depouille.verification import _normaliser, verifier_table
+
+    page = ("PLACEMENT EN GARDE À VUE\n\nLe 9 février 2034 à 09h00, notifions à M. Andrei POPESCU, né le 12/02/2016 à\n"
+            "lasi, son placement en garde à vue. Droits notifiés à 09h10.")
+    db = ouvrir_db(tmp_path / "t.db")
+    db.execute("INSERT INTO pages (numero_global, fichier_source, page_fichier, texte, empreinte_sha256, ocr_applique) "
+               "VALUES (4, 'd', 4, ?, 'x', 1)", (page,))
+    db.execute("INSERT INTO evenements_faits (page, citation, description, statut_verif) VALUES (4, ?, 'Placement.', 'a_faire')",
+               ("Le 9 février 2034 à 09h00, notifions à M. Andrei POPESCU, né le 12/02/2016 à Iasi, son placement en garde à vue.",))
+    db.commit()
+    assert verifier_table(db, "evenements_faits", 90)["floue_ocr"] == 1
+    citation = db.execute("SELECT citation FROM evenements_faits").fetchone()[0]
+    assert "lasi" in citation and _normaliser(citation) in _normaliser(page), "le texte de la page, pas la version corrigée"
