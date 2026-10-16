@@ -24,6 +24,7 @@ import sqlite3
 import unicodedata
 
 from .config import Config
+from .db import pages_hors_procedure
 from .garde_fous import (
     RE_QUALIFICATION, avec_noms_completes, bloc_discordances, noms_identifies, problemes_redaction, versions_tues,
 )
@@ -125,7 +126,10 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
     if config.offline:
         raise ErreurModeOffline("Interroger le dossier nécessite un appel au modèle.")
 
-    pages = db.execute("SELECT numero_global, texte, ocr_applique FROM pages ORDER BY numero_global").fetchall()
+    # Ni le bordereau ni les notes de l'avocat : on répond sur la procédure.
+    exclues = pages_hors_procedure(db)
+    pages = [p for p in db.execute("SELECT numero_global, texte, ocr_applique FROM pages ORDER BY numero_global")
+             if p["numero_global"] not in exclues]
     selection = pages_pertinentes(pages, question)
     if not selection:
         return introuvable

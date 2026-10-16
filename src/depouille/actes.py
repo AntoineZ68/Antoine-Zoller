@@ -104,6 +104,7 @@ PRECISIONS: dict[str, dict[str, tuple[str, ...]]] = {
 # expertises, et la synthèse (elle reprend les actes d'autres pièces, avec
 # des heures parfois arrondies : elle ferait naître de fausses discordances).
 TYPES_SANS_ACTES = (
+    "Bordereau / inventaire des pièces", "Document de l'avocat (hors procédure)",
     "Relevé bancaire", "Facture", "Casier judiciaire", "Enquête de personnalité",
     "Correspondance saisie (e-mail, courrier, SMS)", "Analyse téléphonique", "Retranscription",
     "Rapport d'expertise", "PV de synthèse", "Signalement (article 40 CPP ou L.823-12 du Code de commerce)",
@@ -158,6 +159,15 @@ RE_NEGATION = re.compile(
 # français » — le modèle cite la première phrase, la preuve est dans la
 # suivante.
 FENETRE_PREUVE = 320
+# « Médecin : « Non. » », « Interprète : « Non, je parle français. » » : la
+# personne refuse — ce n'est pas une demande (observé : un examen médical et
+# un interprète « demandés », d'où deux faux signalements).
+NATURES_DEMANDE = {"demande_examen_medical", "demande_entretien_avocat", "demande_interprete", "demande_avis_famille"}
+RE_REFUS = re.compile(
+    r"[:«]\s*«?\s*non\b|\bne\s+(?:souhaite|veut|demande|d[ée]sire|sollicite)\s+pas|\brefuse|\brenonce|"
+    r"n['’]a\s+sollicit[ée]\s+aucun|\baucun\s+(?:examen|avocat|interpr)",
+    re.IGNORECASE,
+)
 
 
 def _fenetre(citation: str, texte: str) -> str:
@@ -182,6 +192,8 @@ def fiche_verifiee(fiche: dict, date_piece: str | None, texte_piece: str = "") -
     if not re.search(NATURES[nature][0], citation, re.IGNORECASE):
         return None
     if nature in NATURES_REALISATION and RE_NEGATION.search(citation):
+        return None
+    if nature in NATURES_DEMANDE and RE_REFUS.search(citation):
         return None
 
     heure = fiche.get("heure")

@@ -23,6 +23,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Config
+from .db import TYPES_HORS_PROCEDURE
 from .llm import ErreurModeOffline, extraire_json, obtenir_provider, tranches_de_texte
 from .regex_patterns import cote_de_base, detecter_date_heure_acte, texte_sans_entete
 from .titres import titrer_pieces
@@ -68,8 +69,27 @@ CATEGORIES = [
     "Signalement (article 40 CPP ou L.823-12 du Code de commerce)",
     "Correspondance saisie (e-mail, courrier, SMS)",
     "Pièce de procédure – autre",
+    "Bordereau / inventaire des pièces",
+    "Document de l'avocat (hors procédure)",
     "Non identifié",
 ]
+
+TYPE_BORDEREAU = "Bordereau / inventaire des pièces"
+# Couverture du dossier, notes de parloir, annotations de l'avocat : jamais
+# lues comme des pièces de la procédure (observé : des notes de parloir
+# manuscrites restituées comme « déclarations » du mis en cause dans la
+# chronologie). Exclues des faits, des actes, des questions.
+TYPE_DOCUMENT_AVOCAT = "Document de l'avocat (hors procédure)"
+assert (TYPE_BORDEREAU, TYPE_DOCUMENT_AVOCAT) == TYPES_HORS_PROCEDURE
+RE_DOCUMENT_AVOCAT = re.compile(
+    r"\bparloir\b|cabinet\s+de\s+ma[îi]tre|\btoque\b|[àa]\s+faire\s*:|notes?\s+d['’]entretien|\bhonoraires\b",
+    re.IGNORECASE,
+)
+# « Feuillet 2/2 », « Page 1/2 » : le format des PV de police (LRPPN) et des
+# décisions. Un feuillet 1 ouvre une pièce, un feuillet suivant la continue —
+# plus sûr qu'un intitulé, que l'en-tête répété sur chaque feuillet imite.
+RE_FEUILLET = re.compile(r"\b(?:Feuillet|Page)\s*(?:n[°o]\s*)?(\d{1,3})\s*/\s*(\d{1,3})\b", re.IGNORECASE)
+LIGNES_FEUILLET = 15
 
 # Règles déterministes : (motifs devant TOUS apparaître dans l'en-tête, type).
 # Évaluées dans l'ordre ; la première règle satisfaite l'emporte. Ni exhaustif
@@ -77,6 +97,8 @@ CATEGORIES = [
 # ajouter — une pièce qui ne correspond à aucune règle part en "Non identifié"
 # pour relecture humaine, elle n'est jamais devinée.
 REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
+    (["BORDEREAU"], TYPE_BORDEREAU),
+    (["INVENTAIRE DES PIECES"], TYPE_BORDEREAU),
     (["NOTIFICATION", "PLACEMENT", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
     (["NOTIFICATION", "MESURE", "GARDE À VUE"], "PV de notification de placement en garde à vue"),
     (["NOTIFICATION", "DROITS"], "PV de notification des droits"),
@@ -106,6 +128,7 @@ REGLES_MOTS_CLES: list[tuple[list[str], str]] = [
     # Avant RÉQUISITION : « ORDONNANCE D'AUTORISATION D'INTERCEPTION —
     # RÉQUISITION » est une décision du juge, pas une réquisition.
     (["AUTORISATION", "INTERCEPTION"], "Ordonnance du juge des libertés et de la détention"),
+    (["DETENTION PROVISOIRE"], "Ordonnance du juge des libertés et de la détention"),
     (["RÉQUISITOIRE"], "Réquisitoire introductif"),
     (["RÉQUISITION"], "Réquisition"),
     (["INTERROGATOIRE", "COMPARUTION"], "PV d'interrogatoire de première comparution"),
@@ -322,13 +345,63 @@ def _detecter_pieces_par_page(pages: list[sqlite3.Row]) -> list[dict]:
             l for l in page["texte"].splitlines()[:NB_LIGNES_BRUIT_MAX + NB_LIGNES_EXAMINEES_FRONTIERE * 2]
             if l.strip() and not _bruit_de_scan(l)
         ][:NB_LIGNES_EXAMINEES_FRONTIERE]
-        nouvelle_piece = not pieces or nouveau_fichier or any(_est_titre(l) for l in premieres_lignes)
+        feuillet = _feuillet(page["texte"])
+        if not pieces or nouveau_fichier or _document_avocat(page["texte"]):
+            nouvelle_piece = True
+        elif feuillet:
+            nouvelle_piece = feuillet[0] == 1
+        else:
+            nouvelle_piece = any(_est_titre(l) for l in premieres_lignes)
+        if pieces and not nouveau_fichier and _document_avocat(pieces[-1]["pages"][-1]["texte"]) and not _document_avocat(page["texte"]):
+            nouvelle_piece = True
         if nouvelle_piece:
             pieces.append({"page_debut": page["numero_global"], "page_fin": page["numero_global"], "pages": [page]})
         else:
             pieces[-1]["page_fin"] = page["numero_global"]
             pieces[-1]["pages"].append(page)
     return pieces
+
+
+def _feuillet(texte: str) -> tuple[int, int] | None:
+    lignes = [l for l in texte.splitlines() if l.strip()]
+    for ligne in lignes[:LIGNES_FEUILLET] + lignes[-4:]:
+        m = RE_FEUILLET.search(ligne)
+        if m and 0 < int(m.group(1)) <= int(m.group(2)):
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _document_avocat(texte: str) -> bool:
+    """Page de l'avocat : marqueur explicite (parloir, cabinet de Maître,
+    « À faire : »), sans en-tête de procès-verbal."""
+    return bool(RE_DOCUMENT_AVOCAT.search(texte)) and not re.search(
+        r"PROC[ÈE]S[- ]?VERBAL|\bNous,\s", texte[:600], re.IGNORECASE
+    )
+
+
+RE_OBJET = re.compile(r"\bObjet\s*:\s*([^\n]{4,120})", re.IGNORECASE)
+RE_INTITULE_FORT = re.compile(
+    r"^\s*(?:BORDEREAU|INVENTAIRE|PROC[ÈE]S[- ]VERBAL\s+D|ORDONNANCE|R[ÉE]QUISITOIRE|CERTIFICAT|AUTORISATION|RAPPORT)[^a-z]{4,}$"
+)
+
+
+def intitule_de_classement(texte_page: str) -> str:
+    """Ce sur quoi la pièce est classée : l'en-tête en capitales, l'objet
+    d'un PV de police (« Objet : Audition de personne gardée à vue — n° 1 »,
+    lu « PROCÈS-VERBAL D'AUDITION DE PERSONNE GARDÉE À VUE ») et tout
+    intitulé fort des premières lignes (« BORDEREAU DES PIÈCES »). Observé
+    sur un vrai format de PV : l'intitulé ne disait que « PROCÈS-VERBAL », et
+    trois auditions de garde à vue passaient pour des interrogatoires de
+    première comparution."""
+    parties = [_entete_etendu(texte_page)]
+    lignes = [l.strip() for l in texte_page.splitlines() if l.strip()][:LIGNES_FEUILLET]
+    m = RE_OBJET.search("\n".join(lignes))
+    if m and re.search(r"PROC[ÈE]S[- ]?VERBAL", "\n".join(lignes), re.IGNORECASE):
+        objet = re.split(r"\s{2,}|Feuillet|N°", m.group(1))[0].strip(" -–—")
+        liaison = "D'" if _sans_accents(objet[:1]).upper() in "AEIOUYH" else "DE "
+        parties.insert(0, f"PROCÈS-VERBAL {liaison}{objet.upper()}")
+    parties += [l for l in lignes if RE_INTITULE_FORT.match(l)]
+    return " ".join(p for p in parties if p)
 
 
 def _sans_accents(texte: str) -> str:
@@ -816,6 +889,88 @@ def identifier_personne_via_llm(
         return None
 
 
+# --- Une personne, plusieurs écritures --------------------------------------
+# L'OCR lit « DERRADJI » tantôt « DERRADIJI », tantôt « DERRADII », et le
+# dossier écrit tantôt « NOM Prénom », tantôt « Prénom NOM » : observé sur un
+# dossier de test, une seule personne devenait trois, et sa garde à vue,
+# coupée en deux, ne donnait plus aucun délai. Même prénom, nom à une lettre
+# près (deux pour un nom long) : la même personne.
+
+
+def _distance(a: str, b: str) -> int:
+    precedente = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        courante = [i]
+        for j, cb in enumerate(b, 1):
+            courante.append(min(precedente[j] + 1, courante[j - 1] + 1, precedente[j - 1] + (ca != cb)))
+        precedente = courante
+    return precedente[-1]
+
+
+def _prenoms_et_nom(nom: str) -> tuple[str, str]:
+    mots = nom.split()
+    noms = [m for m in mots if m.isupper() and len(m) > 1]
+    prenoms = [m for m in mots if m not in noms]
+    return _sans_accents(" ".join(prenoms)).lower().replace(" ", ""), _sans_accents(" ".join(noms)).upper()
+
+
+def meme_personne(a: str, b: str) -> bool:
+    prenom_a, nom_a = _prenoms_et_nom(a)
+    prenom_b, nom_b = _prenoms_et_nom(b)
+    if not (prenom_a and prenom_b and nom_a and nom_b) or nom_a[0] != nom_b[0]:
+        return False
+    # Une lettre d'écart ; deux pour un nom long de même longueur (deux
+    # lettres mal lues). « MARTIN » et « MARTINEZ » restent deux personnes.
+    tolerance = 2 if min(len(nom_a), len(nom_b)) >= 9 and abs(len(nom_a) - len(nom_b)) <= 1 else 1
+    return _distance(prenom_a, prenom_b) <= 1 and _distance(nom_a, nom_b) <= tolerance
+
+
+def fusionner_personnes_proches(db: sqlite3.Connection) -> int:
+    """Réunit les personnes qui sont la même écrite autrement. L'écriture
+    retenue est celle qui revient le plus souvent dans les pages, à l'ordre
+    Prénom NOM ; le rôle retenu est le plus lourd (mis en cause, victime,
+    témoin). Renvoie le nombre de doublons fusionnés."""
+    personnes = [dict(r) for r in db.execute("SELECT * FROM personnes ORDER BY id")]
+    texte = "\n".join(r[0] for r in db.execute("SELECT texte FROM pages")).upper()
+    groupes: list[list[dict]] = []
+    for p in personnes:
+        groupe = next((g for g in groupes if any(meme_personne(p["nom"], q["nom"]) for q in g)), None)
+        if groupe is None:
+            groupes.append([p])
+        else:
+            groupe.append(p)
+    fusionnes = 0
+    for groupe in groupes:
+        if len(groupe) < 2:
+            continue
+
+        def frequence(personne: dict) -> int:
+            _, nom = _prenoms_et_nom(personne["nom"])
+            return len(re.findall(rf"(?<![A-Z]){re.escape(nom)}(?![A-Z])", _sans_accents(texte)))
+
+        modele = max(groupe, key=frequence)
+        mots = modele["nom"].split()
+        noms = [m for m in mots if m.isupper() and len(m) > 1]
+        nom_retenu = " ".join([m for m in mots if m not in noms] + noms)
+        garde = min(groupe, key=lambda p: p["id"])
+        role = max((p["role"] for p in groupe), key=lambda r: PRIORITE_ROLE_TAGUE.get(r, 0))
+        client = max(int(p.get("est_client") or 0) for p in groupe)
+        for autre in groupe:
+            if autre["id"] == garde["id"]:
+                continue
+            for table, colonne in (("pieces", "personne_principale_id"), ("evenements_procedure", "personne_id"),
+                                   ("declarations", "personne_id"), ("evenements_faits", "personne_id_source"),
+                                   ("divergences", "personne_id")):
+                db.execute(f"UPDATE {table} SET {colonne} = ? WHERE {colonne} = ?", (garde["id"], autre["id"]))
+            db.execute("DELETE FROM personnes WHERE id = ?", (autre["id"],))
+            fusionnes += 1
+        db.execute("UPDATE personnes SET nom = ?, role = ? WHERE id = ?", (nom_retenu, role, garde["id"]))
+        if client:
+            db.execute("UPDATE personnes SET est_client = 1 WHERE id = ?", (garde["id"],))
+    db.commit()
+    return fusionnes
+
+
 TITRES_ET_CIVILITES = TITRES_A_EXCLURE | HONORIFIQUES_ABREGES | {"dr", "pr", "professeur", "mademoiselle"}
 
 
@@ -844,6 +999,9 @@ def identifier_personne_principale(
     payer deux fois le même appel au modèle. Ordre de priorité : le tag de
     rôle explicite en en-tête (fiable), puis le premier nom mentionné pour
     les pièces où c'est sans ambiguïté, puis le modèle en dernier recours."""
+    if type_piece in TYPES_HORS_PROCEDURE:
+        return None, "hors_procedure"
+
     personne_id = identifier_declarant(db, texte_complet)
     if personne_id is not None:
         return personne_id, "tag_entete"
@@ -861,7 +1019,18 @@ def identifier_personne_principale(
         if personne_id is not None:
             return personne_id, "champ_identite"
 
-    if type_piece in TYPES_PERSONNE_PAR_PREMIERE_MENTION:
+    # Certificat médical : le premier nom est celui du médecin (« Je
+    # soussignée, Docteur Anne-Laure CHABERT ») — observé, la médecin légiste
+    # devenait mise en cause. On ne retient qu'une personne déjà connue.
+    if type_piece == "Certificat médical":
+        connus = []
+        for row in db.execute("SELECT id, nom FROM personnes"):
+            m = _motif_nom(row["nom"]).search(texte_complet)
+            if m:
+                connus.append((m.start(), row["id"]))
+        if connus:
+            return min(connus)[1], "premiere_mention"
+    elif type_piece in TYPES_PERSONNE_PAR_PREMIERE_MENTION:
         personne_id = _premiere_mention_ou_creation(db, texte_complet, "mis_en_cause")
         if personne_id is not None:
             return personne_id, "premiere_mention"
@@ -912,9 +1081,12 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
 
     for groupe in groupes:
         texte_complet = "\n".join(p["texte"] for p in groupe["pages"])
-        entete = _entete_etendu(groupe["pages"][0]["texte"])
+        entete = intitule_de_classement(groupe["pages"][0]["texte"])
 
-        type_, confiance = _classifier_type_deterministe(entete)
+        if _document_avocat(texte_complet):
+            type_, confiance = TYPE_DOCUMENT_AVOCAT, 1.0
+        else:
+            type_, confiance = _classifier_type_deterministe(entete)
         if type_ == "Non identifié" and not config.offline:
             type_, confiance = _classifier_type_llm(config, texte_complet, console, compteur)
             nb_llm += 1
@@ -964,6 +1136,9 @@ def lancer_classification(db: sqlite3.Connection, config: Config, force: bool, c
         )
 
     db.commit()
+    fusionnes = fusionner_personnes_proches(db)
+    if fusionnes:
+        console.print(f"  [classify] {fusionnes} écriture(s) d'un même nom réunie(s) (lecture du scan, ordre NOM Prénom).")
 
     # Après l'identification des personnes : un intitulé d'audition porte
     # le nom de la personne entendue.

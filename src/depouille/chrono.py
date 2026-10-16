@@ -83,6 +83,8 @@ RE_NOTIFICATION_DROITS_DIFFEREE = re.compile(
     rf"notification.{{0,60}}?droits.{{0,200}}?à\s+{FRAGMENT_HEURE}", re.IGNORECASE | re.DOTALL
 )
 
+RE_DROITS_DANS_LE_PLACEMENT = re.compile(r"\bnotifions\b[^.]{0,80}\bb[ée]n[ée]ficie\s+du\s+droit", re.IGNORECASE)
+
 NATURE_SIMPLE_PAR_TYPE = {
     "PV d'interpellation": "interpellation",
     "PV de notification de placement en garde à vue": "placement_garde_a_vue",
@@ -115,10 +117,16 @@ def _personne_par_nom(db: sqlite3.Connection, nom_libre: str) -> int | None:
     mots_recherches = frozenset(nom_libre.lower().split())
     if len(mots_recherches) < 2:
         return None
-    for ligne in db.execute("SELECT id, nom FROM personnes"):
+    personnes = db.execute("SELECT id, nom FROM personnes").fetchall()
+    for ligne in personnes:
         if frozenset(ligne["nom"].lower().split()) == mots_recherches:
             return ligne["id"]
-    return None
+    # « DERRADII Yanis » lu par l'OCR pour « Yanis DERRADJI » : même prénom,
+    # nom à une ou deux lettres près (voir classify.meme_personne).
+    from .classify import meme_personne
+
+    proches = [ligne["id"] for ligne in personnes if meme_personne(nom_libre, ligne["nom"])]
+    return proches[0] if len(proches) == 1 else None
 
 
 def _chercher_sur_pages(pages: list[sqlite3.Row], motif: re.Pattern) -> tuple[int, re.Match, str] | None:
@@ -202,6 +210,19 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
             # calculé. La date n'est pas répétée dans ce genre de mention
             # ("n'a pu être faite qu'à 11h45") : celle du placement, déjà
             # établi ci-dessus, s'applique (même jour).
+            # « Lui notifions qu'elle bénéficie du droit : de faire prévenir un
+            # proche… » dans le PV de placement lui-même : les droits sont
+            # notifiés dans l'acte (observé : « droits non identifiés »
+            # signalé à tort sur un vrai format de PV).
+            r_meme_acte = _chercher_sur_pages(pages, RE_DROITS_DANS_LE_PLACEMENT)
+            placement = next((e for e in evenements if e["nature"] == "placement_garde_a_vue"), None)
+            heure_propre = any(
+                _chercher_sur_pages(pages, motif) for nature, motif in ACTES_HORODATES if nature == "notification_droits"
+            )
+            if (r_meme_acte and placement and not heure_propre
+                    and not _chercher_sur_pages(pages, RE_NOTIFICATION_DROITS_DIFFEREE)):
+                evenements.append({**placement, "nature": "notification_droits", "page": r_meme_acte[0],
+                                   "citation": r_meme_acte[2]})
             r_notif = _chercher_sur_pages(pages, RE_NOTIFICATION_DROITS_DIFFEREE)
             if r_notif:
                 page, m, citation = r_notif
@@ -365,6 +386,8 @@ def calculer_durees(db: sqlite3.Connection) -> dict[str, str]:
 # placement réapparaissant aussi comme un "fait") est un moindre mal face
 # au risque de silencieusement passer à côté d'une déclaration.
 TYPES_SANS_FAITS_NARRATIFS = (
+    "Bordereau / inventaire des pièces",
+    "Document de l'avocat (hors procédure)",
     "PV d'entretien avocat",
     "Réquisition",
     "Soit-transmis",

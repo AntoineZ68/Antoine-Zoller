@@ -185,6 +185,20 @@ MIGRATIONS = (
 )
 
 
+# Pièces qui ne sont pas des actes de la procédure : le bordereau des pièces
+# (il énumère les actes, il ne les accomplit pas) et les documents de
+# l'avocat (couverture, notes de parloir). Jamais lues comme procédure.
+TYPES_HORS_PROCEDURE = ("Bordereau / inventaire des pièces", "Document de l'avocat (hors procédure)")
+
+
+def pages_hors_procedure(conn: sqlite3.Connection) -> set[int]:
+    lignes = conn.execute(
+        f"SELECT page_debut, page_fin FROM pieces WHERE type IN ({','.join('?' * len(TYPES_HORS_PROCEDURE))})",
+        TYPES_HORS_PROCEDURE,
+    ).fetchall()
+    return {n for debut, fin in lignes for n in range(debut, fin + 1)}
+
+
 def appliquer_migrations(conn: sqlite3.Connection) -> None:
     for table, colonne, definition in MIGRATIONS:
         colonnes = {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}

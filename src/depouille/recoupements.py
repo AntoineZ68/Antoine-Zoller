@@ -90,7 +90,13 @@ class EntiteCommune:
 def occurrences_identifiants(db: sqlite3.Connection) -> dict[tuple[str, str], list[OccurrenceEntite]]:
     """Toutes les occurrences de chaque identifiant, par (type, valeur
     normalisée) — une seule par page."""
-    pages = db.execute("SELECT numero_global, texte FROM pages ORDER BY numero_global").fetchall()
+    from .db import pages_hors_procedure
+
+    exclues = pages_hors_procedure(db) if db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'pieces'"
+    ).fetchone() else set()
+    pages = [p for p in db.execute("SELECT numero_global, texte FROM pages ORDER BY numero_global")
+             if p["numero_global"] not in exclues]
 
     par_cle: dict[tuple[str, str], list[OccurrenceEntite]] = {}
     for page in pages:
