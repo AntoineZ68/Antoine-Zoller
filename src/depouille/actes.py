@@ -133,8 +133,9 @@ PROMPT = (
     "N'invente rien, ne déduis rien : une précision que la citation ne dit pas vaut null ; une "
     "heure absente de la citation vaut null. Ne relève pas un acte seulement évoqué dans une "
     "question posée à la personne entendue, ni ce que la personne raconte de son côté. "
-    "« Propos recueillis hors audition » : propos de la personne obtenus en dehors d'un procès-verbal "
-    "d'audition (couloir, véhicule, oralement). Le texte peut venir d'une page numérisée : recopie "
+    "« Propos recueillis hors audition » : propos de la personne interpellée ou gardée à vue elle-même "
+    "(jamais ceux d'un tiers : parent, témoin) obtenus en dehors d'un procès-verbal d'audition "
+    "(interpellation, perquisition, couloir, véhicule, oralement). Le texte peut venir d'une page numérisée : recopie "
     "la citation telle qu'écrite, sans la corriger. "
     'Réponds uniquement en JSON : {"actes": [...]}.'
 )
@@ -170,6 +171,36 @@ RE_REFUS = re.compile(
 )
 
 
+# « Mentionnons qu'à 10h05, Me VIDAL se présente au service » : l'arrivée
+# de l'avocat, rendue par le modèle comme un avis à l'avocat — l'heure
+# d'avis aurait été faussée.
+RE_ARRIVEE = re.compile(r"\bse\s+pr[ée]sente\b|\barriv", re.IGNORECASE)
+RE_AVIS = re.compile(r"avis|contact|t[ée]l[ée]phon|inform|pr[ée]venu|joint|message|appel", re.IGNORECASE)
+
+# Précisions écrites en toutes lettres dans la pièce, lues par une règle
+# quand le modèle les laisse vides (observé sur un dossier de test :
+# « autorisation accordée sans présentation préalable de la personne » et
+# « L'intéressé déclare accepter d'être entendu hors la présence de son
+# avocat », rendues null — deux contrôles ne se déclenchaient pas).
+RE_SANS_PRESENTATION = re.compile(r"sans\s+pr[ée]sentation\b", re.IGNORECASE)
+RE_PRESENTEE = re.compile(r"\b(?:a\s+été|est|été)\s+pr[ée]sent[ée]e?\s+(?:au|à|devant)\b|visio", re.IGNORECASE)
+RE_HORS_PRESENCE_AVOCAT = re.compile(
+    r"hors\s+(?:la\s+)?pr[ée]sence\s+de\s+(?:son|l['’]|leur)\s*(?:avocat|conseil)", re.IGNORECASE
+)
+
+
+def precisions_ecrites(nature: str, citation: str, texte: str) -> dict:
+    """Précisions de l'acte écrites dans la pièce : la prolongation « sans
+    présentation » (toute la page), l'audition « hors la présence de son
+    avocat » (le texte qui suit l'ouverture de l'audition)."""
+    precisions = {}
+    if nature == "prolongation_garde_a_vue" and RE_SANS_PRESENTATION.search(texte) and not RE_PRESENTEE.search(texte):
+        precisions["presentation"] = "non"
+    if nature == "debut_audition" and RE_HORS_PRESENCE_AVOCAT.search(_fenetre(citation, texte)):
+        precisions["avocat"] = "absent"
+    return precisions
+
+
 def _fenetre(citation: str, texte: str) -> str:
     texte_n, citation_n = _normaliser(texte), _normaliser(citation)
     debut = texte_n.find(citation_n)
@@ -194,6 +225,8 @@ def fiche_verifiee(fiche: dict, date_piece: str | None, texte_piece: str = "") -
     if nature in NATURES_REALISATION and RE_NEGATION.search(citation):
         return None
     if nature in NATURES_DEMANDE and RE_REFUS.search(citation):
+        return None
+    if nature == "avis_avocat" and RE_ARRIVEE.search(citation) and not RE_AVIS.search(citation):
         return None
 
     heure = fiche.get("heure")

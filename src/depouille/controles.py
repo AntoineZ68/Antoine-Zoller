@@ -68,6 +68,26 @@ def _a(acte: dict) -> str:
     return f"à {acte['heure']} (page {acte['page']})" if acte.get("heure") else f"page {acte['page']}"
 
 
+RE_LOCUTEUR = re.compile(
+    r"\b(?:M\.|Mme|Mlle|Madame|Monsieur|Mademoiselle)\s+((?:[A-ZÀ-Ý][\w'’-]+\s+){0,2}[A-ZÀ-Ý][\w'’-]+)"
+    r"[^.«:]{0,40}?\b(?:d[ée]clare|indique|dit|pr[ée]cise|affirme|ajoute|s['’][ée]crie)"
+)
+
+
+def _propos_d_un_tiers(citation: str, nom_personne: str) -> bool:
+    """« Mme DERRADJI Nadia déclare spontanément : « Il est rentré tard » » :
+    les propos de la mère, rattachés par le modèle à la garde à vue du fils.
+    Un locuteur nommé dont un mot n'est pas dans le nom de la personne est un
+    tiers ; « M. TARKAN déclare » reste la personne."""
+    from .classify import _sans_accents
+
+    m = RE_LOCUTEUR.search(citation)
+    if not m or not nom_personne:
+        return False
+    mots_personne = set(_sans_accents(nom_personne).upper().split())
+    return any(mot not in mots_personne for mot in _sans_accents(m.group(1)).upper().split())
+
+
 def controles_garde_a_vue(gav: dict, suffixe: str) -> list:
     note = NOTE_SANS_DATE if gav.get("heures_sans_date") else ""
     signalements = []
@@ -191,9 +211,10 @@ def controles_garde_a_vue(gav: dict, suffixe: str) -> list:
             if any(p["instant"] <= audition["instant"] for p in prolongations):
                 continue
             prolongation = f", la prolongation intervenant {_a(prolongations[0])}" if prolongations else ""
+            depuis = "l'interpellation" if gav.get("interpellation") else "le placement"
             signalements.append(_signalement(
                 f"Audition après l'échéance des 24 heures, avant toute prolongation{suffixe}",
-                f"La mesure court depuis {_a(debut)} : les vingt-quatre heures expirent le "
+                f"La mesure court depuis {depuis} {_a(debut)} : les vingt-quatre heures expirent le "
                 f"{echeance.strftime('%d/%m à %Hh%M')}. L'audition débute {_a(audition)}{prolongation} "
                 f"(article 63 II du code de procédure pénale) — à vérifier.{note}",
                 audition,
@@ -219,8 +240,10 @@ def controles_garde_a_vue(gav: dict, suffixe: str) -> list:
                 audition,
             ))
 
-    # Propos hors audition.
+    # Propos hors audition — ceux de la personne, pas d'un tiers.
     for propos in _actes(gav, "propos_hors_audition"):
+        if _propos_d_un_tiers(propos["citation"] or "", gav.get("nom") or ""):
+            continue
         sans_avocat = " hors la présence de l'avocat," if propos["details"].get("avocat") == "absent" else ""
         signalements.append(_signalement(
             f"Propos recueillis hors procès-verbal d'audition{suffixe}",
@@ -287,6 +310,41 @@ RE_GEOLOCALISATION = re.compile(r"(?:g[ée]o)?localisation\s+en\s+temps\s+r[ée]
 RE_AUTORISATION_MAGISTRAT = re.compile(
     r"autoris[ée]e?s?\b[^.]{0,80}(?:procureur|juge|JLD|libert[ée]s)|(?:procureur|juge|JLD)[^.]{0,80}autoris", re.IGNORECASE
 )
+
+
+# Une photographie montrée seule au témoin pour savoir « si c'était lui »,
+# avant la planche photographique (observé sur un dossier de test : photo
+# envoyée par WhatsApp au témoin, message effacé à la demande du policier,
+# puis « reconnaissance » sur planche).
+RE_PHOTO_ISOLEE = re.compile(
+    r"\b(?:envoy|montr|pr[ée]sent|fait\s+voir|soumis)\w*\s+(?:une|la|sa|cette)\s+(?:seule\s+)?photo(?:graphie)?s?\b"
+    r"(?![^.]{0,40}\bplanche)(?=[^«»]{0,200}?(?:si\s+c['’][ée]tait\s+lui|reconna|identifi|c['’]est\s+lui|ressembl))",
+    re.IGNORECASE,
+)
+RE_PLANCHE = re.compile(r"planche\s+(?:photographique|comportant|de\s+(?:\d+|six|cinq|huit|dix))|tapissage", re.IGNORECASE)
+RE_EFFACE = re.compile(r"effac|supprim|d[ée]truit", re.IGNORECASE)
+
+
+def _photo_montree_avant_la_planche(db: sqlite3.Connection) -> list:
+    pages = db.execute("SELECT numero_global, texte FROM pages ORDER BY numero_global").fetchall()
+    planche = next((p for p in pages if RE_PLANCHE.search(p["texte"])), None)
+    if planche is None:
+        return []
+    for page in pages:
+        m = RE_PHOTO_ISOLEE.search(page["texte"])
+        if not m:
+            continue
+        suite = page["texte"][m.start() : m.start() + 600]
+        efface = " ; le message aurait été effacé à la demande de l'enquêteur" if RE_EFFACE.search(suite) else ""
+        return [_signalement(
+            "Photographie montrée seule au témoin, en plus de la planche",
+            f"La pièce (page {page['numero_global']}) rapporte qu'une photographie a été montrée ou envoyée seule à "
+            f"un témoin pour savoir s'il reconnaissait l'auteur{efface}. Une planche photographique figure au dossier "
+            f"(page {planche['numero_global']}) : la reconnaissance a pu en être influencée — l'ordre des deux, la "
+            "fiabilité de l'identification et la loyauté du procédé sont à vérifier.",
+            {"page": page["numero_global"], "citation": _phrase(page["texte"], m.start())},
+        )]
+    return []
 
 
 def _cle(date: str | None):
@@ -363,7 +421,7 @@ def controles_dossier(db: sqlite3.Connection) -> list:
     (article 76) — le cadre d'enquête est lu dans la pièce par une règle."""
     import json
 
-    signalements = controles_pieces(db)
+    signalements = controles_pieces(db) + _photo_montree_avant_la_planche(db)
     for e in db.execute(
         "SELECT * FROM evenements_procedure WHERE nature = 'debut_perquisition' AND statut_verif = 'verifie'"
     ):

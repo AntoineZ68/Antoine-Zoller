@@ -76,6 +76,29 @@ PROMPT_SYSTEME = (
 )
 
 
+# « Y a-t-il une nullité à soulever ? » : le modèle ne qualifie pas (il
+# répondait « introuvable »), mais les contrôles de procédure ont relevé des
+# points précis et sourcés — c'est ce que l'avocat cherche.
+RE_QUESTION_DE_NULLITE = re.compile(r"nullit|irr[ée]gularit|vices?\s+de\s+proc[ée]dure|annul", re.IGNORECASE)
+
+
+def _points_de_procedure(db: sqlite3.Connection) -> dict | None:
+    from .conformite import detecter_signalements  # import ici : évite un cycle au chargement
+
+    signalements = detecter_signalements(db)
+    citations = [{"page": s.page_reference, "citation": s.citation_reference}
+                 for s in signalements if s.page_reference and s.citation_reference]
+    if not citations:
+        return None
+    titres = "".join(f"\n- {s.titre}" for s in signalements)
+    return {
+        "statut": "passages",
+        "reponse": "Je ne qualifie pas juridiquement les éléments du dossier. Les contrôles de procédure "
+                   f"signalent ces points à vérifier (détail dans l'onglet Procédure) :{titres}",
+        "citations": list({(c["page"], c["citation"]): c for c in citations}.values()),
+    }
+
+
 def _normaliser(texte: str) -> str:
     forme = unicodedata.normalize("NFKD", texte.lower())
     return "".join(c for c in forme if not unicodedata.combining(c))
@@ -123,6 +146,10 @@ def repondre_question(db: sqlite3.Connection, config: Config, question: str) -> 
     introuvable = {"statut": "introuvable", "reponse": MESSAGE_INTROUVABLE, "citations": []}
     if not question:
         return introuvable
+    if RE_QUESTION_DE_NULLITE.search(question):
+        reponse = _points_de_procedure(db)
+        if reponse:
+            return reponse
     if config.offline:
         raise ErreurModeOffline("Interroger le dossier nécessite un appel au modèle.")
 

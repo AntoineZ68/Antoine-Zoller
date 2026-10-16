@@ -266,8 +266,100 @@ def _actes_avant_saisine(db: sqlite3.Connection) -> list[Contradiction]:
     return resultats
 
 
+NUMEROS_EN_LETTRES = {
+    "UN": 1, "DEUX": 2, "TROIS": 3, "QUATRE": 4, "CINQ": 5, "SIX": 6, "SEPT": 7, "HUIT": 8, "NEUF": 9, "DIX": 10,
+    "ONZE": 11, "DOUZE": 12, "TREIZE": 13, "QUATORZE": 14, "QUINZE": 15, "SEIZE": 16,
+}
+# « DERRADJI-DEUX » (nom du mis en cause et numéro en lettres, usage police)
+# ou « scellé n° 3 ».
+RE_SCELLE = re.compile(
+    r"\b([A-Z]{3,})-(" + "|".join(NUMEROS_EN_LETTRES) + r"|\d{1,2})\b|\bscell[ée]\s+n[°o]\s*(\d{1,3})\b",
+    re.IGNORECASE,
+)
+COULEURS = ("gris", "noir", "blanc", "bleu", "rouge", "vert", "jaune", "marron", "beige", "rose", "violet",
+            "orange", "kaki", "bordeaux", "argent", "dor[ée]")
+RE_COULEUR = re.compile(r"\b(" + "|".join(COULEURS) + r")(?:e|s|es)?\b", re.IGNORECASE)
+RE_MESURE = re.compile(r"\b(\d+(?:[.,]\d+)?)\s*(cm|mm)\b", re.IGNORECASE)
+
+
+def _description_scelle(texte: str, fin: int) -> tuple[str, int]:
+    """Ce qui décrit le scellé : la parenthèse qui suit son numéro, sinon la
+    fin de la ligne (tableau des scellés) ; et où s'arrête le passage."""
+    reste = texte[fin:]
+    m = re.match(r"\s*\(([^)\n]{3,150})\)", reste)
+    if m:
+        return m.group(1).strip(), fin + m.end()
+    ligne = reste.split("\n", 1)[0][:150]
+    return ligne.strip(" .:;—-"), fin + len(ligne.rstrip())
+
+
+def _scelles_decrits_differemment(db: sqlite3.Connection) -> list[Contradiction]:
+    """Le même scellé décrit avec une autre couleur ou une autre mesure d'une
+    pièce à l'autre : « DERRADJI-DEUX Sweat-shirt à capuche gris » au PV de
+    perquisition, « Scellé DERRADJI-DEUX (sweat-shirt noir à capuche) » au
+    rapport d'exploitation (observé sur un dossier de test ; le modèle ne le
+    relevait pas). Erreur de plume ou objet différent : l'intégrité du
+    scellé est à vérifier."""
+    from .classify import _sans_accents
+    from .db import pages_hors_procedure
+
+    exclues = pages_hors_procedure(db)
+    pages_ocr = {r[0] for r in db.execute("SELECT numero_global FROM pages WHERE ocr_applique = 1")}
+    par_scelle: dict[tuple[str, int], list[tuple[int, str, str, str]]] = {}
+    for page in db.execute("SELECT numero_global, texte FROM pages ORDER BY numero_global"):
+        if page["numero_global"] in exclues:
+            continue
+        texte = page["texte"]
+        for m in RE_SCELLE.finditer(texte):
+            if m.group(3):
+                cle = ("", int(m.group(3)))
+            else:
+                numero = m.group(2).upper()
+                # Le nom est souvent mal lu (DERRADJI, DERRADIJI) : ses quatre
+                # premières lettres suffisent à distinguer deux séries.
+                cle = (_sans_accents(m.group(1)).upper()[:4], NUMEROS_EN_LETTRES.get(numero) or int(numero))
+            description, fin = _description_scelle(texte, m.end())
+            if description:
+                extrait = " ".join(texte[m.start():fin].split())
+                par_scelle.setdefault(cle, []).append((page["numero_global"], m.group(0), description, extrait))
+
+    resultats = []
+    for occurrences in par_scelle.values():
+        for i, (page_a, nom_a, desc_a, extrait_a) in enumerate(occurrences):
+            autre = None
+            for page_b, _, desc_b, extrait_b in occurrences[i + 1:]:
+                if page_b == page_a:
+                    continue
+                couleurs = [{_sans_accents(c).lower() for c in RE_COULEUR.findall(d)} for d in (desc_a, desc_b)]
+                mesures = [{(v.replace(",", "."), u.lower()) for v, u in RE_MESURE.findall(d)} for d in (desc_a, desc_b)]
+                ecart = next((n for n, (x, y) in (("couleur", couleurs), ("mesure", mesures)) if x and y and not x & y), None)
+                if ecart:
+                    autre = (page_b, desc_b, extrait_b, ecart)
+                    break
+            if not autre:
+                continue
+            page_b, desc_b, extrait_b, ecart = autre
+            description = (
+                f"Le même scellé est décrit « {desc_a} » (page {page_a}) puis « {desc_b} » (page {page_b}). "
+                "Erreur de description, ou objet différent de celui saisi : l'intégrité du scellé est à vérifier "
+                "(article 97 du code de procédure pénale)."
+            )
+            if page_a in pages_ocr or page_b in pages_ocr:
+                description += " L'une des pages est numérisée : relire l'original, la lecture automatique a pu se tromper."
+            resultats.append(Contradiction(
+                domaine="procedure",
+                titre=f"Scellé {nom_a} : {ecart} différente selon les pièces",
+                description=description,
+                sources=[{"libelle": "", "page": page_a, "citation": extrait_a},
+                         {"libelle": "", "page": page_b, "citation": extrait_b}],
+            ))
+            break
+    return resultats
+
+
 def contradictions_par_regles(db: sqlite3.Connection) -> list[Contradiction]:
-    return _actes_dates_differemment(db) + _actes_avant_saisine(db) + _identifiants_proches(db)
+    return (_actes_dates_differemment(db) + _actes_avant_saisine(db) + _identifiants_proches(db)
+            + _scelles_decrits_differemment(db))
 
 
 def discordances_connues(db: sqlite3.Connection) -> list[tuple[str, list[str]]]:
@@ -295,7 +387,9 @@ PROMPT = (
     "Relève au plus " + str(MAX_PROPOSITIONS_MODELE) + " discordances CONCRÈTES entre "
     "éléments de pages différentes portant sur le même fait : heure, date, lieu, "
     "véhicule, couleur, description d'une personne, présence de quelqu'un, montant, "
-    "déroulé. N'en relève pas pour une simple dénégation opposée à une accusation, ni "
+    "déroulé — y compris entre l'arme, le vêtement ou le véhicule décrits par la victime ou "
+    "un témoin et l'objet saisi que l'enquête leur rattache (longueur de lame, couleur). "
+    "N'en relève pas pour une simple dénégation opposée à une accusation, ni "
     "pour une différence de point de vue sans détail vérifiable, ni quand l'un des "
     "éléments ne dit rien du point (« non précisé » n'est pas une contradiction), ni "
     "pour un simple écart d'approximation (« 23h05 » et « vers 23 heures »), ni entre "
@@ -315,6 +409,14 @@ PROMPT = (
 )
 
 
+def _douze_heures_d_ecart(titre: str) -> bool:
+    """« vers 23h selon sa mère, vers 11h selon sa déclaration » : la mère
+    avait dit « vers onze heures », le soir — la même heure (observé sur un
+    dossier de test, accepté par la relecture)."""
+    heures = {(int(h), int(m or 0)) for h, m in re.findall(r"\b(\d{1,2})\s*h\s*(\d{2})?\b", titre)}
+    return any((h + 12, m) in heures for h, m in heures)
+
+
 def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list[str] = ()) -> Contradiction | None:
     if not isinstance(proposition, dict):
         return None
@@ -332,6 +434,8 @@ def proposition_retenue(proposition: dict, elements: dict[str, dict], noms: list
     if contient_qualification(texte) or RE_JUGEMENT.search(texte):
         return None
     if RE_ABSENCE_N_EST_PAS_CONTRADICTION.search(texte):
+        return None
+    if _douze_heures_d_ecart(titre):
         return None
     if elements_absents(texte, avec_noms_completes("\n".join(f"p. {elements[s]['page']} {elements[s]['ligne']}" for s in sources), noms)):
         return None
@@ -397,7 +501,8 @@ PROMPT_RELECTURE = (
     "événement qu'elle raconte (une synthèse du 26/09 qui raconte un appel du 01/09). "
     "contradiction_reelle : les passages donnent sur un même point des versions qui s'excluent "
     "— pas un silence, pas un écart d'approximation, pas deux choses distinctes, pas des "
-    "versions qui concordent en réalité."
+    "versions qui concordent en réalité. L'objet décrit par la victime ou un témoin (arme, "
+    "vêtement, véhicule) et l'objet saisi que l'enquête lui rattache portent sur un même point."
 )
 
 

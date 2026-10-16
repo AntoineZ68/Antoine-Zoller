@@ -153,3 +153,103 @@ def test_flagrance_apres_l_ouverture_et_geolocalisation_sans_autorisation(tmp_pa
     geoloc = [s for s in signalements if s.titre.startswith("Géolocalisation")]
     assert [s.page_reference for s in flagrance] == [2]
     assert [s.page_reference for s in geoloc] == [2] and "sans limitation de durée" in geoloc[0].description
+
+
+def test_precisions_ecrites_en_toutes_lettres() -> None:
+    from depouille.actes import precisions_ecrites
+
+    prolongation = ("AUTORISONS la prolongation de la garde à vue. Disons que la présente autorisation est accordée "
+                    "sans présentation préalable de la personne. Fait au parquet, le 16 mars 2026 à 07h05.")
+    assert precisions_ecrites("prolongation_garde_a_vue", "Fait au parquet, le 16 mars 2026 à 07h05.", prolongation) == {
+        "presentation": "non"}
+    assert precisions_ecrites("prolongation_garde_a_vue", "x", "La personne a été présentée au procureur.") == {}
+    ouverture = "Faisons comparaître DERRADJI Yanis, placé en garde à vue."
+    audition = (ouverture + " Mentionnons que Me Claire VIDAL a été avisée à 06h15. Elle ne s'est pas présentée. "
+                "L'intéressé déclare accepter d'être entendu hors la présence de son avocat.")
+    assert precisions_ecrites("debut_audition", ouverture, audition) == {"avocat": "absent"}
+
+
+def test_arrivee_de_l_avocat_n_est_pas_un_avis() -> None:
+    assert fiche_verifiee({"nature": "avis_avocat", "page": 1,
+                           "citation": "Mentionnons qu'à 10h05, Me Claire VIDAL se présente au service."}, None) is None
+    assert fiche_verifiee({"nature": "avis_avocat", "page": 1,
+                           "citation": "Mentionnons que Me Claire VIDAL, avisée à 07h40, ne s'est pas présentée."}, None)
+
+
+@pytest.mark.parametrize("citation, tiers", [
+    ("Mme DERRADJI Nadia déclare spontanément : « Il est rentré tard hier, vers onze heures. »", True),
+    ("M. DERRADJI déclare dans le véhicule : « C'est pas moi. »", False),
+    ("L'intéressé déclare : « J'ai rien fait. »", False),
+])
+def test_propos_d_un_tiers(citation, tiers) -> None:
+    from depouille.controles import _propos_d_un_tiers
+
+    assert _propos_d_un_tiers(citation, "Yanis DERRADJI") is tiers
+
+
+def test_entretien_avec_l_avocat_consigne_dans_l_audition() -> None:
+    from depouille.chrono import ACTES_HORODATES
+
+    texte = ("Mentionnons qu'à 10h05, Me Claire VIDAL se présente au service. Suspendons l'audition afin de lui "
+             "permettre de\ns'entretenir confidentiellement avec son client pendant trente minutes.")
+    trouves = [(n, m.group("heure")) for n, motif in ACTES_HORODATES if (m := motif.search(texte))]
+    assert ("realisation_entretien_avocat", "10h05") in trouves
+
+
+def _base_pages(tmp_path, textes: dict[int, str]):
+    db = ouvrir_db(tmp_path / "t.db")
+    for numero, texte in textes.items():
+        db.execute("INSERT INTO pages (numero_global, fichier_source, page_fichier, texte, empreinte_sha256) "
+                   "VALUES (?, 'd', ?, ?, ?)", (numero, numero, texte, str(numero)))
+    db.commit()
+    return db
+
+
+def test_scelle_decrit_differemment(tmp_path) -> None:
+    from depouille.contradictions import contradictions_par_regles
+
+    db = _base_pages(tmp_path, {
+        14: "Scellé Description\nDERRADJI-UN Couteau de type papillon, lame 8 cm, manche métallique\n"
+            "DERRADJI-DEUX Sweat-shirt à capuche gris, marque Nike, taille M\nFABRE-UN.",
+        34: "Scellé DERRADIJI-UN (couteau papillon)\nScellé DERRADIJI-DEUX (sweat-shirt noir à capuche, marque Nike)",
+    })
+    titres = [c.titre for c in contradictions_par_regles(db)]
+    assert titres == ["Scellé DERRADJI-DEUX : couleur différente selon les pièces"], titres
+
+
+def test_photo_montree_seule_avant_la_planche(tmp_path) -> None:
+    db = _base_pages(tmp_path, {
+        10: "Présentons au témoin une planche comportant six photographies numérotées de 1 à 6.",
+        31: "R : « Le policier m'a envoyé une photo sur WhatsApp en me demandant si c'était lui. » "
+            "Q : Avez-vous conservé ce message ? R : « Non, il m'a demandé de l'effacer. »",
+    })
+    signalements = [s for s in detecter_signalements(db) if s.titre.startswith("Photographie montrée seule")]
+    assert len(signalements) == 1 and signalements[0].page_reference == 31
+    assert "effacé" in signalements[0].description
+    db.execute("DELETE FROM pages WHERE numero_global = 10")
+    assert not any(s.titre.startswith("Photographie") for s in detecter_signalements(db)), "sans planche, rien"
+
+
+def test_garde_fous_des_contradictions() -> None:
+    from depouille.contradictions import _douze_heures_d_ecart
+    from depouille.garde_fous import _mots_propres, elements_absents
+
+    assert _douze_heures_d_ecart("Heure de retour : vers 23h00 selon sa mère, vers 11h00 selon sa déclaration")
+    assert not _douze_heures_d_ecart("Heure des faits : 21h25 ou 21h45")
+    assert elements_absents("Lame : 20 cm selon la victime, 8 cm selon le scellé",
+                            "une lame d'une vingtaine de centimètres ; lame de 8 cm") == []
+    propres = _mots_propres("Demandes :\n- Refus d'examen médical ;\n- Assistance de Me VIDAL")
+    assert "VIDAL" in propres and not {"Refus", "Assistance"} & set(propres), "un élément de liste ouvre une phrase"
+
+
+def test_question_de_nullite_renvoie_les_points_de_procedure(tmp_path) -> None:
+    from depouille.config import Config
+    from depouille.questions import repondre_question
+
+    db = _base_pages(tmp_path, {
+        10: "Présentons au témoin une planche comportant six photographies.",
+        31: "« Il m'a envoyé une photo en me demandant si c'était lui. »",
+    })
+    reponse = repondre_question(db, Config(offline=True), "Y a-t-il une nullité à soulever ?")
+    assert reponse["statut"] == "passages" and "Photographie montrée seule" in reponse["reponse"]
+    assert reponse["citations"][0]["page"] == 31

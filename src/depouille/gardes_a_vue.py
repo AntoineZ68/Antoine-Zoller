@@ -20,6 +20,8 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 
+from .actes import precisions_ecrites
+
 NATURES_GAV = (
     "interpellation",
     "placement_garde_a_vue",
@@ -101,6 +103,13 @@ def gardes_a_vue(db: sqlite3.Connection) -> list[dict]:
         for l in lignes
     ]
     evenements.sort(key=lambda e: (e["instant"] is None, e["instant"] or datetime.min))
+    textes_pages: dict[int, str] = {}
+    for e in evenements:
+        if e["nature"] in ("prolongation_garde_a_vue", "debut_audition") and e["page"] is not None:
+            if e["page"] not in textes_pages:
+                ligne = db.execute("SELECT texte FROM pages WHERE numero_global = ?", (e["page"],)).fetchone()
+                textes_pages[e["page"]] = ligne[0] if ligne else ""
+            e["details"] = {**precisions_ecrites(e["nature"], e["citation"] or "", textes_pages[e["page"]]), **e["details"]}
 
     placements: dict[int | None, dict] = {}
     for e in evenements:

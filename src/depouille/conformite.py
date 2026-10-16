@@ -143,7 +143,16 @@ def _signalements_garde_a_vue(db: sqlite3.Connection, gav: dict, suffixe: str, u
             **reference,
         ))
 
-    if not _piece_existe(db, "PV d'entretien avocat", personne):
+    # L'entretien peut être consigné dans un autre PV (« Me VIDAL se présente
+    # au service. Suspendons l'audition afin de lui permettre de
+    # s'entretenir confidentiellement avec son client »).
+    entretien_consigne = "realisation_entretien_avocat" in natures and db.execute(
+        "SELECT 1 FROM evenements_procedure e JOIN pieces p ON p.id = e.piece_id "
+        "WHERE e.nature = 'realisation_entretien_avocat' AND e.statut_verif = 'verifie' "
+        "AND (? IS NULL OR e.personne_id = ?)",
+        (personne, personne),
+    ).fetchone()
+    if not _piece_existe(db, "PV d'entretien avocat", personne) and not entretien_consigne:
         signalements.append(Signalement(
             titre=f"Entretien avec l'avocat non identifié{suffixe}",
             description=(

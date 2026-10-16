@@ -84,10 +84,11 @@ UNITES = frozenset({
     "femmes", "enfant", "enfants", "coup", "coups", "balle", "balles", "vehicule",
     "vehicules", "telephone", "telephones",
 })
-APPROXIMATIONS = frozenset({
-    "dizaine", "douzaine", "quinzaine", "vingtaine", "trentaine", "quarantaine",
-    "cinquantaine", "soixantaine", "centaine", "millier",
-})
+VALEUR_DES_APPROXIMATIONS = {
+    "dizaine": 10, "douzaine": 12, "quinzaine": 15, "vingtaine": 20, "trentaine": 30, "quarantaine": 40,
+    "cinquantaine": 50, "soixantaine": 60, "centaine": 100, "millier": 1000,
+}
+APPROXIMATIONS = frozenset(VALEUR_DES_APPROXIMATIONS)
 
 # Pas « coups », « blessures » ni « agression » : ils décrivent un fait (« des coups de
 # pied »), et les exiger poussait le modèle vers « actes répréhensibles »,
@@ -239,8 +240,11 @@ def _mots_propres(texte: str) -> list[str]:
         lettres = re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ]", "", mot)
         if len(lettres) < 2:
             continue
-        avant = texte[: m.start()].rstrip()
-        debut_de_phrase = not avant or avant[-1] in FINS_DE_PHRASE
+        avant = texte[: m.start()].rstrip(" \t")
+        # Un élément de liste (« - Refus d'examen médical ») commence une
+        # phrase (observé : une réponse exacte écartée pour « Refus »).
+        avant = re.sub(r"(?:^|\n)\s*(?:[-–—•*]|\d+[.)])\s*$", "\n", avant).rstrip(" \t")
+        debut_de_phrase = not avant or avant[-1] in FINS_DE_PHRASE or avant[-1] == "\n"
         if lettres.isupper() or (lettres[0].isupper() and not debut_de_phrase):
             mots.append(mot)
     return mots
@@ -256,7 +260,11 @@ def elements_absents(texte: str, reference: str) -> list[str]:
     mots_ref = set(re.findall(r"[a-z0-9]+", ref))
     jetons_ref = _jetons_chiffres(ref, strict=False)
     jetons_txt = _jetons_chiffres(txt, strict=True)
-    nombres_ref = {v for _, v in jetons_ref if v is not None}
+    # « une vingtaine de centimètres » rendu « 20 cm » : le même nombre
+    # (observé : la longueur de la lame décrite par la victime, écartée).
+    nombres_ref = {v for _, v in jetons_ref if v is not None} | {
+        VALEUR_DES_APPROXIMATIONS[m.rstrip("s")] for m in mots_ref if m.rstrip("s") in VALEUR_DES_APPROXIMATIONS
+    }
     horaires_ref = {h for _, h in _horaires(jetons_ref)}
 
     absents: list[str] = []

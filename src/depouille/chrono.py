@@ -309,6 +309,9 @@ def _extraire_evenements_piece(db: sqlite3.Connection, piece: sqlite3.Row, pages
         if not r:
             continue
         page, m, citation = r
+        suite = phrase_contenant(m.string, m.end() - 1)
+        if suite not in citation:
+            citation = f"{citation} {suite}"  # l'acte tient sur deux phrases
         heure = _normaliser_heure_libre(m.group("heure"))
         if heure:
             evenements.append({"nature": nature, "date": piece["date_apparente"], "heure": heure, "page": page,
@@ -332,6 +335,13 @@ ACTES_HORODATES: tuple[tuple[str, re.Pattern], ...] = (
     ("avis_avocat", re.compile(
         rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*(?:nous\s+)?(?:contactons|avisons|informons|joignons|appelons|pr[ée]venons)\s+"
         r"[^.]{0,60}?(?:avocat|ma[îi]tre|barreau|permanence)", re.IGNORECASE)),
+    # « Mentionnons qu'à 10h05, Me VIDAL se présente au service. Suspendons
+    # l'audition afin de lui permettre de s'entretenir confidentiellement
+    # avec son client » : l'entretien tenu au cours d'un autre PV — sans lui,
+    # « Entretien avec l'avocat non identifié » était signalé à tort.
+    ("realisation_entretien_avocat", re.compile(
+        rf"\b[àa]\s+{_HEURE_NOMMEE}\s*,\s*(?:Me|Ma[îi]tre)\b[^.]{{0,80}}?\bse\s+pr[ée]sente\b[^.]{{0,80}}\.\s*"
+        r"[^.]{0,160}?\bs['’]entretenir\b", re.IGNORECASE)),
     ("avis_parquet", re.compile(
         rf"\b[AÀ]\s+{_HEURE_NOMMEE}\s*,\s*(?:nous\s+)?(?:avisons|informons|pr[ée]venons|contactons)\s+"
         r"[^.]{0,60}?(?:procureur|parquet)", re.IGNORECASE)),
