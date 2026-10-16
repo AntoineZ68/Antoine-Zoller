@@ -327,10 +327,18 @@ RE_DATE_BOITE_ACTE = re.compile(
 # jamais celle de l'acte. Le casier d'un dossier d'essai était daté du jour
 # de naissance de l'intéressé, faute d'autre « le [date] » reconnu.
 RE_AVANT_DATE_NAISSANCE = re.compile(r"(?:\bn[ée]e?s?|naissance\s*:?)\s*$", re.IGNORECASE)
+# « Vu la mesure de garde à vue dont fait l'objet X depuis le 15 mars 2026 à
+# 07h25 » : la date d'un acte antérieur, rappelée, n'est pas celle de la
+# décision (« Fait au parquet, le 16 mars 2026 à 07h05 »). Observé sur une
+# autorisation de prolongation : datée du début de la garde à vue, elle
+# masquait une prolongation accordée après l'échéance des vingt-quatre heures.
+RE_AVANT_DATE_RAPPELEE = re.compile(r"\b(?:depuis|jusqu['’]au|avant)\s*$", re.IGNORECASE)
 
 
 def _date_de_naissance(texte: str, debut: int) -> bool:
-    return bool(RE_AVANT_DATE_NAISSANCE.search(texte[max(0, debut - 20) : debut]))
+    """Date qui n'est pas celle de l'acte : naissance, ou date rappelée."""
+    avant = texte[max(0, debut - 20) : debut]
+    return bool(RE_AVANT_DATE_NAISSANCE.search(avant) or RE_AVANT_DATE_RAPPELEE.search(avant))
 
 
 RE_OUVERTURE_LE_DATE = re.compile(rf"\bLe\s+{FRAGMENT_DATE}\b")

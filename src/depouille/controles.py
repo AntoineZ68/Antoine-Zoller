@@ -27,6 +27,10 @@ La liste, complète :
 - personne mineure au moment de la garde à vue ;
 - perquisition : avant 6 h ou après 21 h (conformite.py) ; en enquête
   préliminaire sans assentiment ni autorisation du juge ;
+- audition après l'échéance des 24 heures, avant toute prolongation ;
+  audition suivante hors la présence de l'avocat avisé peu avant ;
+- acte d'enquête de flagrance après l'ouverture de l'information ;
+  géolocalisation en temps réel sans autorisation de magistrat ;
 - acte de procédure antérieur à la saisine (contradictions.py).
 """
 
@@ -174,6 +178,47 @@ def controles_garde_a_vue(gav: dict, suffixe: str) -> list:
             premiere,
         ))
 
+    # Audition tenue après l'échéance des vingt-quatre heures, alors qu'aucune
+    # prolongation n'est encore intervenue (observé sur un dossier de test :
+    # audition à 06h40, échéance à 06h10 depuis l'interpellation,
+    # prolongation à 07h05 — et c'est dans cette audition que viennent les
+    # aveux).
+    if debut["instant"]:
+        echeance = debut["instant"] + DUREE_AVANT_PROLONGATION
+        for audition in auditions:
+            if not audition["instant"] or audition["instant"] <= echeance:
+                continue
+            if any(p["instant"] <= audition["instant"] for p in prolongations):
+                continue
+            prolongation = f", la prolongation intervenant {_a(prolongations[0])}" if prolongations else ""
+            signalements.append(_signalement(
+                f"Audition après l'échéance des 24 heures, avant toute prolongation{suffixe}",
+                f"La mesure court depuis {_a(debut)} : les vingt-quatre heures expirent le "
+                f"{echeance.strftime('%d/%m à %Hh%M')}. L'audition débute {_a(audition)}{prolongation} "
+                f"(article 63 II du code de procédure pénale) — à vérifier.{note}",
+                audition,
+            ))
+            break
+
+    # Auditions suivantes hors la présence de l'avocat, avisé peu avant (la
+    # première audition relève du délai de deux heures : conformite.py).
+    for audition in auditions[1:] if len(auditions) > 1 else []:
+        if audition["details"].get("avocat") != "absent" or not audition["instant"]:
+            continue
+        avis = [a for a in _actes(gav, "avis_avocat") if a["instant"] and a["instant"] <= audition["instant"]]
+        if not avis:
+            continue
+        dernier = max(avis, key=lambda a: a["instant"])
+        ecart = audition["instant"] - dernier["instant"]
+        if ecart < timedelta(hours=2):
+            minutes = int(ecart.total_seconds() // 60)
+            signalements.append(_signalement(
+                f"Audition hors la présence de l'avocat, avisé {minutes} min avant{suffixe}",
+                f"L'avocat est avisé {_a(dernier)} ; l'audition débute {_a(audition)} hors sa présence "
+                f"(article 63-4-2 du code de procédure pénale ; renonciation éventuelle à vérifier sur la pièce).{note}",
+                audition,
+            ))
+
     # Propos hors audition.
     for propos in _actes(gav, "propos_hors_audition"):
         sans_avocat = " hors la présence de l'avocat," if propos["details"].get("avocat") == "absent" else ""
@@ -236,12 +281,89 @@ def controle_mineur(db: sqlite3.Connection, gav: dict, suffixe: str) -> list:
     return []
 
 
+RE_FLAGRANCE = re.compile(r"flagran", re.IGNORECASE)
+RE_COMMISSION_ROGATOIRE = re.compile(r"commission\s+rogatoire", re.IGNORECASE)
+RE_GEOLOCALISATION = re.compile(r"(?:g[ée]o)?localisation\s+en\s+temps\s+r[ée]el|g[ée]olocalisation", re.IGNORECASE)
+RE_AUTORISATION_MAGISTRAT = re.compile(
+    r"autoris[ée]e?s?\b[^.]{0,80}(?:procureur|juge|JLD|libert[ée]s)|(?:procureur|juge|JLD)[^.]{0,80}autoris", re.IGNORECASE
+)
+
+
+def _cle(date: str | None):
+    try:
+        j, m, a = (int(x) for x in (date or "").split("/"))
+        return (a, m, j)
+    except ValueError:
+        return None
+
+
+def _texte_piece(db: sqlite3.Connection, piece) -> list:
+    return db.execute(
+        "SELECT numero_global, texte FROM pages WHERE numero_global BETWEEN ? AND ? ORDER BY numero_global",
+        (piece["page_debut"], piece["page_fin"]),
+    ).fetchall()
+
+
+def controles_pieces(db: sqlite3.Connection) -> list:
+    """Contrôles lus directement dans le texte des pièces, par des règles :
+    - un acte d'enquête de flagrance daté après l'ouverture de
+      l'information (réquisitoire introductif), sans commission rogatoire —
+      observé sur un dossier de test : réquisition du 17/03, information
+      ouverte le 16/03 ;
+    - une géolocalisation en temps réel sans autorisation d'un magistrat
+      mentionnée (articles 230-32 et suivants)."""
+    signalements = []
+    pieces = db.execute("SELECT * FROM pieces ORDER BY page_debut").fetchall()
+    ouverture = min(
+        (p for p in pieces if p["type"] == "Réquisitoire introductif" and _cle(p["date_apparente"])),
+        key=lambda p: _cle(p["date_apparente"]), default=None,
+    )
+    for piece in pieces:
+        if piece["type"] in ("Réquisitoire introductif", "PV de synthèse"):
+            continue
+        pages = _texte_piece(db, piece)
+        texte = "\n".join(p["texte"] for p in pages)
+        if (ouverture and _cle(piece["date_apparente"]) and _cle(piece["date_apparente"]) > _cle(ouverture["date_apparente"])
+                and RE_FLAGRANCE.search(texte) and not RE_COMMISSION_ROGATOIRE.search(texte)):
+            m = RE_FLAGRANCE.search(texte)
+            signalements.append(_signalement(
+                f"Acte d'enquête de flagrance après l'ouverture de l'information ({piece['date_apparente']})",
+                f"La pièce du {piece['date_apparente']} se réfère à l'enquête de flagrance, alors que l'information est "
+                f"ouverte depuis le réquisitoire du {ouverture['date_apparente']} (page {ouverture['page_debut']}), "
+                "et ne mentionne aucune commission rogatoire. Après l'ouverture de l'information, les actes "
+                "d'enquête relèvent du juge d'instruction (articles 81 et 151 du code de procédure pénale) — à vérifier.",
+                {"page": _page_de(pages, m.group(0)), "citation": _phrase(texte, m.start())},
+            ))
+        m = RE_GEOLOCALISATION.search(texte)
+        if m and piece["type"] not in ("Ordonnance du juge des libertés et de la détention",) and not RE_AUTORISATION_MAGISTRAT.search(texte):
+            signalements.append(_signalement(
+                "Géolocalisation en temps réel sans autorisation de magistrat mentionnée",
+                f"La pièce (page {piece['page_debut']}) demande une localisation en temps réel ; aucune autorisation du "
+                "procureur de la République ou du juge n'y est mentionnée (articles 230-32 et suivants du code de "
+                "procédure pénale)" + (" ; la demande est faite « sans limitation de durée »"
+                                        if re.search(r"sans\s+limitation\s+de\s+dur[ée]e", texte, re.IGNORECASE) else "")
+                + " — à vérifier.",
+                {"page": _page_de(pages, m.group(0)), "citation": _phrase(texte, m.start())},
+            ))
+    return signalements
+
+
+def _page_de(pages, extrait: str) -> int:
+    return next((p["numero_global"] for p in pages if extrait in p["texte"]), pages[0]["numero_global"])
+
+
+def _phrase(texte: str, position: int) -> str:
+    debut = max(texte.rfind(".", 0, position), texte.rfind("\n\n", 0, position)) + 1
+    fin = texte.find(".", position)
+    return " ".join(texte[debut : fin + 1 if fin >= 0 else len(texte)].split())
+
+
 def controles_dossier(db: sqlite3.Connection) -> list:
     """Perquisition en enquête préliminaire sans assentiment ni juge
     (article 76) — le cadre d'enquête est lu dans la pièce par une règle."""
     import json
 
-    signalements = []
+    signalements = controles_pieces(db)
     for e in db.execute(
         "SELECT * FROM evenements_procedure WHERE nature = 'debut_perquisition' AND statut_verif = 'verifie'"
     ):
